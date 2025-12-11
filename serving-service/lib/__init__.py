@@ -12,6 +12,12 @@ from .adk_core import (
 from .config import ServiceConfig, config as Config
 from .a2a_client import A2AClient, A2AClientPool, A2AError, AgentTimeoutError, AgentNotAvailableError
 from .prompts import PromptTemplates, PromptBuilder
+from .sharepoint_publisher import (
+    SharePointPublisher,
+    SharePointPageConfig,
+    PublishResult,
+    MarkdownToSharePointConverter
+)
 
 __all__ = [
     'ADKAgent', 
@@ -30,5 +36,9 @@ __all__ = [
     'AgentTimeoutError',
     'AgentNotAvailableError',
     'PromptTemplates',
-    'PromptBuilder'
+    'PromptBuilder',
+    'SharePointPublisher',
+    'SharePointPageConfig',
+    'PublishResult',
+    'MarkdownToSharePointConverter'
 ]

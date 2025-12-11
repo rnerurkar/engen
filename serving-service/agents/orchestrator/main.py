@@ -11,6 +11,7 @@ if serving_service_dir not in sys.path:
 from lib.adk_core import ADKAgent, AgentRequest, setup_logging
 from lib.config import Config
 from lib.a2a_client import A2AClient, A2AError
+from lib.sharepoint_publisher import SharePointPublisher, SharePointPageConfig
 
 
 class Orchestrator(ADKAgent):
@@ -28,6 +29,19 @@ class Orchestrator(ADKAgent):
         self.max_revisions = int(os.getenv("MAX_REVISIONS", 3))
         self.min_score = int(os.getenv("MIN_REVIEW_SCORE", 90))
         self.timeout = int(os.getenv("AGENT_TIMEOUT", 60))
+        
+        # SharePoint publishing configuration
+        self.publish_to_sharepoint = os.getenv("PUBLISH_TO_SHAREPOINT", "false").lower() == "true"
+        self.sp_publisher = None
+        
+        if self.publish_to_sharepoint:
+            sp_config = SharePointPageConfig.from_env()
+            if sp_config.is_valid():
+                self.sp_publisher = SharePointPublisher(sp_config)
+                self.logger.info("SharePoint publisher initialized")
+            else:
+                self.logger.warning("SharePoint publishing enabled but credentials not configured")
+                self.publish_to_sharepoint = False
 
     async def process(self, req: AgentRequest) -> dict:
         """Process architecture diagram through the agent pipeline"""
@@ -35,7 +49,12 @@ class Orchestrator(ADKAgent):
         if not img:
             raise ValueError("Missing 'image' or 'image_uri' in payload")
         
+        # Get optional parameters
+        title = req.payload.get('title', 'Architecture Documentation')
+        should_publish = req.payload.get('publish', self.publish_to_sharepoint)
+        
         self.logger.info(f"Processing diagram: {img}")
+        self.logger.info(f"Title: {title}, Publish to SharePoint: {should_publish}")
         
         # Use A2AClient for all agent communication
         async with A2AClient("Orchestrator", default_timeout=self.timeout) as client:
@@ -113,17 +132,53 @@ class Orchestrator(ADKAgent):
             
             self.logger.info(f"Document generation complete: {len(final_doc)} sections")
             
-            return {
+            # Build base response
+            response = {
                 "document": final_doc,
                 "donor_pattern": donor_id,
-                "diagram_description": description
+                "diagram_description": description,
+                "sections_generated": len(final_doc)
             }
+            
+            # Step 4: Publish to SharePoint (if enabled)
+            if should_publish and self.sp_publisher:
+                self.logger.info("Step 4: Publishing to SharePoint...")
+                try:
+                    publish_result = await self.sp_publisher.publish_document(
+                        title=title,
+                        sections=final_doc,
+                        description=f"Auto-generated architecture documentation for {title}",
+                        diagram_description=description,
+                        donor_pattern=donor_id
+                    )
+                    
+                    response["sharepoint"] = {
+                        "published": publish_result.success,
+                        "page_url": publish_result.page_url,
+                        "page_id": publish_result.page_id,
+                        "publish_time_ms": publish_result.publish_time_ms
+                    }
+                    
+                    if publish_result.success:
+                        self.logger.info(f"Published to SharePoint: {publish_result.page_url}")
+                    else:
+                        self.logger.error(f"SharePoint publish failed: {publish_result.error}")
+                        response["sharepoint"]["error"] = publish_result.error
+                        
+                except Exception as e:
+                    self.logger.error(f"SharePoint publishing error: {e}")
+                    response["sharepoint"] = {
+                        "published": False,
+                        "error": str(e)
+                    }
+            
+            return response
 
     def get_supported_tasks(self):
-        return ["generate", "process", "create_document"]
+        return ["generate", "process", "create_document", "generate_and_publish"]
 
     def get_description(self):
-        return "Orchestrates the document generation pipeline using Vision, Retrieval, Writer, and Reviewer agents"
+        return "Orchestrates the document generation pipeline using Vision, Retrieval, Writer, and Reviewer agents with optional SharePoint publishing"
 
 
 async def main():

@@ -275,20 +275,24 @@ The Serving Plane uses a multi-agent system to analyze architecture diagrams and
 ### 4.2 Agent Swarm Architecture
 
 #### Orchestrator Agent (Port 8080)
-**Role**: Workflow coordinator and traffic controller
+**Role**: Workflow coordinator, traffic controller, and SharePoint publisher
 
 **Responsibilities**:
 - Receives document generation requests with architecture diagram
 - Routes tasks to specialized agents in correct sequence
 - Manages reflection loop for quality refinement
 - Implements retry logic and timeout handling
-- Returns final document or error status
+- **Converts final markdown to SharePoint modern page format**
+- **Publishes .aspx pages to SharePoint using MS Graph API**
+- Returns final document with optional SharePoint URL
 
 **Key Behaviors**:
 - Uses `A2AClient` for all inter-agent communication
 - Configurable max revisions (default: 3) and min quality score (default: 90)
 - Implements exponential backoff for agent failures
 - Maintains session context across agent calls
+- **Uses `SharePointPublisher` to create and publish pages**
+- **Supports optional news promotion for high-visibility documents**
 
 #### Vision Agent (Port 8081)
 **Role**: Architecture diagram interpreter
@@ -361,9 +365,10 @@ sequenceDiagram
     participant Writer as Writer Agent
     participant Review as Reviewer Agent
     participant GCP as GCP Services
+    participant SP as SharePoint
 
     Client->>Orch: POST /invoke
-    Note right of Client: {image_uri, sections[]}
+    Note right of Client: {image_uri, title, sections[], publish}
     Orch->>Orch: Validate request payload
     
     Note over Orch,Vision: Step 1: Vision Analysis
@@ -421,12 +426,25 @@ sequenceDiagram
                 Orch->>Orch: Accept last draft with warning
             end
         end
+        end
     end
     
-    Note over Orch,Client: Return Complete Document
-    Orch->>Orch: Assemble final document
-    Orch-->>Client: Complete response
-end
+    Note over Orch,SP: Step 4: SharePoint Publishing
+    alt publish=true and SP configured
+        Orch->>Orch: Convert markdown to HTML
+        Orch->>SP: POST /sites/{siteId}/pages
+        Note right of Orch: Create modern page
+        SP-->>Orch: {pageId, name}
+        Orch->>SP: PATCH /pages/{pageId}
+        Note right of Orch: Set canvas content
+        SP-->>Orch: 200 OK
+        Orch->>SP: POST /pages/{pageId}/publish
+        SP-->>Orch: {webUrl}
+    end
+    
+    Note over Orch,Client: Return Complete Response
+    Orch->>Orch: Assemble final response
+    Orch-->>Client: Response with SharePoint URL
 ```
 
 ### 4.4 End-to-End Flow Description
@@ -553,26 +571,115 @@ end
    }
    ```
 
+#### Step 4: SharePoint Publishing (Optional)
+When `publish=true` is set in the request, Orchestrator publishes the generated document to SharePoint:
+
+39. Orchestrator checks `publish` flag from request payload (default: `false`)
+40. If publish enabled, combines all sections into unified markdown document:
+   - Orders sections by standard sequence: Problem → Solution → Implementation → etc.
+   - Adds document title from `title` parameter or generates default
+
+**OAuth Authentication**
+41. SharePointPublisher acquires OAuth token:
+   - Uses MSAL Client Credentials Flow
+   - Requests scope: `https://graph.microsoft.com/.default`
+   - Caches token for subsequent calls (token lifetime ~60 min)
+
+42. Token request to Azure AD:
+   ```
+   POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
+   grant_type=client_credentials&client_id={id}&client_secret={secret}&scope=https://graph.microsoft.com/.default
+   ```
+
+**Page Creation**
+43. MarkdownToSharePointConverter transforms markdown:
+   - Converts markdown to HTML using Python markdown library
+   - Wraps HTML in SharePoint Text Web Part structure
+   - Creates canvas section with single-column layout
+
+44. Creates draft page via MS Graph API:
+   ```
+   POST https://graph.microsoft.com/v1.0/sites/{siteId}/pages
+   {
+     "name": "{title}.aspx",
+     "title": "{title}",
+     "pageLayout": "article",
+     "showPublishDate": true
+   }
+   ```
+
+45. Graph API returns page ID and draft URL
+
+**Content Setting**
+46. Sets page canvas content with converted markdown:
+   ```
+   PATCH https://graph.microsoft.com/v1.0/sites/{siteId}/pages/{pageId}/microsoft.graph.sitePage
+   {
+     "canvasLayout": {
+       "horizontalSections": [...]
+     }
+   }
+   ```
+
+**Publishing**
+47. Publishes the page to make it visible:
+   ```
+   POST https://graph.microsoft.com/v1.0/sites/{siteId}/pages/{pageId}/microsoft.graph.sitePage/publish
+   ```
+
+**News Promotion (Optional)**
+48. If `SHAREPOINT_PROMOTE_AS_NEWS=true`:
+   ```
+   PATCH https://graph.microsoft.com/v1.0/sites/{siteId}/pages/{pageId}/microsoft.graph.sitePage
+   {
+     "promotionKind": "newsPost"
+   }
+   ```
+
+49. SharePointPublisher returns `PublishResult`:
+   ```python
+   PublishResult(
+       success=True,
+       page_id="abc123",
+       page_url="https://tenant.sharepoint.com/sites/site/SitePages/title.aspx",
+       error=None,
+       publish_time_ms=2340
+   )
+   ```
+
+50. Orchestrator logs SharePoint publishing metrics:
+   - Page URL
+   - Page ID
+   - Publishing duration
+
 #### Response Assembly
-39. Orchestrator constructs final response:
+51. Orchestrator constructs final response:
    - `document`: Dictionary of section names to markdown content
    - `donor_pattern`: ID of the pattern used as reference
    - `diagram_description`: Technical description from Vision Agent
+   - `sharepoint`: Publishing result (if publish=true)
 
-40. Logs completion metrics:
+52. Logs completion metrics:
    - Total sections generated
    - Average quality score
    - Total revisions across all sections
    - Processing time
+   - SharePoint page URL (if published)
 
-41. Returns response to Client:
+53. Returns response to Client:
    ```json
    {
      "status": "completed",
      "result": {
        "document": {...},
        "donor_pattern": "pat_101",
-       "diagram_description": "..."
+       "diagram_description": "...",
+       "sharepoint": {
+         "published": true,
+         "page_url": "https://tenant.sharepoint.com/sites/site/SitePages/title.aspx",
+         "page_id": "abc123",
+         "publish_time_ms": 2340
+       }
      },
      "execution_time_ms": 45230
    }
@@ -584,6 +691,9 @@ end
 - **Writer Agent Fails**: Logs error, attempts to continue with next section, returns partial document
 - **Reviewer Agent Fails**: Logs error, accepts draft without review (score = 100 bypass)
 - **Timeout Exceeded**: Returns partial results with timeout status
+- **SharePoint OAuth Fails**: Logs authentication error, returns document without publishing (graceful degradation)
+- **SharePoint Page Creation Fails**: Logs Graph API error, returns document with `sharepoint.published=false`
+- **SharePoint Publishing Fails**: Logs error, draft page remains accessible via admin, returns partial success
 
 ---
 
@@ -603,6 +713,7 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 - **Quality**: Reflection loop with automated review achieves 90+ quality scores
 - **Resilience**: Retry logic and health checks ensure 99%+ success rate
 - **Scalability**: Handles 1000+ patterns and concurrent agent requests
+- **Integration**: SharePoint publishing enables direct enterprise content delivery
 
 ### Production Readiness
 
@@ -611,6 +722,7 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 | Ingestion Service | ✅ Complete | 90% |
 | Serving Service | ✅ Complete | 85% |
 | GCP Integration | ✅ Complete | 95% |
+| SharePoint Integration | ✅ Complete | 90% |
 | Error Handling | ✅ Complete | 90% |
 | Monitoring | ⚠️ Partial | 60% |
 | Testing | ⚠️ Partial | 70% |
