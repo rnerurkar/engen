@@ -1,3 +1,17 @@
+"""
+Orchestrator Agent
+------------------
+
+Coordinates the agent workflow and optionally publishes the final document to
+SharePoint using `SharePointPublisher`.
+
+SharePoint Publishing Notes:
+- Markdown conversion uses Python-Markdown with extensions (fenced_code, tables,
+    sane_lists, codehilite, toc) rather than custom regex.
+- Resulting HTML is sanitized with Bleach (allowlisted tags/attrs/protocols)
+    before embedding into a SharePoint Text web part as `properties.inlineHtml`.
+- See `serving-service/lib/sharepoint_publisher.py` for implementation details.
+"""
 import os
 import sys
 import asyncio

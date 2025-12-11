@@ -34,6 +34,12 @@ EnGen uses a two-plane architecture to transform architecture diagrams into comp
 - **Orchestrator Agent** - Workflow coordination and traffic control (Port 8080)
 - **Vision Agent** - Architecture diagram interpretation using Gemini Vision (Port 8081)
 - **Retrieval Agent** - Semantic search for donor patterns (Port 8082)
+- SharePoint Publishing: The Orchestrator uses `SharePointPublisher` to create modern pages.
+	- Markdown conversion: Python-Markdown with extensions (`fenced_code`, `tables`, `sane_lists`, `codehilite`, `toc`).
+	- Sanitization: Bleach allowlist for tags/attributes/protocols ensures safe HTML.
+	- Web part schema: Content is embedded as a Text web part using `properties.inlineHtml`.
+	- Dependencies: see `serving-service/requirements.txt` (includes `markdown`, `bleach`).
+
 - **Writer Agent** - Documentation section generation (Port 8083)
 - **Reviewer Agent** - Quality evaluation and feedback (Port 8084)
 - **A2A Communication** - Standardized agent-to-agent protocol with retry and timeout
