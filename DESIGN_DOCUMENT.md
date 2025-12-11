@@ -360,15 +360,19 @@ sequenceDiagram
     participant Retr as Retrieval Agent
     participant Writer as Writer Agent
     participant Review as Reviewer Agent
-    participant GCP as GCP Services<br/>(Gemini, Discovery, Firestore)
+    participant GCP as GCP Services
 
-    Client->>Orch: POST /invoke<br/>{image_uri, sections[]}
+    Client->>Orch: POST /invoke
+    Note right of Client: {image_uri, sections[]}
     Orch->>Orch: Validate request payload
     
     Note over Orch,Vision: Step 1: Vision Analysis
-    Orch->>Vision: A2A call: task="interpret"<br/>{image: uri}
-    Vision->>GCP: Gemini Vision API<br/>analyze diagram
-    GCP-->>Vision: Technical description<br/>components, patterns
+    Orch->>Vision: A2A call: task=interpret
+    Note right of Orch: {image: uri}
+    Vision->>GCP: Gemini Vision API
+    Note right of Vision: analyze diagram
+    GCP-->>Vision: Technical description
+    Note left of GCP: components, patterns
     Vision-->>Orch: {description, confidence}
     
     alt Description invalid or empty
@@ -376,32 +380,37 @@ sequenceDiagram
     end
     
     Note over Orch,Retr: Step 2: Pattern Retrieval
-    Orch->>Retr: A2A call: task="find_donor"<br/>{description, image}
-    Retr->>GCP: Discovery Engine<br/>semantic search(query)
+    Orch->>Retr: A2A call: task=find_donor
+    Note right of Orch: {description, image}
+    Retr->>GCP: Discovery Engine
+    Note right of Retr: semantic search
     GCP-->>Retr: Top matching pattern_id
     Retr->>GCP: Firestore: get sections
     GCP-->>Retr: Section documents
-    Retr-->>Orch: {donor_id, sections{}}
+    Retr-->>Orch: {donor_id, sections}
     
-    Note over Orch,Review: Step 3: Reflection Loop<br/>(per section)
+    Note over Orch,Review: Step 3: Reflection Loop (per section)
     
-    loop For each section in [Problem, Solution, ...]
+    loop For each section
         loop Max 3 revisions
             Note over Orch,Writer: Generate Draft
-            Orch->>Writer: A2A call: task="write"<br/>{section, description,<br/>donor_context, critique}
+            Orch->>Writer: A2A call: task=write
+            Note right of Orch: {section, description, donor_context, critique}
             Writer->>GCP: Gemini LLM with prompt
             GCP-->>Writer: Generated section text
             Writer-->>Orch: {text: markdown_content}
             
             Note over Orch,Review: Review Draft
-            Orch->>Review: A2A call: task="review"<br/>{draft: text}
-            Review->>GCP: Gemini LLM with<br/>evaluation criteria
+            Orch->>Review: A2A call: task=review
+            Note right of Orch: {draft: text}
+            Review->>GCP: Gemini LLM
+            Note right of Review: evaluation criteria
             GCP-->>Review: Score + feedback JSON
-            Review->>Review: Parse JSON (with fallback)
-            Review-->>Orch: {score: 85, feedback: "..."}
+            Review->>Review: Parse JSON with fallback
+            Review-->>Orch: {score: 85, feedback}
             
-            alt Score >= 90 (threshold met)
-                Orch->>Orch: Accept draft, move to next section
+            alt Score >= 90 threshold met
+                Orch->>Orch: Accept draft, next section
                 break
             else Score < 90 and revisions < max
                 Orch->>Orch: Prepare critique for Writer
@@ -415,7 +424,8 @@ sequenceDiagram
     
     Note over Orch,Client: Return Complete Document
     Orch->>Orch: Assemble final document
-    Orch-->>Client: {document: {Problem: "...",<br/>Solution: "...", ...},<br/>donor_pattern: "pat_101",<br/>diagram_description: "..."}
+    Orch-->>Client: Complete response
+    Note left of Orch: {document, donor_pattern, diagram_description}
 ```
 
 ### 4.4 End-to-End Flow Description
