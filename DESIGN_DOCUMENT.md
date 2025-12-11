@@ -773,6 +773,7 @@ sequenceDiagram
 
     Pub->>Pub: Generate safe filename<br/>"My Doc: Test!" → "my-doc-test-20251211143052.aspx"
     
+    Note right of Graph: Some page APIs require /beta
     Pub->>Graph: POST /sites/{siteId}/pages<br/>{"name": "{filename}", "title": "{title}", "pageLayout": "article"}
     activate Graph
     
@@ -801,7 +802,7 @@ sequenceDiagram
         Note right of Conv: Step 7: Wrap text in &lt;p&gt; tags
         Note right of Conv: Step 8: Restore code blocks
         
-        Conv->>Conv: create_text_web_part(html)<br/>{"id": "wp-1-abc", "innerHtml": "..."}
+        Conv->>Conv: create_text_web_part(html)<br/>{"id": "wp-1-abc", "instanceId": "wp-1-abc", "dataVersion": "1.0", "properties": {"inlineHtml": "..."}}
         
         Conv->>Conv: create_section([webpart])<br/>{"columns": [{"factor": 12, "webparts": [...]}]}
     end
@@ -811,7 +812,7 @@ sequenceDiagram
 
     Note over Orch,SP: PHASE 5: Set Page Content
 
-    Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId}<br/>{"canvasLayout": {...}}
+    Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId}<br/>{"canvasLayout": {"horizontalSections": [...]}}
     activate Graph
     
     Graph->>SP: Update page canvas
@@ -821,6 +822,7 @@ sequenceDiagram
 
     Note over Orch,SP: PHASE 6: Publish Page
 
+    Note right of Graph: May be under /beta depending on tenant
     Pub->>Graph: POST /sites/{siteId}/pages/{pageId}/publish
     activate Graph
     
@@ -853,6 +855,7 @@ sequenceDiagram
     Note over Orch,SP: PHASE 8: Return Result
 
     Pub->>Pub: Calculate publish_time_ms
+    Note over Pub,Graph: Handle throttling: 429 with Retry-After
     
     Pub-->>Orch: PublishResult(<br/>  success=true,<br/>  page_id="abc123",<br/>  page_url="https://...",<br/>  publish_time_ms=2340<br/>)
     deactivate Pub

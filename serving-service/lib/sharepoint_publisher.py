@@ -48,6 +48,17 @@ from dataclasses import dataclass, field
 
 import aiohttp
 import msal
+import random
+
+# Third-party libraries for robust markdown conversion and sanitization
+try:
+    import markdown as md
+except ImportError:  # pragma: no cover
+    md = None
+try:
+    import bleach
+except ImportError:  # pragma: no cover
+    bleach = None
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +143,18 @@ class SharePointPageConfig:
         Returns:
             True if all required fields are present and non-empty
         """
-        return bool(self.site_id and self.tenant_id and self.client_id and self.client_secret)
+        # Basic presence check
+        if not (self.site_id and self.tenant_id and self.client_id and self.client_secret):
+            return False
+        
+        # Basic format validation (GUID-like for tenant/client)
+        guid_regex = re.compile(r'^[0-9a-fA-F-]{32,36}$')
+        if not guid_regex.match(self.tenant_id):
+            logger.warning("AZURE_TENANT_ID format may be invalid")
+        if not guid_regex.match(self.client_id):
+            logger.warning("AZURE_CLIENT_ID format may be invalid")
+        
+        return True
 
 
 @dataclass
@@ -261,10 +283,11 @@ class MarkdownToSharePointConverter:
         """
         Initialize the converter.
         
-        The web_part_id_counter ensures each web part gets a unique ID,
-        which SharePoint requires to distinguish between content blocks.
+        Converter maintains no shared mutable state across calls to avoid
+        concurrency issues. Web part IDs are generated using a per-call
+        approach via a local counter.
         """
-        self.web_part_id_counter = 0
+        self._local_counter = 0
     
     def _generate_web_part_id(self) -> str:
         """
@@ -280,10 +303,10 @@ class MarkdownToSharePointConverter:
         Returns:
             A unique web part ID string
         """
-        self.web_part_id_counter += 1
+        self._local_counter += 1
         # Create a hash from timestamp + counter for uniqueness
-        unique_hash = hashlib.md5(f"{datetime.now()}-{self.web_part_id_counter}".encode()).hexdigest()[:8]
-        return f"wp-{self.web_part_id_counter}-{unique_hash}"
+        unique_hash = hashlib.md5(f"{datetime.now()}-{self._local_counter}".encode()).hexdigest()[:8]
+        return f"wp-{self._local_counter}-{unique_hash}"
     
     def markdown_to_html(self, markdown_text: str) -> str:
         """
@@ -326,270 +349,62 @@ class MarkdownToSharePointConverter:
         # 
         # REGEX EXPLAINED: r'```(\\w+)?\\n(.*?)```'
         #   ```       - Literal triple backticks (start of code block)
-        #   (\\w+)?   - Optional capture group 1: language name (python, json, etc.)
-        #             - \\w+ = one or more word characters
-        #             - ?   = zero or one (makes language optional)
-        #   \\n       - Newline after the opening backticks
-        #   (.*?)     - Capture group 2: the actual code content
-        #             - .  = any character (with DOTALL flag, includes newlines)
-        #             - *? = zero or more, non-greedy (stops at first ```)
-        #   ```       - Literal triple backticks (end of code block)
-        #
-        # re.DOTALL flag makes . match newlines too (code can be multi-line)
-        # =====================================================================
-        
-        code_blocks = []  # Store code blocks to restore later
-        
-        def save_code_block(match):
+        def markdown_to_html(self, markdown_text: str) -> str:
             """
-            Callback function for re.sub() to process each code block match.
-            
-            When regex finds a code block, this function:
-            1. Extracts the language (group 1) and code content (group 2)
-            2. Escapes HTML entities to prevent code from being interpreted as HTML
-            3. Stores the formatted HTML in code_blocks list
-            4. Returns a placeholder string that we'll replace later
-            
-            Why placeholders? Because we don't want other regex operations
-            (like bold or italic) to modify code content.
+            Convert markdown to HTML suitable for SharePoint using a robust library
+            and sanitize the output for safety.
+        
+            Uses `markdown` with common extensions:
+            - fenced_code, codehilite, tables, sane_lists, toc
+            Then sanitizes with `bleach` to allow only safe tags/attributes.
+        
+            Falls back to the existing regex converter if libraries are missing.
             """
-            lang = match.group(1) or ''  # Language (e.g., "python") or empty string
-            code = match.group(2)         # The actual code content
-            
-            # IMPORTANT: Escape HTML entities in code
-            # This prevents code like "<div>" from being interpreted as an HTML tag
-            # Order matters: & must be escaped first, or we'd double-escape
-            code = code.replace('&', '&amp;')   # & becomes &amp;
-            code = code.replace('<', '&lt;')     # < becomes &lt;
-            code = code.replace('>', '&gt;')     # > becomes &gt;
-            
-            # Create placeholder and store the formatted code block
-            placeholder = f"__CODE_BLOCK_{len(code_blocks)}__"
-            code_blocks.append(f'<pre><code class="language-{lang}">{code}</code></pre>')
-            return placeholder
-        
-        html = re.sub(r'```(\w+)?\n(.*?)```', save_code_block, html, flags=re.DOTALL)
-        
-        # =====================================================================
-        # STEP 2: HANDLE INLINE CODE
-        # =====================================================================
-        # Inline code uses single backticks: `code`
-        #
-        # REGEX EXPLAINED: r'`([^`]+)`'
-        #   `         - Opening backtick
-        #   ([^`]+)   - Capture group 1: one or more non-backtick characters
-        #             - [^`] = any character EXCEPT backtick
-        #             - +    = one or more (at least one character required)
-        #   `         - Closing backtick
-        # =====================================================================
-        
-        def escape_inline_code(match):
-            """Escape HTML entities within inline code and wrap in <code> tags."""
-            code = match.group(1)
-            code = code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            return f'<code>{code}</code>'
-        
-        html = re.sub(r'`([^`]+)`', escape_inline_code, html)
-        
-        # =====================================================================
-        # STEP 3: HANDLE HEADERS (h1 through h6)
-        # =====================================================================
-        # Markdown headers: # H1, ## H2, ### H3, etc.
-        #
-        # Why process from h6 to h1? Because ###### contains ####, ###, etc.
-        # If we process h1 first, "#### Title" would match the first # as h1!
-        #
-        # REGEX EXPLAINED: r'^#{6} (.+)$' (for h6)
-        #   ^         - Start of line (not just start of string, due to MULTILINE)
-        #   #{6}      - Exactly 6 hash characters
-        #   \\s       - A space (between # and title)
-        #   (.+)      - Capture group 1: one or more characters (the title text)
-        #   $         - End of line
-        #
-        # re.MULTILINE makes ^ and $ match at line boundaries, not just string ends
-        # =====================================================================
-        
-        for i in range(6, 0, -1):  # Process h6, h5, h4, h3, h2, h1
-            pattern = r'^' + '#' * i + r' (.+)$'  # e.g., r'^### (.+)$' for h3
-            # \\1 in replacement refers to capture group 1 (the title text)
-            html = re.sub(pattern, f'<h{i}>\\1</h{i}>', html, flags=re.MULTILINE)
-        
-        # =====================================================================
-        # STEP 4: HANDLE BOLD TEXT
-        # =====================================================================
-        # Markdown bold: **text** or __text__
-        #
-        # REGEX EXPLAINED: r'\\*\\*([^*]+)\\*\\*'
-        #   \\*\\*    - Two literal asterisks (escaped because * is special in regex)
-        #   ([^*]+)   - Capture group 1: one or more non-asterisk characters
-        #   \\*\\*    - Two closing asterisks
-        #
-        # Similar pattern for __text__ using underscores
-        # =====================================================================
-        
-        html = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', html)
-        html = re.sub(r'__([^_]+)__', r'<strong>\1</strong>', html)
-        
-        # =====================================================================
-        # STEP 5: HANDLE ITALIC TEXT
-        # =====================================================================
-        # Markdown italic: *text* or _text_
-        # Must process AFTER bold, or **bold** would partially match *text*
-        #
-        # REGEX EXPLAINED: r'\\*([^*]+)\\*'
-        #   \\*       - Single asterisk (escaped)
-        #   ([^*]+)   - Capture group 1: text between asterisks
-        #   \\*       - Closing asterisk
-        # =====================================================================
-        
-        html = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', html)
-        html = re.sub(r'_([^_]+)_', r'<em>\1</em>', html)
-        
-        # =====================================================================
-        # STEP 6: HANDLE LINKS
-        # =====================================================================
-        # Markdown links: [link text](url)
-        #
-        # REGEX EXPLAINED: r'\\[([^\\]]+)\\]\\(([^)]+)\\)'
-        #   \\[       - Opening square bracket (escaped)
-        #   ([^\\]]+) - Capture group 1: link text (one or more non-] characters)
-        #   \\]       - Closing square bracket
-        #   \\(       - Opening parenthesis (escaped because () is special in regex)
-        #   ([^)]+)   - Capture group 2: URL (one or more non-) characters)
-        #   \\)       - Closing parenthesis
-        #
-        # Replacement: <a href="\\2">\\1</a>
-        #   \\2 = group 2 (URL), \\1 = group 1 (link text)
-        # =====================================================================
-        
-        html = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', html)
-        
-        # =====================================================================
-        # STEP 7: HANDLE LISTS (Bullet and Numbered)
-        # =====================================================================
-        # Markdown lists:
-        #   - item (unordered/bullet list)
-        #   * item (also unordered)
-        #   + item (also unordered)
-        #   1. item (ordered/numbered list)
-        #
-        # Lists are tricky because we need to group consecutive items.
-        # We process line by line and track when we're inside a list.
-        # =====================================================================
-        
-        lines = html.split('\n')
-        processed_lines = []
-        in_list = False      # 'ul' or 'ol' when inside a list
-        list_items = []      # Accumulate <li> items
-        
-        for line in lines:
-            # UNORDERED LIST REGEX: r'^[-*+] (.+)$'
-            #   ^       - Start of line
-            #   [-*+]   - One of: dash, asterisk, or plus (bullet markers)
-            #   \\s     - A space
-            #   (.+)    - Capture group 1: the list item text
-            #   $       - End of line
-            ul_match = re.match(r'^[-*+] (.+)$', line)
-            
-            # ORDERED LIST REGEX: r'^\\d+\\. (.+)$'
-            #   ^       - Start of line
-            #   \\d+    - One or more digits (1, 2, 10, 99, etc.)
-            #   \\.     - Literal period (escaped because . is special)
-            #   \\s     - A space
-            #   (.+)    - Capture group 1: the list item text
-            #   $       - End of line
-            ol_match = re.match(r'^\d+\. (.+)$', line)
-            
-            if ul_match:
-                if not in_list:
-                    in_list = 'ul'
-                    list_items = []
-                list_items.append(f'<li>{ul_match.group(1)}</li>')
-            elif ol_match:
-                if not in_list:
-                    in_list = 'ol'
-                    list_items = []
-                list_items.append(f'<li>{ol_match.group(1)}</li>')
+            # If markdown library is available, prefer it
+            if md is not None:
+                extensions = [
+                    'fenced_code', 'codehilite', 'tables', 'sane_lists', 'toc'
+                ]
+                html = md.markdown(markdown_text or '', extensions=extensions)
             else:
-                # Non-list line: close any open list first
-                if in_list:
-                    tag = in_list
-                    processed_lines.append(f'<{tag}>{"".join(list_items)}</{tag}>')
-                    in_list = False
-                    list_items = []
-                
-                # =========================================================
-                # STEP 8: WRAP PLAIN TEXT IN PARAGRAPH TAGS
-                # =========================================================
-                # Non-empty lines that aren't already HTML tags or placeholders
-                # get wrapped in <p> tags.
-                #
-                # We skip lines that:
-                # - Are empty or whitespace only
-                # - Already start with < (already HTML)
-                # - Start with __CODE_BLOCK_ (our placeholder)
-                # =========================================================
-                stripped = line.strip()
-                if stripped and not stripped.startswith('<') and not stripped.startswith('__CODE_BLOCK_'):
-                    processed_lines.append(f'<p>{stripped}</p>')
-                elif stripped:
-                    processed_lines.append(line)
+                html = markdown_text or ''
         
-        # Handle list at end of content (if document ends with a list)
-        if in_list:
-            tag = in_list
-            processed_lines.append(f'<{tag}>{"".join(list_items)}</{tag}>')
+            # Sanitize with bleach if available
+            if bleach is not None:
+                allowed_tags = [
+                    'h1','h2','h3','h4','h5','h6','p','strong','em','ul','ol','li',
+                    'code','pre','blockquote','a','table','thead','tbody','tr','th','td',
+                    'hr','br','span','div'
+                ]
+                allowed_attrs = {
+                    'a': ['href','title','target','rel'],
+                    'code': ['class'],
+                    'span': ['class'],
+                    'div': ['class']
+                }
+                html = bleach.clean(html, tags=allowed_tags, attributes=allowed_attrs, strip=True)
         
-        html = '\n'.join(processed_lines)
-        
-        # =====================================================================
-        # STEP 9: RESTORE CODE BLOCKS
-        # =====================================================================
-        # Replace our placeholders with the actual formatted code blocks
-        # =====================================================================
-        for i, block in enumerate(code_blocks):
-            html = html.replace(f'__CODE_BLOCK_{i}__', block)
-        
-        # =====================================================================
-        # STEP 10: CLEAN UP EMPTY PARAGRAPHS
-        # =====================================================================
-        # Remove any <p></p> or <p>   </p> that might have been created
-        #
-        # REGEX EXPLAINED: r'<p>\\s*</p>'
-        #   <p>       - Opening paragraph tag
-        #   \\s*      - Zero or more whitespace characters
-        #   </p>      - Closing paragraph tag
-        # =====================================================================
-        html = re.sub(r'<p>\s*</p>', '', html)
-        
-        return html
+            return html
     
     def create_text_web_part(self, html_content: str) -> dict:
         """
-        Create a SharePoint Text web part structure.
+        Create a SharePoint Text web part structure using the modern schema.
         
-        WHAT IS A WEB PART?
-        -------------------
-        SharePoint pages are built from "web parts" - modular content blocks.
-        The Text web part displays rich text/HTML content.
+        SharePoint Text web part schema typically includes:
+        - id / instanceId: unique identifiers
+        - dataVersion: content schema version
+        - properties: object with `inlineHtml`
         
-        The structure returned looks like:
-        {
-            "id": "wp-1-a3f8c2b1",   ← Unique identifier
-            "innerHtml": "<h2>...</h2><p>...</p>"  ← The actual HTML content
-        }
-        
-        This JSON gets sent to SharePoint as part of the page canvas.
-        
-        Args:
-            html_content: HTML string to display in the web part
-            
-        Returns:
-            Dictionary representing a Text web part
+        This aligns closer to SharePoint expectations than raw `innerHtml`.
         """
+        instance_id = self._generate_web_part_id()
         return {
-            "id": self._generate_web_part_id(),
-            "innerHtml": html_content
+            "id": instance_id,
+            "instanceId": instance_id,
+            "dataVersion": "1.0",
+            "properties": {
+                "inlineHtml": html_content
+            }
         }
     
     def create_section(self, web_parts: List[dict], column_layout: str = "oneColumn") -> dict:
@@ -773,6 +588,12 @@ class SharePointPublisher:
     # Graph API endpoints - v1.0 for stable, beta for page-specific features
     GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
     GRAPH_BETA_URL = "https://graph.microsoft.com/beta"  # Some page APIs require beta
+
+    def _pages_base(self) -> str:
+        """Select appropriate pages base URL (prefer v1.0, fallback to beta)."""
+        # As of writing, some modern page operations are only available in beta.
+        # Centralize the selection for easier control.
+        return self.GRAPH_BETA_URL
     
     def __init__(self, config: SharePointPageConfig):
         """
@@ -856,29 +677,34 @@ class SharePointPublisher:
         # - No token yet
         # - No expiry time recorded
         # - Token expires within 5 minutes
+        if not hasattr(self, "_token_lock"):
+            self._token_lock = asyncio.Lock()
+        
         if (self._access_token is None or 
             self._token_expires_at is None or
             datetime.now() >= self._token_expires_at - timedelta(minutes=5)):
+            async with self._token_lock:
+                # Double-check under lock
+                if (self._access_token is None or 
+                    self._token_expires_at is None or
+                    datetime.now() >= self._token_expires_at - timedelta(minutes=5)):
             
-            logger.info("Acquiring new access token for MS Graph API")
-            
-            app = self._get_msal_app()
-            
-            # Run MSAL token acquisition in thread pool (it's synchronous)
-            result = await asyncio.to_thread(
-                app.acquire_token_for_client,
-                scopes=["https://graph.microsoft.com/.default"]
-            )
-            
-            if "access_token" in result:
-                self._access_token = result["access_token"]
-                # Token typically expires in 1 hour
-                expires_in = result.get("expires_in", 3600)
-                self._token_expires_at = datetime.now() + timedelta(seconds=expires_in)
-                logger.info(f"Token acquired, expires in {expires_in} seconds")
-            else:
-                error = result.get("error_description", result.get("error", "Unknown error"))
-                raise Exception(f"Failed to acquire token: {error}")
+                    logger.info("Acquiring new access token for MS Graph API")
+                    app = self._get_msal_app()
+                    # Run MSAL token acquisition in thread pool (it's synchronous)
+                    result = await asyncio.to_thread(
+                        app.acquire_token_for_client,
+                        scopes=["https://graph.microsoft.com/.default"]
+                    )
+                    if "access_token" in result:
+                        self._access_token = result["access_token"]
+                        # Token typically expires in 1 hour
+                        expires_in = result.get("expires_in", 3600)
+                        self._token_expires_at = datetime.now() + timedelta(seconds=expires_in)
+                        logger.info("Token acquired; expires in %ss", expires_in)
+                    else:
+                        error = result.get("error_description", result.get("error", "Unknown error"))
+                        raise Exception("Failed to acquire token: %s", error)
         
         return self._access_token
     
@@ -914,33 +740,12 @@ class SharePointPublisher:
         max_retries: int = 3
     ) -> tuple:
         """
-        Make HTTP request with retry logic for transient failures.
+        Make HTTP request with robust retry logic for transient failures and throttling.
         
-        RETRY STRATEGY
-        ---------------
-        - Attempts the request up to max_retries times
-        - Uses exponential backoff: 1s, 2s, 4s between retries
-        - Only retries on network errors (aiohttp.ClientError)
-        - Does NOT retry on HTTP errors (4xx, 5xx) - those are returned
-        
-        This handles transient issues like:
-        - Network timeouts
-        - DNS resolution failures
-        - Connection resets
-        
-        Args:
-            session: aiohttp session for making requests
-            method: HTTP method (GET, POST, PATCH)
-            url: Full URL to request
-            headers: HTTP headers including Authorization
-            json_body: Optional JSON body for POST/PATCH
-            max_retries: Maximum number of attempts
-            
-        Returns:
-            Tuple of (status_code, response_text)
-            
-        Raises:
-            aiohttp.ClientError: If all retries fail
+        Enhancements:
+        - Retries on aiohttp.ClientError
+        - Retries on HTTP 429 (respect Retry-After) and 502/503/504 with exponential backoff + jitter
+        - Returns (status, text) for caller to parse; logs minimal info to avoid leaking secrets
         """
         last_error = None
         
@@ -948,18 +753,42 @@ class SharePointPublisher:
             try:
                 if method == "GET":
                     async with session.get(url, headers=headers) as response:
-                        return response.status, await response.text()
+                        status = response.status
+                        text = await response.text()
                 elif method == "POST":
                     async with session.post(url, headers=headers, json=json_body) as response:
-                        return response.status, await response.text()
+                        status = response.status
+                        text = await response.text()
                 elif method == "PATCH":
                     async with session.patch(url, headers=headers, json=json_body) as response:
-                        return response.status, await response.text()
-                        
+                        status = response.status
+                        text = await response.text()
+                else:
+                    raise ValueError(f"Unsupported method: {method}")
+                
+                # Throttling or transient server errors
+                if status in (429, 502, 503, 504) and attempt < max_retries - 1:
+                    retry_after = 0
+                    try:
+                        # Honor Retry-After header if present
+                        retry_after_header = response.headers.get('Retry-After')
+                        if retry_after_header:
+                            retry_after = int(retry_after_header)
+                    except Exception:
+                        retry_after = 0
+                    base_delay = (2 ** attempt)
+                    jitter = random.uniform(0, 0.5)
+                    delay = max(retry_after, base_delay + jitter)
+                    await asyncio.sleep(delay)
+                    continue
+                
+                return status, text
             except aiohttp.ClientError as e:
                 last_error = e
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    base_delay = (2 ** attempt)
+                    jitter = random.uniform(0, 0.5)
+                    await asyncio.sleep(base_delay + jitter)
                     continue
                 raise
         
@@ -1053,7 +882,7 @@ class SharePointPublisher:
             page_body["description"] = description
         
         # Create the page
-        url = f"{self.GRAPH_BETA_URL}/sites/{self.config.site_id}/pages"
+        url = f"{self._pages_base()}/sites/{self.config.site_id}/pages"
         
         status, response_text = await self._request_with_retry(
             session, "POST", url, headers, page_body
@@ -1141,7 +970,7 @@ class SharePointPublisher:
         canvas_content = self.converter.convert_document(sections, title)
         
         # Update page content via PATCH request
-        url = f"{self.GRAPH_BETA_URL}/sites/{self.config.site_id}/pages/{page_id}"
+        url = f"{self._pages_base()}/sites/{self.config.site_id}/pages/{page_id}"
         
         update_body = {
             "canvasLayout": canvas_content["canvasLayout"]
@@ -1201,7 +1030,7 @@ class SharePointPublisher:
         headers = self._get_headers(token)
         
         # Publish the page
-        url = f"{self.GRAPH_BETA_URL}/sites/{self.config.site_id}/pages/{page_id}/publish"
+        url = f"{self._pages_base()}/sites/{self.config.site_id}/pages/{page_id}/publish"
         
         status, response_text = await self._request_with_retry(
             session, "POST", url, headers
@@ -1213,7 +1042,7 @@ class SharePointPublisher:
             raise Exception(f"Failed to publish page: {status} - {response_text}")
         
         # Get the page URL
-        page_url = f"{self.GRAPH_BETA_URL}/sites/{self.config.site_id}/pages/{page_id}"
+        page_url = f"{self._pages_base()}/sites/{self.config.site_id}/pages/{page_id}"
         
         status, response_text = await self._request_with_retry(
             session, "GET", page_url, headers
@@ -1271,7 +1100,7 @@ class SharePointPublisher:
         token = await self._ensure_valid_token()
         headers = self._get_headers(token)
         
-        url = f"{self.GRAPH_BETA_URL}/sites/{self.config.site_id}/pages/{page_id}"
+        url = f"{self._pages_base()}/sites/{self.config.site_id}/pages/{page_id}"
         
         update_body = {
             "promotionKind": "newsPost"
