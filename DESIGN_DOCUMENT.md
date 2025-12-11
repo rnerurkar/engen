@@ -409,15 +409,16 @@ sequenceDiagram
             Review->>Review: Parse JSON with fallback
             Review-->>Orch: {score: 85, feedback}
             
-            alt Score >= 90 threshold met
+        alt Score >= 90 threshold met
+            break Threshold Met
                 Orch->>Orch: Accept draft, next section
-                break
-            else Score < 90 and revisions < max
-                Orch->>Orch: Prepare critique for Writer
-                Note over Orch: Loop with critique feedback
-            else Max revisions reached
+            end
+        else Score < 90 and revisions < max
+            Orch->>Orch: Prepare critique for Writer
+            Note over Orch: Loop with critique feedback
+        else Max revisions reached
+            break Max Revisions
                 Orch->>Orch: Accept last draft with warning
-                break
             end
         end
     end
@@ -425,7 +426,7 @@ sequenceDiagram
     Note over Orch,Client: Return Complete Document
     Orch->>Orch: Assemble final document
     Orch-->>Client: Complete response
-    Note left of Orch: {document, donor_pattern, diagram_description}
+end
 ```
 
 ### 4.4 End-to-End Flow Description
