@@ -1,8 +1,39 @@
 """
 SharePoint Publisher Module
+============================
 
-Converts markdown documentation to SharePoint modern pages (.aspx)
-and publishes them using MS Graph API.
+This module converts markdown documentation to SharePoint modern pages (.aspx)
+and publishes them using the Microsoft Graph API.
+
+OVERVIEW FOR BEGINNERS
+----------------------
+
+What This Module Does (High-Level):
+1. Takes markdown text (like README files with # headers, **bold**, `code`, etc.)
+2. Converts it to HTML (the language web browsers understand)
+3. Wraps that HTML in SharePoint's special "web part" format
+4. Sends it to SharePoint via Microsoft Graph API to create a modern page
+
+Key Concepts:
+- Markdown: A simple text format using symbols like # for headers, ** for bold
+- HTML: The language of web pages (<h1>, <p>, <strong> tags)
+- Web Parts: SharePoint's building blocks for page content
+- MS Graph API: Microsoft's REST API for accessing SharePoint, Teams, etc.
+- OAuth: Authentication method using tokens instead of passwords
+
+CONVERSION PIPELINE:
+   Markdown → HTML → Web Part JSON → SharePoint Page Canvas → Published Page
+
+Example Flow:
+   "## Problem\n\nThis is **important**."
+         ↓ (markdown_to_html)
+   "<h2>Problem</h2><p>This is <strong>important</strong>.</p>"
+         ↓ (create_text_web_part)
+   {"id": "wp-1-abc", "innerHtml": "<h2>Problem</h2>..."}
+         ↓ (create_section)
+   {"columns": [{"factor": 12, "webparts": [...]}]}
+         ↓ (MS Graph API POST)
+   https://company.sharepoint.com/sites/MySite/SitePages/my-doc.aspx
 """
 
 import os
@@ -23,7 +54,42 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SharePointPageConfig:
-    """Configuration for SharePoint page publishing."""
+    """
+    Configuration for SharePoint page publishing.
+    
+    This dataclass holds all the credentials and settings needed to connect
+    to SharePoint via Microsoft Graph API.
+    
+    REQUIRED ENVIRONMENT VARIABLES:
+    --------------------------------
+    SHAREPOINT_SITE_ID    : The unique ID of your SharePoint site
+                            Find it: /_api/site/id in your SharePoint site
+    AZURE_TENANT_ID       : Your Microsoft 365 tenant ID (a GUID)
+                            Find it: Azure Portal → Azure Active Directory → Overview
+    AZURE_CLIENT_ID       : The Application (client) ID of your Azure AD app
+                            Find it: Azure Portal → App Registrations → Your App
+    AZURE_CLIENT_SECRET   : A secret key for your Azure AD app
+                            Create it: Azure Portal → App Registrations → Certificates & secrets
+    
+    OPTIONAL ENVIRONMENT VARIABLES:
+    --------------------------------
+    SHAREPOINT_TARGET_FOLDER : Folder name under SitePages (default: "Generated Documentation")
+    SHAREPOINT_PAGE_TEMPLATE : Page layout type (default: "Article")
+                               Options: Article, Home, SingleWebPartAppPage
+    SHAREPOINT_PROMOTE_AS_NEWS : "true" to show in news feed (default: "false")
+    
+    AZURE AD APP PERMISSIONS REQUIRED:
+    -----------------------------------
+    Microsoft Graph (Application permissions):
+    - Sites.ReadWrite.All  : Create and modify pages
+    - Sites.Manage.All     : Manage site settings (for publishing)
+    
+    Usage Example:
+    --------------
+    config = SharePointPageConfig.from_env()
+    if config.is_valid():
+        publisher = SharePointPublisher(config)
+    """
     site_id: str
     tenant_id: str
     client_id: str
@@ -34,7 +100,15 @@ class SharePointPageConfig:
     
     @classmethod
     def from_env(cls) -> "SharePointPageConfig":
-        """Create configuration from environment variables."""
+        """
+        Create configuration from environment variables.
+        
+        This factory method reads from os.environ and creates a config object.
+        It supports legacy variable names (SHAREPOINT_TENANT_ID) as fallbacks.
+        
+        Returns:
+            SharePointPageConfig instance populated from environment
+        """
         return cls(
             site_id=os.getenv("SHAREPOINT_SITE_ID", ""),
             tenant_id=os.getenv("AZURE_TENANT_ID", os.getenv("SHAREPOINT_TENANT_ID", "")),
@@ -46,13 +120,58 @@ class SharePointPageConfig:
         )
     
     def is_valid(self) -> bool:
-        """Check if configuration has required values."""
+        """
+        Check if configuration has all required values.
+        
+        Publishing will fail if any of these are missing:
+        - site_id: Where to create the page
+        - tenant_id: Which Microsoft 365 organization
+        - client_id: Which app is making the request
+        - client_secret: Proof that we own the app
+        
+        Returns:
+            True if all required fields are present and non-empty
+        """
         return bool(self.site_id and self.tenant_id and self.client_id and self.client_secret)
 
 
 @dataclass
 class PublishResult:
-    """Result of a SharePoint publish operation."""
+    """
+    Result of a SharePoint publish operation.
+    
+    This dataclass is returned by publish_document() to communicate
+    the outcome of the publishing attempt.
+    
+    Attributes:
+        success      : True if page was created and published successfully
+        page_id      : The unique identifier for the page in SharePoint
+                       (can be used for future updates)
+        page_url     : The full URL where users can view the page
+                       Example: https://company.sharepoint.com/sites/MySite/SitePages/my-doc.aspx
+        error        : Error message if success=False
+        publish_time_ms : How long the entire operation took (in milliseconds)
+    
+    Success Example:
+    ----------------
+    PublishResult(
+        success=True,
+        page_id="abc123-def456",
+        page_url="https://company.sharepoint.com/sites/MySite/SitePages/architecture-doc.aspx",
+        error=None,
+        publish_time_ms=2340
+    )
+    
+    Failure Example:
+    ----------------
+    PublishResult(
+        success=False,
+        page_id=None,
+        page_url=None,
+        error="Failed to acquire token: Invalid client secret",
+        publish_time_ms=150
+    )
+    """
     success: bool
     page_id: Optional[str] = None
     page_url: Optional[str] = None
@@ -64,15 +183,105 @@ class MarkdownToSharePointConverter:
     """
     Converts markdown content to SharePoint modern page format.
     
-    SharePoint modern pages use a specific JSON structure for web parts.
+    UNDERSTANDING THE CONVERSION PROCESS
+    =====================================
+    
+    SharePoint modern pages don't understand markdown directly. They use a
+    specific JSON structure with "web parts" - reusable content blocks.
+    
+    This converter does 3 things:
+    1. markdown_to_html()  : Convert markdown syntax to HTML tags
+    2. create_text_web_part() : Wrap HTML in SharePoint's Text web part format
+    3. create_section()    : Organize web parts into page sections
+    
+    MARKDOWN → HTML CONVERSION EXPLAINED
+    =====================================
+    
+    Markdown uses simple symbols to format text. This converter translates
+    each symbol to its HTML equivalent:
+    
+    | Markdown         | HTML                      | What It Does        |
+    |------------------|---------------------------|---------------------|
+    | # Title          | <h1>Title</h1>            | Level 1 heading     |
+    | ## Subtitle      | <h2>Subtitle</h2>         | Level 2 heading     |
+    | **bold**         | <strong>bold</strong>     | Bold text           |
+    | *italic*         | <em>italic</em>           | Italic text         |
+    | `code`           | <code>code</code>         | Inline code         |
+    | ```code block``` | <pre><code>...</code></pre>| Code block         |
+    | [text](url)      | <a href="url">text</a>    | Hyperlink           |
+    | - item           | <ul><li>item</li></ul>    | Bullet list         |
+    | 1. item          | <ol><li>item</li></ol>    | Numbered list       |
+    
+    REGULAR EXPRESSIONS (REGEX) PRIMER
+    ===================================
+    
+    This class uses regex patterns to find and replace markdown syntax.
+    Here's a quick reference for the regex symbols used:
+    
+    Symbol  | Meaning                          | Example
+    --------|----------------------------------|----------------------
+    ^       | Start of line                    | ^# matches "# " at line start
+    $       | End of line                      | text$ matches "text" at line end
+    .       | Any single character             | a.c matches "abc", "a1c"
+    *       | Zero or more of previous         | ab* matches "a", "ab", "abb"
+    +       | One or more of previous          | ab+ matches "ab", "abb" (not "a")
+    ?       | Zero or one of previous          | ab? matches "a" or "ab"
+    \\w     | Word character (letter/digit/_)  | \\w+ matches "hello"
+    \\s     | Whitespace (space/tab/newline)   | \\s+ matches "   "
+    \\d     | Digit (0-9)                      | \\d+ matches "123"
+    [abc]   | Any char in brackets             | [aeiou] matches any vowel
+    [^abc]  | Any char NOT in brackets         | [^0-9] matches non-digits
+    (...)   | Capture group                    | (\\w+) captures word for later
+    \\1     | Reference to group 1             | Used in replacement string
+    |       | OR operator                      | cat|dog matches either
+    
+    REGEX FLAGS USED:
+    - re.MULTILINE : ^ and $ match start/end of each line (not just string)
+    - re.DOTALL    : . matches newline characters too
+    
+    SHAREPOINT PAGE STRUCTURE
+    ==========================
+    
+    A SharePoint modern page is organized like this:
+    
+    Page
+    └── canvasLayout
+        └── horizontalSections[]        ← Array of horizontal bands
+            └── columns[]               ← Array of columns in that band
+                └── webparts[]          ← Array of web parts in that column
+                    └── innerHtml       ← The actual HTML content
+    
+    The "factor" property determines column width (12 = full width in a 12-column grid):
+    - factor: 12 = full width
+    - factor: 6  = half width (for 2-column layouts)
+    - factor: 4  = third width (for 3-column layouts)
     """
     
     def __init__(self):
+        """
+        Initialize the converter.
+        
+        The web_part_id_counter ensures each web part gets a unique ID,
+        which SharePoint requires to distinguish between content blocks.
+        """
         self.web_part_id_counter = 0
     
     def _generate_web_part_id(self) -> str:
-        """Generate unique web part instance ID."""
+        """
+        Generate unique web part instance ID.
+        
+        SharePoint requires each web part to have a unique identifier.
+        This generates IDs like: "wp-1-a3f8c2b1", "wp-2-b7d9e4f2"
+        
+        The format is: wp-{counter}-{hash}
+        - counter: Sequential number for this converter instance
+        - hash: First 8 chars of MD5 hash for uniqueness
+        
+        Returns:
+            A unique web part ID string
+        """
         self.web_part_id_counter += 1
+        # Create a hash from timestamp + counter for uniqueness
         unique_hash = hashlib.md5(f"{datetime.now()}-{self.web_part_id_counter}".encode()).hexdigest()[:8]
         return f"wp-{self.web_part_id_counter}-{unique_hash}"
     
@@ -80,63 +289,215 @@ class MarkdownToSharePointConverter:
         """
         Convert markdown to HTML suitable for SharePoint.
         
-        Handles:
-        - Headers (h1-h6)
-        - Bold/italic
-        - Code blocks
-        - Lists (ordered/unordered)
-        - Links
+        This is the core conversion function that transforms markdown syntax
+        into HTML tags. The order of operations matters - we process elements
+        from most complex (code blocks) to simplest (paragraphs).
+        
+        PROCESSING ORDER:
+        1. Code blocks (``` ```)  - Protect these first so content isn't changed
+        2. Inline code (` `)      - Single backticks for inline code
+        3. Headers (# to ######)  - Process from h6 to h1 to avoid conflicts
+        4. Bold (**text**)        - Double asterisks or underscores
+        5. Italic (*text*)        - Single asterisks or underscores
+        6. Links ([text](url))    - Hyperlinks
+        7. Lists (- or 1.)        - Bullet and numbered lists
+        8. Paragraphs             - Wrap remaining text in <p> tags
+        
+        Args:
+            markdown_text: Raw markdown string
+            
+        Returns:
+            HTML string suitable for SharePoint web part
+            
+        Example:
+            >>> converter = MarkdownToSharePointConverter()
+            >>> html = converter.markdown_to_html("## Hello\\n\\nThis is **bold**.")
+            >>> print(html)
+            <h2>Hello</h2>
+            <p>This is <strong>bold</strong>.</p>
         """
         html = markdown_text
         
-        # Escape HTML entities first (but not our generated tags)
-        # We'll handle this carefully to avoid double-escaping
+        # =====================================================================
+        # STEP 1: HANDLE CODE BLOCKS FIRST
+        # =====================================================================
+        # Code blocks are fenced with triple backticks: ```language\ncode\n```
+        # We extract these first to protect their content from other conversions.
+        # 
+        # REGEX EXPLAINED: r'```(\\w+)?\\n(.*?)```'
+        #   ```       - Literal triple backticks (start of code block)
+        #   (\\w+)?   - Optional capture group 1: language name (python, json, etc.)
+        #             - \\w+ = one or more word characters
+        #             - ?   = zero or one (makes language optional)
+        #   \\n       - Newline after the opening backticks
+        #   (.*?)     - Capture group 2: the actual code content
+        #             - .  = any character (with DOTALL flag, includes newlines)
+        #             - *? = zero or more, non-greedy (stops at first ```)
+        #   ```       - Literal triple backticks (end of code block)
+        #
+        # re.DOTALL flag makes . match newlines too (code can be multi-line)
+        # =====================================================================
         
-        # Code blocks (fenced) - process first to protect content
-        code_blocks = []
+        code_blocks = []  # Store code blocks to restore later
+        
         def save_code_block(match):
-            lang = match.group(1) or ''
-            code = match.group(2)
-            # Escape HTML in code
-            code = code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            """
+            Callback function for re.sub() to process each code block match.
+            
+            When regex finds a code block, this function:
+            1. Extracts the language (group 1) and code content (group 2)
+            2. Escapes HTML entities to prevent code from being interpreted as HTML
+            3. Stores the formatted HTML in code_blocks list
+            4. Returns a placeholder string that we'll replace later
+            
+            Why placeholders? Because we don't want other regex operations
+            (like bold or italic) to modify code content.
+            """
+            lang = match.group(1) or ''  # Language (e.g., "python") or empty string
+            code = match.group(2)         # The actual code content
+            
+            # IMPORTANT: Escape HTML entities in code
+            # This prevents code like "<div>" from being interpreted as an HTML tag
+            # Order matters: & must be escaped first, or we'd double-escape
+            code = code.replace('&', '&amp;')   # & becomes &amp;
+            code = code.replace('<', '&lt;')     # < becomes &lt;
+            code = code.replace('>', '&gt;')     # > becomes &gt;
+            
+            # Create placeholder and store the formatted code block
             placeholder = f"__CODE_BLOCK_{len(code_blocks)}__"
             code_blocks.append(f'<pre><code class="language-{lang}">{code}</code></pre>')
             return placeholder
         
         html = re.sub(r'```(\w+)?\n(.*?)```', save_code_block, html, flags=re.DOTALL)
         
-        # Inline code
+        # =====================================================================
+        # STEP 2: HANDLE INLINE CODE
+        # =====================================================================
+        # Inline code uses single backticks: `code`
+        #
+        # REGEX EXPLAINED: r'`([^`]+)`'
+        #   `         - Opening backtick
+        #   ([^`]+)   - Capture group 1: one or more non-backtick characters
+        #             - [^`] = any character EXCEPT backtick
+        #             - +    = one or more (at least one character required)
+        #   `         - Closing backtick
+        # =====================================================================
+        
         def escape_inline_code(match):
+            """Escape HTML entities within inline code and wrap in <code> tags."""
             code = match.group(1)
             code = code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             return f'<code>{code}</code>'
         
         html = re.sub(r'`([^`]+)`', escape_inline_code, html)
         
-        # Headers (process h6 to h1 to avoid conflicts)
-        for i in range(6, 0, -1):
-            pattern = r'^' + '#' * i + r' (.+)$'
+        # =====================================================================
+        # STEP 3: HANDLE HEADERS (h1 through h6)
+        # =====================================================================
+        # Markdown headers: # H1, ## H2, ### H3, etc.
+        #
+        # Why process from h6 to h1? Because ###### contains ####, ###, etc.
+        # If we process h1 first, "#### Title" would match the first # as h1!
+        #
+        # REGEX EXPLAINED: r'^#{6} (.+)$' (for h6)
+        #   ^         - Start of line (not just start of string, due to MULTILINE)
+        #   #{6}      - Exactly 6 hash characters
+        #   \\s       - A space (between # and title)
+        #   (.+)      - Capture group 1: one or more characters (the title text)
+        #   $         - End of line
+        #
+        # re.MULTILINE makes ^ and $ match at line boundaries, not just string ends
+        # =====================================================================
+        
+        for i in range(6, 0, -1):  # Process h6, h5, h4, h3, h2, h1
+            pattern = r'^' + '#' * i + r' (.+)$'  # e.g., r'^### (.+)$' for h3
+            # \\1 in replacement refers to capture group 1 (the title text)
             html = re.sub(pattern, f'<h{i}>\\1</h{i}>', html, flags=re.MULTILINE)
         
-        # Bold
+        # =====================================================================
+        # STEP 4: HANDLE BOLD TEXT
+        # =====================================================================
+        # Markdown bold: **text** or __text__
+        #
+        # REGEX EXPLAINED: r'\\*\\*([^*]+)\\*\\*'
+        #   \\*\\*    - Two literal asterisks (escaped because * is special in regex)
+        #   ([^*]+)   - Capture group 1: one or more non-asterisk characters
+        #   \\*\\*    - Two closing asterisks
+        #
+        # Similar pattern for __text__ using underscores
+        # =====================================================================
+        
         html = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', html)
         html = re.sub(r'__([^_]+)__', r'<strong>\1</strong>', html)
         
-        # Italic
+        # =====================================================================
+        # STEP 5: HANDLE ITALIC TEXT
+        # =====================================================================
+        # Markdown italic: *text* or _text_
+        # Must process AFTER bold, or **bold** would partially match *text*
+        #
+        # REGEX EXPLAINED: r'\\*([^*]+)\\*'
+        #   \\*       - Single asterisk (escaped)
+        #   ([^*]+)   - Capture group 1: text between asterisks
+        #   \\*       - Closing asterisk
+        # =====================================================================
+        
         html = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', html)
         html = re.sub(r'_([^_]+)_', r'<em>\1</em>', html)
         
-        # Links
+        # =====================================================================
+        # STEP 6: HANDLE LINKS
+        # =====================================================================
+        # Markdown links: [link text](url)
+        #
+        # REGEX EXPLAINED: r'\\[([^\\]]+)\\]\\(([^)]+)\\)'
+        #   \\[       - Opening square bracket (escaped)
+        #   ([^\\]]+) - Capture group 1: link text (one or more non-] characters)
+        #   \\]       - Closing square bracket
+        #   \\(       - Opening parenthesis (escaped because () is special in regex)
+        #   ([^)]+)   - Capture group 2: URL (one or more non-) characters)
+        #   \\)       - Closing parenthesis
+        #
+        # Replacement: <a href="\\2">\\1</a>
+        #   \\2 = group 2 (URL), \\1 = group 1 (link text)
+        # =====================================================================
+        
         html = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', html)
         
-        # Unordered lists - collect consecutive items
+        # =====================================================================
+        # STEP 7: HANDLE LISTS (Bullet and Numbered)
+        # =====================================================================
+        # Markdown lists:
+        #   - item (unordered/bullet list)
+        #   * item (also unordered)
+        #   + item (also unordered)
+        #   1. item (ordered/numbered list)
+        #
+        # Lists are tricky because we need to group consecutive items.
+        # We process line by line and track when we're inside a list.
+        # =====================================================================
+        
         lines = html.split('\n')
         processed_lines = []
-        in_list = False
-        list_items = []
+        in_list = False      # 'ul' or 'ol' when inside a list
+        list_items = []      # Accumulate <li> items
         
         for line in lines:
+            # UNORDERED LIST REGEX: r'^[-*+] (.+)$'
+            #   ^       - Start of line
+            #   [-*+]   - One of: dash, asterisk, or plus (bullet markers)
+            #   \\s     - A space
+            #   (.+)    - Capture group 1: the list item text
+            #   $       - End of line
             ul_match = re.match(r'^[-*+] (.+)$', line)
+            
+            # ORDERED LIST REGEX: r'^\\d+\\. (.+)$'
+            #   ^       - Start of line
+            #   \\d+    - One or more digits (1, 2, 10, 99, etc.)
+            #   \\.     - Literal period (escaped because . is special)
+            #   \\s     - A space
+            #   (.+)    - Capture group 1: the list item text
+            #   $       - End of line
             ol_match = re.match(r'^\d+\. (.+)$', line)
             
             if ul_match:
@@ -150,37 +511,82 @@ class MarkdownToSharePointConverter:
                     list_items = []
                 list_items.append(f'<li>{ol_match.group(1)}</li>')
             else:
+                # Non-list line: close any open list first
                 if in_list:
                     tag = in_list
                     processed_lines.append(f'<{tag}>{"".join(list_items)}</{tag}>')
                     in_list = False
                     list_items = []
                 
-                # Regular line - wrap in paragraph if not already tagged
+                # =========================================================
+                # STEP 8: WRAP PLAIN TEXT IN PARAGRAPH TAGS
+                # =========================================================
+                # Non-empty lines that aren't already HTML tags or placeholders
+                # get wrapped in <p> tags.
+                #
+                # We skip lines that:
+                # - Are empty or whitespace only
+                # - Already start with < (already HTML)
+                # - Start with __CODE_BLOCK_ (our placeholder)
+                # =========================================================
                 stripped = line.strip()
                 if stripped and not stripped.startswith('<') and not stripped.startswith('__CODE_BLOCK_'):
                     processed_lines.append(f'<p>{stripped}</p>')
                 elif stripped:
                     processed_lines.append(line)
         
-        # Handle list at end of content
+        # Handle list at end of content (if document ends with a list)
         if in_list:
             tag = in_list
             processed_lines.append(f'<{tag}>{"".join(list_items)}</{tag}>')
         
         html = '\n'.join(processed_lines)
         
-        # Restore code blocks
+        # =====================================================================
+        # STEP 9: RESTORE CODE BLOCKS
+        # =====================================================================
+        # Replace our placeholders with the actual formatted code blocks
+        # =====================================================================
         for i, block in enumerate(code_blocks):
             html = html.replace(f'__CODE_BLOCK_{i}__', block)
         
-        # Clean up empty paragraphs
+        # =====================================================================
+        # STEP 10: CLEAN UP EMPTY PARAGRAPHS
+        # =====================================================================
+        # Remove any <p></p> or <p>   </p> that might have been created
+        #
+        # REGEX EXPLAINED: r'<p>\\s*</p>'
+        #   <p>       - Opening paragraph tag
+        #   \\s*      - Zero or more whitespace characters
+        #   </p>      - Closing paragraph tag
+        # =====================================================================
         html = re.sub(r'<p>\s*</p>', '', html)
         
         return html
     
     def create_text_web_part(self, html_content: str) -> dict:
-        """Create a SharePoint Text web part structure."""
+        """
+        Create a SharePoint Text web part structure.
+        
+        WHAT IS A WEB PART?
+        -------------------
+        SharePoint pages are built from "web parts" - modular content blocks.
+        The Text web part displays rich text/HTML content.
+        
+        The structure returned looks like:
+        {
+            "id": "wp-1-a3f8c2b1",   ← Unique identifier
+            "innerHtml": "<h2>...</h2><p>...</p>"  ← The actual HTML content
+        }
+        
+        This JSON gets sent to SharePoint as part of the page canvas.
+        
+        Args:
+            html_content: HTML string to display in the web part
+            
+        Returns:
+            Dictionary representing a Text web part
+        """
         return {
             "id": self._generate_web_part_id(),
             "innerHtml": html_content
@@ -190,8 +596,39 @@ class MarkdownToSharePointConverter:
         """
         Create a SharePoint page section.
         
-        column_layout options: oneColumn, twoColumns, threeColumns, 
-                               oneThirdLeftColumn, oneThirdRightColumn
+        UNDERSTANDING PAGE SECTIONS
+        ----------------------------
+        SharePoint pages are divided into horizontal "sections" (bands across the page).
+        Each section can have one or more columns.
+        
+        SharePoint uses a 12-column grid system (like Bootstrap):
+        - factor: 12 = full width (100%)
+        - factor: 6  = half width (50%) 
+        - factor: 4  = third width (33%)
+        - factor: 3  = quarter width (25%)
+        
+        LAYOUT OPTIONS:
+        ---------------
+        - "oneColumn"          : Single full-width column (factor: 12)
+        - "twoColumns"         : Two equal columns (factor: 6 each)
+        - "threeColumns"       : Three equal columns (factor: 4 each)
+        - "oneThirdLeftColumn" : Narrow left, wide right
+        - "oneThirdRightColumn": Wide left, narrow right
+        
+        The returned structure looks like:
+        {
+            "columns": [
+                {"factor": 12, "webparts": [...]}
+            ],
+            "emphasis": "none"   ← Background style (none, neutral, soft, strong)
+        }
+        
+        Args:
+            web_parts: List of web part dictionaries to include
+            column_layout: How to arrange columns
+            
+        Returns:
+            Dictionary representing a page section
         """
         columns = []
         
@@ -221,17 +658,57 @@ class MarkdownToSharePointConverter:
         """
         Convert a complete document with multiple sections to SharePoint page structure.
         
+        THE FULL CONVERSION PIPELINE
+        =============================
+        
+        This method orchestrates the entire conversion process:
+        
+        INPUT (sections dictionary):
+        {
+            "Problem": "## Problem\\n\\nThe system has **issues**...",
+            "Solution": "## Solution\\n\\nWe propose to..."
+        }
+        
+        STEP 1: For each section, convert markdown to HTML:
+        {
+            "Problem": "<h2>Problem</h2><p>The system has <strong>issues</strong>...</p>",
+            "Solution": "<h2>Solution</h2><p>We propose to...</p>"
+        }
+        
+        STEP 2: Wrap each HTML in a Text web part:
+        [
+            {"id": "wp-1-abc", "innerHtml": "<h2>Problem</h2>..."},
+            {"id": "wp-2-def", "innerHtml": "<h2>Solution</h2>..."}
+        ]
+        
+        STEP 3: Wrap web parts in page sections:
+        [
+            {"columns": [{"factor": 12, "webparts": [wp1]}], "emphasis": "none"},
+            {"columns": [{"factor": 12, "webparts": [wp2]}], "emphasis": "none"}
+        ]
+        
+        STEP 4: Wrap sections in canvas layout:
+        {
+            "canvasLayout": {
+                "horizontalSections": [section1, section2]
+            }
+        }
+        
+        This final structure is what SharePoint's Graph API expects.
+        
         Args:
             sections: Dictionary of section_name -> markdown_content
-            title: Page title
+                      Example: {"Problem": "## Problem\\n...", "Solution": "..."}
+            title: Page title (not used in conversion, but may be useful for headers)
             
         Returns:
-            SharePoint page canvas content structure
+            SharePoint page canvas content structure ready for Graph API
         """
         page_sections = []
         
         for section_name, markdown_content in sections.items():
-            # Skip metadata sections (internal use)
+            # Skip metadata sections (internal use) - sections starting with _
+            # are reserved for internal metadata like "_generated_by"
             if section_name.startswith('_'):
                 continue
             
@@ -241,7 +718,7 @@ class MarkdownToSharePointConverter:
             # Create web part for this section
             web_part = self.create_text_web_part(html_content)
             
-            # Create page section
+            # Create page section (each document section becomes a page section)
             section = self.create_section([web_part])
             page_sections.append(section)
         
@@ -256,13 +733,61 @@ class SharePointPublisher:
     """
     Publishes documentation to SharePoint using MS Graph API.
     
+    WHAT IS MICROSOFT GRAPH API?
+    =============================
+    Microsoft Graph is a REST API that provides access to Microsoft 365 services:
+    - SharePoint (sites, pages, documents)
+    - Teams (channels, messages)
+    - Outlook (email, calendar)
+    - Azure AD (users, groups)
+    
+    Base URL: https://graph.microsoft.com/v1.0 (stable)
+              https://graph.microsoft.com/beta (preview features)
+    
+    AUTHENTICATION FLOW (OAuth 2.0 Client Credentials)
+    ===================================================
+    This class uses "Application" permissions (app-only, no user login):
+    
+    1. Register an app in Azure AD
+    2. Grant it Sites.ReadWrite.All and Sites.Manage.All permissions
+    3. Create a client secret
+    4. Use MSAL library to exchange client_id + client_secret for access token
+    5. Include access token in HTTP Authorization header
+    
+    Token request flow:
+    POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
+    Body: grant_type=client_credentials&client_id=...&client_secret=...&scope=https://graph.microsoft.com/.default
+    
+    Response: {"access_token": "eyJ0...", "expires_in": 3600, ...}
+    
+    PAGE CREATION WORKFLOW
+    =======================
+    1. Create draft page: POST /sites/{siteId}/pages
+    2. Set content: PATCH /sites/{siteId}/pages/{pageId}
+    3. Publish: POST /sites/{siteId}/pages/{pageId}/publish
+    4. (Optional) Promote as news: PATCH with {"promotionKind": "newsPost"}
+    
     Uses modern page API to create and publish .aspx pages.
     """
     
+    # Graph API endpoints - v1.0 for stable, beta for page-specific features
     GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
     GRAPH_BETA_URL = "https://graph.microsoft.com/beta"  # Some page APIs require beta
     
     def __init__(self, config: SharePointPageConfig):
+        """
+        Initialize the SharePoint publisher.
+        
+        Args:
+            config: SharePointPageConfig with credentials and settings
+            
+        The publisher maintains:
+        - config: Connection configuration
+        - converter: MarkdownToSharePointConverter instance for content conversion
+        - _access_token: Cached OAuth token (refreshed when expired)
+        - _token_expires_at: When the current token expires
+        - _msal_app: MSAL library app instance for token management
+        """
         self.config = config
         self.converter = MarkdownToSharePointConverter()
         self._access_token: Optional[str] = None
@@ -270,8 +795,26 @@ class SharePointPublisher:
         self._msal_app: Optional[msal.ConfidentialClientApplication] = None
     
     def _get_msal_app(self) -> msal.ConfidentialClientApplication:
-        """Get or create MSAL application instance."""
+        """
+        Get or create MSAL (Microsoft Authentication Library) application instance.
+        
+        WHAT IS MSAL?
+        -------------
+        MSAL is Microsoft's library for handling OAuth authentication.
+        It manages token acquisition, caching, and refresh automatically.
+        
+        We use ConfidentialClientApplication because:
+        - We're a server-side application (not a browser)
+        - We have a client secret (confidential)
+        - We use Client Credentials flow (no user login)
+        
+        The "authority" URL tells MSAL which Azure AD tenant to authenticate against.
+        
+        Returns:
+            MSAL ConfidentialClientApplication instance
+        """
         if self._msal_app is None:
+            # Authority format: https://login.microsoftonline.com/{tenant_id}
             authority = f"https://login.microsoftonline.com/{self.config.tenant_id}"
             self._msal_app = msal.ConfidentialClientApplication(
                 client_id=self.config.client_id,
@@ -281,7 +824,38 @@ class SharePointPublisher:
         return self._msal_app
     
     async def _ensure_valid_token(self) -> str:
-        """Ensure we have a valid access token, refreshing if needed."""
+        """
+        Ensure we have a valid access token, refreshing if needed.
+        
+        TOKEN LIFECYCLE
+        ----------------
+        - Tokens typically expire after 1 hour (3600 seconds)
+        - We refresh 5 minutes before expiry to avoid race conditions
+        - MSAL handles the actual token request to Azure AD
+        
+        CLIENT CREDENTIALS FLOW
+        ------------------------
+        POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
+        Content-Type: application/x-www-form-urlencoded
+        
+        Body:
+        grant_type=client_credentials
+        client_id={our_app_id}
+        client_secret={our_secret}
+        scope=https://graph.microsoft.com/.default
+        
+        The ".default" scope means "give me all the permissions this app has been granted"
+        
+        Returns:
+            Valid access token string
+            
+        Raises:
+            Exception: If token acquisition fails (invalid credentials, permissions, etc.)
+        """
+        # Check if we need a new token:
+        # - No token yet
+        # - No expiry time recorded
+        # - Token expires within 5 minutes
         if (self._access_token is None or 
             self._token_expires_at is None or
             datetime.now() >= self._token_expires_at - timedelta(minutes=5)):
@@ -309,7 +883,21 @@ class SharePointPublisher:
         return self._access_token
     
     def _get_headers(self, token: str) -> dict:
-        """Get HTTP headers for Graph API requests."""
+        """
+        Get HTTP headers for Graph API requests.
+        
+        REQUIRED HEADERS FOR MS GRAPH
+        ------------------------------
+        - Authorization: Bearer {token}  ← Proves we're authenticated
+        - Content-Type: application/json ← We're sending JSON body
+        - Accept: application/json       ← We want JSON responses
+        
+        Args:
+            token: OAuth access token from _ensure_valid_token()
+            
+        Returns:
+            Dictionary of HTTP headers
+        """
         return {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -325,7 +913,35 @@ class SharePointPublisher:
         json_body: Optional[dict] = None,
         max_retries: int = 3
     ) -> tuple:
-        """Make HTTP request with retry logic."""
+        """
+        Make HTTP request with retry logic for transient failures.
+        
+        RETRY STRATEGY
+        ---------------
+        - Attempts the request up to max_retries times
+        - Uses exponential backoff: 1s, 2s, 4s between retries
+        - Only retries on network errors (aiohttp.ClientError)
+        - Does NOT retry on HTTP errors (4xx, 5xx) - those are returned
+        
+        This handles transient issues like:
+        - Network timeouts
+        - DNS resolution failures
+        - Connection resets
+        
+        Args:
+            session: aiohttp session for making requests
+            method: HTTP method (GET, POST, PATCH)
+            url: Full URL to request
+            headers: HTTP headers including Authorization
+            json_body: Optional JSON body for POST/PATCH
+            max_retries: Maximum number of attempts
+            
+        Returns:
+            Tuple of (status_code, response_text)
+            
+        Raises:
+            aiohttp.ClientError: If all retries fail
+        """
         last_error = None
         
         for attempt in range(max_retries):
@@ -356,29 +972,81 @@ class SharePointPublisher:
         description: str = ""
     ) -> dict:
         """
-        Create a new SharePoint modern page.
+        Create a new SharePoint modern page (Step 1 of publishing workflow).
+        
+        MS GRAPH API CALL
+        ------------------
+        POST https://graph.microsoft.com/beta/sites/{siteId}/pages
+        
+        Request Body:
+        {
+            "name": "my-document-20251211143052.aspx",
+            "title": "My Document",
+            "pageLayout": "article"
+        }
+        
+        Response (201 Created):
+        {
+            "id": "abc123",
+            "name": "my-document-20251211143052.aspx",
+            "webUrl": "https://company.sharepoint.com/sites/site/SitePages/...",
+            "createdDateTime": "2025-12-11T14:30:52Z",
+            ...
+        }
+        
+        PAGE NAME GENERATION
+        ---------------------
+        SharePoint requires a URL-safe filename. We transform the title:
+        
+        "Architecture: Design Patterns!"
+           ↓ (remove special chars)
+        "Architecture Design Patterns"
+           ↓ (replace spaces with hyphens)
+        "architecture-design-patterns"
+           ↓ (add timestamp for uniqueness)
+        "architecture-design-patterns-20251211143052.aspx"
+        
+        REGEX EXPLAINED:
+        - r'[^\\w\\s-]' : Match anything that's NOT a word char, space, or hyphen
+        - r'[-\\s]+'    : Match one or more hyphens or spaces
         
         Args:
             session: aiohttp session
-            title: Page title
+            title: Page title (displayed to users)
             description: Optional page description
             
         Returns:
-            Created page metadata
+            Created page metadata dictionary with id, name, webUrl, etc.
+            
+        Raises:
+            Exception: If page creation fails (permissions, invalid site, etc.)
         """
         token = await self._ensure_valid_token()
         headers = self._get_headers(token)
         
-        # Generate safe page name from title
+        # =====================================================================
+        # GENERATE SAFE PAGE FILENAME
+        # =====================================================================
+        # SharePoint filenames can't contain: " * : < > ? / \ |
+        # We remove all special chars and convert spaces to hyphens
+        # =====================================================================
+        
+        # Step 1: Remove all characters except letters, digits, spaces, and hyphens
+        # Regex: [^\w\s-] matches anything NOT in the allowed set
         page_name = re.sub(r'[^\w\s-]', '', title).strip()
+        
+        # Step 2: Replace multiple hyphens or spaces with single hyphen
+        # "hello   world" or "hello---world" becomes "hello-world"
         page_name = re.sub(r'[-\s]+', '-', page_name).lower()
+        
+        # Step 3: Add timestamp to ensure uniqueness (avoid name collisions)
         page_name = f"{page_name}-{datetime.now().strftime('%Y%m%d%H%M%S')}.aspx"
         
         # Create page request body
         page_body = {
             "name": page_name,
             "title": title,
-            "pageLayout": self.config.page_template.lower()
+            "pageLayout": self.config.page_template.lower()  # article, home, etc.
         }
         
         if description:
@@ -406,24 +1074,73 @@ class SharePointPublisher:
         title: str
     ) -> bool:
         """
-        Set the content of a SharePoint page using canvas content.
+        Set the content of a SharePoint page using canvas content (Step 2).
+        
+        MS GRAPH API CALL
+        ------------------
+        PATCH https://graph.microsoft.com/beta/sites/{siteId}/pages/{pageId}
+        
+        Request Body:
+        {
+            "canvasLayout": {
+                "horizontalSections": [
+                    {
+                        "columns": [
+                            {
+                                "factor": 12,
+                                "webparts": [
+                                    {"id": "wp-1-abc", "innerHtml": "<h2>Problem</h2>..."}
+                                ]
+                            }
+                        ],
+                        "emphasis": "none"
+                    }
+                ]
+            }
+        }
+        
+        Response: 200 OK or 204 No Content
+        
+        CANVAS LAYOUT STRUCTURE
+        ------------------------
+        The canvas is SharePoint's page layout engine:
+        
+        Page Canvas
+        ├── horizontalSections[]  ← Rows (bands across the page)
+        │   ├── columns[]         ← Columns within each row
+        │   │   ├── factor        ← Width (1-12 in a 12-column grid)
+        │   │   └── webparts[]    ← Content blocks in this column
+        │   │       ├── id        ← Unique web part identifier
+        │   │       └── innerHtml ← The actual HTML content
+        │   └── emphasis          ← Background color/style
+        
+        This method uses the MarkdownToSharePointConverter to:
+        1. Convert each markdown section to HTML
+        2. Wrap HTML in web part structure
+        3. Organize web parts into sections
+        4. Build the complete canvas layout JSON
         
         Args:
             session: aiohttp session
-            page_id: The ID of the page to update
+            page_id: The ID of the page to update (from create_page response)
             sections: Dictionary of section_name -> markdown_content
-            title: Page title for conversion
+            title: Page title for conversion context
             
         Returns:
-            True if successful
+            True if content was set successfully
+            
+        Raises:
+            Exception: If update fails (invalid page_id, permissions, etc.)
         """
         token = await self._ensure_valid_token()
         headers = self._get_headers(token)
         
-        # Convert sections to SharePoint canvas format
+        # Convert sections to SharePoint canvas format using our converter
+        # This transforms: {"Problem": "## Problem\n..."} 
+        # Into: {"canvasLayout": {"horizontalSections": [...]}}
         canvas_content = self.converter.convert_document(sections, title)
         
-        # Update page content
+        # Update page content via PATCH request
         url = f"{self.GRAPH_BETA_URL}/sites/{self.config.site_id}/pages/{page_id}"
         
         update_body = {
@@ -446,11 +1163,36 @@ class SharePointPublisher:
         page_id: str
     ) -> str:
         """
-        Publish a SharePoint page, making it visible to users.
+        Publish a SharePoint page, making it visible to users (Step 3).
+        
+        DRAFT vs PUBLISHED PAGES
+        -------------------------
+        When you create a page via Graph API, it starts as a DRAFT.
+        Drafts are only visible to editors (people with edit permissions).
+        
+        Publishing makes the page visible to ALL users with read access.
+        
+        MS GRAPH API CALL
+        ------------------
+        POST https://graph.microsoft.com/beta/sites/{siteId}/pages/{pageId}/publish
+        
+        No request body needed!
+        
+        Response: 200 OK or 204 No Content
+        
+        After publishing, we make a GET request to retrieve the final webUrl:
+        GET https://graph.microsoft.com/beta/sites/{siteId}/pages/{pageId}
+        
+        Response includes:
+        {
+            "webUrl": "https://company.sharepoint.com/sites/site/SitePages/my-doc.aspx",
+            "publishingState": "published",
+            ...
+        }
         
         Args:
             session: aiohttp session
-            page_id: The ID of the page to publish
+            page_id: The ID of the page to publish (from create_page response)
             
         Returns:
             Published page URL
@@ -489,14 +1231,42 @@ class SharePointPublisher:
         page_id: str
     ) -> bool:
         """
-        Promote a page as a news article.
+        Promote a page as a news article (Optional Step 4).
+        
+        NEWS vs REGULAR PAGES
+        ----------------------
+        SharePoint has two ways to display pages:
+        
+        1. Regular Page: Appears in SitePages library, accessible via direct link
+        2. News Post: Also appears in "News" web part on the homepage
+        
+        News posts get more visibility - they show up in:
+        - Site homepage news feed
+        - SharePoint Start page
+        - Microsoft Teams (if site is linked)
+        - Mobile app news feed
+        
+        MS GRAPH API CALL
+        ------------------
+        PATCH https://graph.microsoft.com/beta/sites/{siteId}/pages/{pageId}
+        
+        Request Body:
+        {
+            "promotionKind": "newsPost"
+        }
+        
+        Other promotionKind options:
+        - "page" (default - regular page)
+        - "newsPost" (appears in news feed)
+        
+        Response: 200 OK or 204 No Content
         
         Args:
             session: aiohttp session
             page_id: The ID of the page to promote
             
         Returns:
-            True if successful
+            True if promotion successful, False if failed (non-fatal)
         """
         token = await self._ensure_valid_token()
         headers = self._get_headers(token)
@@ -515,6 +1285,7 @@ class SharePointPublisher:
             logger.info(f"Promoted page as news: {page_id}")
             return True
         else:
+            # This is non-fatal - page is still published, just not as news
             logger.warning(f"Failed to promote as news: {status} - {response_text}")
             return False
     
@@ -526,17 +1297,47 @@ class SharePointPublisher:
         """
         Ensure target folder exists in Site Pages library.
         
+        SHAREPOINT FILE STRUCTURE
+        --------------------------
+        SharePoint sites have a "SitePages" library where all modern pages live.
+        We can create subfolders to organize pages:
+        
+        SitePages/
+        ├── Home.aspx
+        ├── About.aspx
+        └── Generated Documentation/     ← Our target folder
+            ├── architecture-doc-1.aspx
+            └── architecture-doc-2.aspx
+        
+        MS GRAPH API CALLS
+        -------------------
+        1. Check if folder exists:
+           GET /sites/{siteId}/drive/root:/SitePages/{folderPath}
+           
+           200 OK = folder exists
+           404 Not Found = need to create it
+        
+        2. Create folder if needed:
+           POST /sites/{siteId}/drive/root:/SitePages:/children
+           
+           Request Body:
+           {
+               "name": "Generated Documentation",
+               "folder": {},
+               "@microsoft.graph.conflictBehavior": "replace"
+           }
+        
         Args:
             session: aiohttp session
-            folder_path: Target folder path
+            folder_path: Target folder name (e.g., "Generated Documentation")
             
         Returns:
-            True if folder exists or was created
+            True if folder exists or was created successfully
         """
         token = await self._ensure_valid_token()
         headers = self._get_headers(token)
         
-        # Check if folder exists
+        # Check if folder exists using drive API
         folder_url = f"{self.GRAPH_BASE_URL}/sites/{self.config.site_id}/drive/root:/SitePages/{folder_path}"
         
         status, _ = await self._request_with_retry(
@@ -544,15 +1345,15 @@ class SharePointPublisher:
         )
         
         if status == 200:
-            return True
+            return True  # Folder already exists
         
         if status == 404:
             # Create the folder
             create_folder_url = f"{self.GRAPH_BASE_URL}/sites/{self.config.site_id}/drive/root:/SitePages:/children"
             folder_body = {
                 "name": folder_path,
-                "folder": {},
-                "@microsoft.graph.conflictBehavior": "replace"
+                "folder": {},  # Empty object indicates this is a folder, not a file
+                "@microsoft.graph.conflictBehavior": "replace"  # Overwrite if exists
             }
             
             status, response_text = await self._request_with_retry(
@@ -579,33 +1380,111 @@ class SharePointPublisher:
         """
         Complete workflow to publish a document to SharePoint.
         
-        This is the main entry point for the Orchestrator to call.
+        This is the MAIN ENTRY POINT for the Orchestrator to call.
+        It orchestrates the entire publishing process.
+        
+        COMPLETE PUBLISHING WORKFLOW
+        =============================
+        
+        ┌─────────────────────────────────────────────────────────────────┐
+        │                       ORCHESTRATOR                              │
+        │    {"Problem": "## Problem\n...", "Solution": "..."}           │
+        └─────────────────────────────────────────┬───────────────────────┘
+                                                  │
+                                                  ▼
+        ┌─────────────────────────────────────────────────────────────────┐
+        │  Step 0: Validate Configuration                                 │
+        │  - Check SHAREPOINT_SITE_ID, AZURE_TENANT_ID, etc.             │
+        └─────────────────────────────────────────┬───────────────────────┘
+                                                  │
+                                                  ▼
+        ┌─────────────────────────────────────────────────────────────────┐
+        │  Step 1: Ensure Folder Exists                                   │
+        │  GET /sites/{siteId}/drive/root:/SitePages/{folder}            │
+        │  POST (if 404)                                                  │
+        └─────────────────────────────────────────┬───────────────────────┘
+                                                  │
+                                                  ▼
+        ┌─────────────────────────────────────────────────────────────────┐
+        │  Step 2: Create Draft Page                                      │
+        │  POST /sites/{siteId}/pages                                     │
+        │  → Returns page_id                                              │
+        └─────────────────────────────────────────┬───────────────────────┘
+                                                  │
+                                                  ▼
+        ┌─────────────────────────────────────────────────────────────────┐
+        │  Step 3: Set Page Content                                       │
+        │  - Convert markdown → HTML                                      │
+        │  - Create web parts                                             │
+        │  - PATCH /sites/{siteId}/pages/{pageId}                        │
+        └─────────────────────────────────────────┬───────────────────────┘
+                                                  │
+                                                  ▼
+        ┌─────────────────────────────────────────────────────────────────┐
+        │  Step 4: Publish Page                                           │
+        │  POST /sites/{siteId}/pages/{pageId}/publish                   │
+        │  → Page now visible to all users                                │
+        └─────────────────────────────────────────┬───────────────────────┘
+                                                  │
+                                                  ▼ (optional)
+        ┌─────────────────────────────────────────────────────────────────┐
+        │  Step 5: Promote as News (if configured)                        │
+        │  PATCH /sites/{siteId}/pages/{pageId}                          │
+        │  {"promotionKind": "newsPost"}                                  │
+        └─────────────────────────────────────────┬───────────────────────┘
+                                                  │
+                                                  ▼
+        ┌─────────────────────────────────────────────────────────────────┐
+        │  Return PublishResult                                           │
+        │  {success: true, page_url: "...", page_id: "...", ...}         │
+        └─────────────────────────────────────────────────────────────────┘
+        
+        ERROR HANDLING
+        ---------------
+        - Configuration errors: Return PublishResult with error, don't throw
+        - API errors: Caught and returned as PublishResult with error
+        - Network errors: Retried 3x with exponential backoff, then return error
         
         Args:
-            title: Page title
+            title: Page title (displayed in SharePoint)
             sections: Dictionary of section_name -> markdown_content
-            description: Optional page description
-            diagram_description: Description of the analyzed diagram
-            donor_pattern: ID of the donor pattern used
+                      Example: {"Problem": "## Problem\n...", "Solution": "..."}
+            description: Optional page description (shown in search results)
+            diagram_description: Description of the analyzed diagram (added as metadata)
+            donor_pattern: ID of the donor pattern used (added as metadata)
             
         Returns:
-            PublishResult with success status and page URL
+            PublishResult with:
+            - success: True if page was published successfully
+            - page_id: SharePoint page ID (for future updates)
+            - page_url: Full URL to the published page
+            - error: Error message if success=False
+            - publish_time_ms: Total time for the operation
         """
         start_time = datetime.now()
         
-        # Validate configuration
+        # =====================================================================
+        # STEP 0: VALIDATE CONFIGURATION
+        # =====================================================================
         if not self.config.is_valid():
             return PublishResult(
                 success=False,
                 error="SharePoint configuration is incomplete. Check SHAREPOINT_SITE_ID, AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET."
             )
         
-        # Add metadata section to the document
+        # =====================================================================
+        # ADD METADATA SECTION
+        # =====================================================================
+        # We add a "Document Metadata" section at the end with:
+        # - Source diagram analysis (truncated to 500 chars)
+        # - Reference pattern ID
+        # - Generation timestamp
+        # =====================================================================
         sections_with_metadata = dict(sections)
         if diagram_description or donor_pattern:
             metadata_md = "\n\n---\n\n## Document Metadata\n\n"
             if diagram_description:
-                # Truncate long descriptions
+                # Truncate long descriptions to keep page clean
                 desc_preview = diagram_description[:500]
                 if len(diagram_description) > 500:
                     desc_preview += "..."
@@ -616,6 +1495,9 @@ class SharePointPublisher:
             
             sections_with_metadata["Document Metadata"] = metadata_md
         
+        # =====================================================================
+        # EXECUTE PUBLISHING WORKFLOW
+        # =====================================================================
         try:
             async with aiohttp.ClientSession() as session:
                 # Step 1: Ensure target folder exists (optional)

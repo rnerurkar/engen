@@ -697,6 +697,263 @@ When `publish=true` is set in the request, Orchestrator publishes the generated 
 
 ---
 
+### 4.5 SharePoint Publishing - Detailed Sequence
+
+This section provides an in-depth look at how the Orchestrator converts markdown documentation to a SharePoint modern page using MS Graph API.
+
+#### 4.5.1 Overview
+
+When `publish=true` is set in the Orchestrator request, the generated markdown document goes through a conversion pipeline:
+
+```
+Markdown → HTML → SharePoint Web Parts → Page Canvas → Published Page
+```
+
+#### 4.5.2 Detailed Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orch as Orchestrator
+    participant Conv as MarkdownToSharePoint<br/>Converter
+    participant Pub as SharePointPublisher
+    participant MSAL as MSAL Library
+    participant AAD as Azure Active<br/>Directory
+    participant Graph as MS Graph API
+    participant SP as SharePoint Site
+
+    Note over Orch,SP: PHASE 1: Configuration & Authentication
+
+    Orch->>Pub: publish_document(title, sections)
+    activate Pub
+    
+    Pub->>Pub: Validate config<br/>(site_id, tenant_id, client_id, client_secret)
+    
+    alt Configuration Invalid
+        Pub-->>Orch: PublishResult(success=false, error="Config incomplete")
+    end
+    
+    Pub->>MSAL: acquire_token_for_client()
+    activate MSAL
+    
+    MSAL->>AAD: POST /oauth2/v2.0/token<br/>grant_type=client_credentials<br/>scope=graph.microsoft.com/.default
+    activate AAD
+    
+    AAD->>AAD: Validate client_id + client_secret
+    AAD-->>MSAL: {"access_token": "eyJ...", "expires_in": 3600}
+    deactivate AAD
+    
+    MSAL-->>Pub: access_token
+    deactivate MSAL
+    
+    Pub->>Pub: Cache token with expiry time
+
+    Note over Orch,SP: PHASE 2: Folder Preparation (Optional)
+
+    opt Target folder configured
+        Pub->>Graph: GET /sites/{siteId}/drive/root:/SitePages/{folder}
+        activate Graph
+        
+        alt Folder exists
+            Graph-->>Pub: 200 OK
+        else Folder not found
+            Graph-->>Pub: 404 Not Found
+            deactivate Graph
+            
+            Pub->>Graph: POST /sites/{siteId}/drive/root:/SitePages:/children<br/>{"name": "{folder}", "folder": {}}
+            activate Graph
+            Graph->>SP: Create folder in SitePages
+            SP-->>Graph: Folder created
+            Graph-->>Pub: 201 Created
+            deactivate Graph
+        end
+    end
+
+    Note over Orch,SP: PHASE 3: Page Creation
+
+    Pub->>Pub: Generate safe filename<br/>"My Doc: Test!" → "my-doc-test-20251211143052.aspx"
+    
+    Pub->>Graph: POST /sites/{siteId}/pages<br/>{"name": "{filename}", "title": "{title}", "pageLayout": "article"}
+    activate Graph
+    
+    Graph->>SP: Create draft page
+    SP-->>Graph: Page created (draft)
+    Graph-->>Pub: {"id": "abc123", "name": "...", "webUrl": "..."}
+    deactivate Graph
+    
+    Note right of Pub: Store page_id for next steps
+
+    Note over Orch,SP: PHASE 4: Markdown to SharePoint Conversion
+
+    Pub->>Conv: convert_document(sections, title)
+    activate Conv
+    
+    loop For each section in document
+        Note over Conv: Section: "Problem" → "## Problem\n\nThe system..."
+        
+        Conv->>Conv: markdown_to_html(markdown_text)
+        Note right of Conv: Step 1: Extract code blocks<br/>Store in placeholders
+        Note right of Conv: Step 2: Convert inline code<br/>`code` → &lt;code&gt;code&lt;/code&gt;
+        Note right of Conv: Step 3: Convert headers<br/>## Title → &lt;h2&gt;Title&lt;/h2&gt;
+        Note right of Conv: Step 4: Convert bold/italic<br/>**bold** → &lt;strong&gt;bold&lt;/strong&gt;
+        Note right of Conv: Step 5: Convert links<br/>[text](url) → &lt;a href="url"&gt;text&lt;/a&gt;
+        Note right of Conv: Step 6: Convert lists<br/>- item → &lt;ul&gt;&lt;li&gt;item&lt;/li&gt;&lt;/ul&gt;
+        Note right of Conv: Step 7: Wrap text in &lt;p&gt; tags
+        Note right of Conv: Step 8: Restore code blocks
+        
+        Conv->>Conv: create_text_web_part(html)<br/>{"id": "wp-1-abc", "innerHtml": "..."}
+        
+        Conv->>Conv: create_section([webpart])<br/>{"columns": [{"factor": 12, "webparts": [...]}]}
+    end
+    
+    Conv-->>Pub: {"canvasLayout": {"horizontalSections": [...]}}
+    deactivate Conv
+
+    Note over Orch,SP: PHASE 5: Set Page Content
+
+    Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId}<br/>{"canvasLayout": {...}}
+    activate Graph
+    
+    Graph->>SP: Update page canvas
+    SP-->>Graph: Content updated
+    Graph-->>Pub: 200 OK
+    deactivate Graph
+
+    Note over Orch,SP: PHASE 6: Publish Page
+
+    Pub->>Graph: POST /sites/{siteId}/pages/{pageId}/publish
+    activate Graph
+    
+    Graph->>SP: Change page state: Draft → Published
+    SP-->>Graph: Published
+    Graph-->>Pub: 200 OK
+    deactivate Graph
+    
+    Note right of Pub: Page now visible to all users with read access
+
+    Pub->>Graph: GET /sites/{siteId}/pages/{pageId}
+    activate Graph
+    Graph-->>Pub: {"webUrl": "https://company.sharepoint.com/..."}
+    deactivate Graph
+
+    Note over Orch,SP: PHASE 7: News Promotion (Optional)
+
+    opt promote_as_news = true
+        Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId}<br/>{"promotionKind": "newsPost"}
+        activate Graph
+        
+        Graph->>SP: Promote to news feed
+        SP-->>Graph: Promoted
+        Graph-->>Pub: 200 OK
+        deactivate Graph
+        
+        Note right of Pub: Page now appears in<br/>SharePoint News feed
+    end
+
+    Note over Orch,SP: PHASE 8: Return Result
+
+    Pub->>Pub: Calculate publish_time_ms
+    
+    Pub-->>Orch: PublishResult(<br/>  success=true,<br/>  page_id="abc123",<br/>  page_url="https://...",<br/>  publish_time_ms=2340<br/>)
+    deactivate Pub
+```
+
+#### 4.5.3 Regex Patterns Used in Markdown Conversion
+
+The `MarkdownToSharePointConverter` uses regular expressions to transform markdown syntax. Here's a detailed explanation of each pattern:
+
+| Pattern | Purpose | Input Example | Output |
+|---------|---------|---------------|--------|
+| `` ```(\w+)?\n(.*?)``` `` | Fenced code blocks | `` ```python\nprint("hi")\n``` `` | `<pre><code class="language-python">print("hi")</code></pre>` |
+| `` `([^`]+)` `` | Inline code | `` `variable` `` | `<code>variable</code>` |
+| `^#{6} (.+)$` | H6 heading | `###### Note` | `<h6>Note</h6>` |
+| `^# (.+)$` | H1 heading | `# Title` | `<h1>Title</h1>` |
+| `\*\*([^*]+)\*\*` | Bold (asterisks) | `**important**` | `<strong>important</strong>` |
+| `__([^_]+)__` | Bold (underscores) | `__important__` | `<strong>important</strong>` |
+| `\*([^*]+)\*` | Italic (asterisks) | `*emphasis*` | `<em>emphasis</em>` |
+| `_([^_]+)_` | Italic (underscores) | `_emphasis_` | `<em>emphasis</em>` |
+| `\[([^\]]+)\]\(([^)]+)\)` | Links | `[text](url)` | `<a href="url">text</a>` |
+| `^[-*+] (.+)$` | Unordered list item | `- item` | `<li>item</li>` (wrapped in `<ul>`) |
+| `^\d+\. (.+)$` | Ordered list item | `1. item` | `<li>item</li>` (wrapped in `<ol>`) |
+| `<p>\s*</p>` | Empty paragraphs (cleanup) | `<p>   </p>` | *(removed)* |
+
+#### 4.5.4 SharePoint Page Canvas Structure
+
+SharePoint modern pages use a specific JSON structure. Here's how the converted document maps to it:
+
+```json
+{
+  "canvasLayout": {
+    "horizontalSections": [
+      {
+        "columns": [
+          {
+            "factor": 12,        // Full width (12-column grid)
+            "webparts": [
+              {
+                "id": "wp-1-abc123",
+                "innerHtml": "<h2>Problem</h2><p>The system has...</p>"
+              }
+            ]
+          }
+        ],
+        "emphasis": "none"      // Background style
+      },
+      {
+        "columns": [
+          {
+            "factor": 12,
+            "webparts": [
+              {
+                "id": "wp-2-def456",
+                "innerHtml": "<h2>Solution</h2><p>We propose...</p>"
+              }
+            ]
+          }
+        ],
+        "emphasis": "none"
+      }
+    ]
+  }
+}
+```
+
+#### 4.5.5 MS Graph API Endpoints Used
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/oauth2/v2.0/token` | POST | Get OAuth access token from Azure AD |
+| `/sites/{siteId}/drive/root:/SitePages/{folder}` | GET | Check if target folder exists |
+| `/sites/{siteId}/drive/root:/SitePages:/children` | POST | Create folder if it doesn't exist |
+| `/sites/{siteId}/pages` | POST | Create new draft page |
+| `/sites/{siteId}/pages/{pageId}` | PATCH | Set page content (canvas layout) |
+| `/sites/{siteId}/pages/{pageId}/publish` | POST | Publish page (make visible) |
+| `/sites/{siteId}/pages/{pageId}` | GET | Retrieve page details (webUrl) |
+| `/sites/{siteId}/pages/{pageId}` | PATCH | Promote to news (`promotionKind: newsPost`) |
+
+#### 4.5.6 Required Azure AD App Permissions
+
+To use SharePoint publishing, register an Azure AD application with these permissions:
+
+| Permission | Type | Purpose |
+|------------|------|---------|
+| `Sites.ReadWrite.All` | Application | Create and modify pages |
+| `Sites.Manage.All` | Application | Publish pages and manage site settings |
+
+**Environment Variables Required:**
+```env
+SHAREPOINT_SITE_ID=<your-site-id>          # Found at /_api/site/id
+AZURE_TENANT_ID=<tenant-guid>              # Azure AD tenant ID
+AZURE_CLIENT_ID=<app-client-id>            # Azure AD app registration
+AZURE_CLIENT_SECRET=<client-secret>        # App secret (keep secure!)
+SHAREPOINT_TARGET_FOLDER=Generated Documentation
+SHAREPOINT_PAGE_TEMPLATE=Article
+SHAREPOINT_PROMOTE_AS_NEWS=false
+PUBLISH_TO_SHAREPOINT=true
+```
+
+---
+
 ## 5. Conclusion
 
 EnGen represents a production-ready implementation of a knowledge-augmented documentation system that combines:
