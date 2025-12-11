@@ -19,3 +19,5 @@ google-cloud-storage>=2.14.0          # Image Blobs
 
 # --- Utilities ---
 python-dotenv>=1.0.1  # For local development
+markdown
+bleach
