@@ -715,10 +715,10 @@ Markdown → HTML → SharePoint Web Parts → Page Canvas → Published Page
 sequenceDiagram
     autonumber
     participant Orch as Orchestrator
-    participant Conv as MarkdownToSharePoint<br/>Converter
+    participant Conv as MarkdownToSharePoint Converter
     participant Pub as SharePointPublisher
     participant MSAL as MSAL Library
-    participant AAD as Azure Active<br/>Directory
+    participant AAD as Azure Active Directory
     participant Graph as MS Graph API
     participant SP as SharePoint Site
 
@@ -727,7 +727,7 @@ sequenceDiagram
     Orch->>Pub: publish_document(title, sections)
     activate Pub
     
-    Pub->>Pub: Validate config<br/>(site_id, tenant_id, client_id, client_secret)
+    Pub->>Pub: Validate config (site_id, tenant_id, client_id, client_secret)
     
     alt Configuration Invalid
         Pub-->>Orch: PublishResult(success=false, error="Config incomplete")
@@ -736,7 +736,7 @@ sequenceDiagram
     Pub->>MSAL: acquire_token_for_client()
     activate MSAL
     
-    MSAL->>AAD: POST /oauth2/v2.0/token<br/>grant_type=client_credentials<br/>scope=graph.microsoft.com/.default
+    MSAL->>AAD: POST /oauth2/v2.0/token grant_type=client_credentials scope=graph.microsoft.com/.default
     activate AAD
     
     AAD->>AAD: Validate client_id + client_secret
@@ -760,7 +760,7 @@ sequenceDiagram
             Graph-->>Pub: 404 Not Found
             deactivate Graph
             
-            Pub->>Graph: POST /sites/{siteId}/drive/root:/SitePages:/children<br/>{"name": "{folder}", "folder": {}}
+            Pub->>Graph: POST /sites/{siteId}/drive/root:/SitePages:/children {"name": "{folder}", "folder": {}}
             activate Graph
             Graph->>SP: Create folder in SitePages
             SP-->>Graph: Folder created
@@ -771,10 +771,10 @@ sequenceDiagram
 
     Note over Orch,SP: PHASE 3: Page Creation
 
-    Pub->>Pub: Generate safe filename<br/>"My Doc: Test!" → "my-doc-test-20251211143052.aspx"
+    Pub->>Pub: Generate safe filename "My Doc: Test!" → "my-doc-test-20251211143052.aspx"
     
     Note right of Graph: Some page APIs require /beta
-    Pub->>Graph: POST /sites/{siteId}/pages<br/>{"name": "{filename}", "title": "{title}", "pageLayout": "article"}
+    Pub->>Graph: POST /sites/{siteId}/pages {"name": "{filename}", "title": "{title}", "pageLayout": "article"}
     activate Graph
     
     Graph->>SP: Create draft page
@@ -792,19 +792,13 @@ sequenceDiagram
     loop For each section in document
         Note over Conv: Section: "Problem" → "## Problem\n\nThe system..."
         
-        Conv->>Conv: markdown_to_html(markdown_text)
-        Note right of Conv: Step 1: Extract code blocks<br/>Store in placeholders
-        Note right of Conv: Step 2: Convert inline code<br/>`code` → &lt;code&gt;code&lt;/code&gt;
-        Note right of Conv: Step 3: Convert headers<br/>## Title → &lt;h2&gt;Title&lt;/h2&gt;
-        Note right of Conv: Step 4: Convert bold/italic<br/>**bold** → &lt;strong&gt;bold&lt;/strong&gt;
-        Note right of Conv: Step 5: Convert links<br/>[text](url) → &lt;a href="url"&gt;text&lt;/a&gt;
-        Note right of Conv: Step 6: Convert lists<br/>- item → &lt;ul&gt;&lt;li&gt;item&lt;/li&gt;&lt;/ul&gt;
-        Note right of Conv: Step 7: Wrap text in &lt;p&gt; tags
-        Note right of Conv: Step 8: Restore code blocks
+      Conv->>Conv: markdown_to_html(markdown_text)
+      Note right of Conv: Convert via Python-Markdown<br/>extensions: fenced_code, tables, sane_lists, codehilite, toc
+      Note right of Conv: Sanitize with Bleach allowlist<br/>(tags/attrs/protocols) to ensure safe HTML
         
-        Conv->>Conv: create_text_web_part(html)<br/>{"id": "wp-1-abc", "instanceId": "wp-1-abc", "dataVersion": "1.0", "properties": {"inlineHtml": "..."}}
+        Conv->>Conv: create_text_web_part(html) {"id": "wp-1-abc", "instanceId": "wp-1-abc", "dataVersion": "1.0", "properties": {"inlineHtml": "..."}}
         
-        Conv->>Conv: create_section([webpart])<br/>{"columns": [{"factor": 12, "webparts": [...]}]}
+        Conv->>Conv: create_section([webpart]) {"columns": [{"factor": 12, "webparts": [...]}}]}
     end
     
     Conv-->>Pub: {"canvasLayout": {"horizontalSections": [...]}}
@@ -812,7 +806,7 @@ sequenceDiagram
 
     Note over Orch,SP: PHASE 5: Set Page Content
 
-    Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId}<br/>{"canvasLayout": {"horizontalSections": [...]}}
+    Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId} {"canvasLayout": {"horizontalSections": [...]}}
     activate Graph
     
     Graph->>SP: Update page canvas
@@ -841,7 +835,7 @@ sequenceDiagram
     Note over Orch,SP: PHASE 7: News Promotion (Optional)
 
     opt promote_as_news = true
-        Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId}<br/>{"promotionKind": "newsPost"}
+        Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId} {"promotionKind": "newsPost"}
         activate Graph
         
         Graph->>SP: Promote to news feed
@@ -849,7 +843,7 @@ sequenceDiagram
         Graph-->>Pub: 200 OK
         deactivate Graph
         
-        Note right of Pub: Page now appears in<br/>SharePoint News feed
+        Note right of Pub: Page now appears in SharePoint News feed
     end
 
     Note over Orch,SP: PHASE 8: Return Result
@@ -861,24 +855,39 @@ sequenceDiagram
     deactivate Pub
 ```
 
-#### 4.5.3 Regex Patterns Used in Markdown Conversion
+#### 4.5.3 Markdown Conversion Libraries
 
-The `MarkdownToSharePointConverter` uses regular expressions to transform markdown syntax. Here's a detailed explanation of each pattern:
+The converter uses proven libraries instead of custom regex:
 
-| Pattern | Purpose | Input Example | Output |
-|---------|---------|---------------|--------|
-| `` ```(\w+)?\n(.*?)``` `` | Fenced code blocks | `` ```python\nprint("hi")\n``` `` | `<pre><code class="language-python">print("hi")</code></pre>` |
-| `` `([^`]+)` `` | Inline code | `` `variable` `` | `<code>variable</code>` |
-| `^#{6} (.+)$` | H6 heading | `###### Note` | `<h6>Note</h6>` |
-| `^# (.+)$` | H1 heading | `# Title` | `<h1>Title</h1>` |
-| `\*\*([^*]+)\*\*` | Bold (asterisks) | `**important**` | `<strong>important</strong>` |
-| `__([^_]+)__` | Bold (underscores) | `__important__` | `<strong>important</strong>` |
-| `\*([^*]+)\*` | Italic (asterisks) | `*emphasis*` | `<em>emphasis</em>` |
-| `_([^_]+)_` | Italic (underscores) | `_emphasis_` | `<em>emphasis</em>` |
-| `\[([^\]]+)\]\(([^)]+)\)` | Links | `[text](url)` | `<a href="url">text</a>` |
-| `^[-*+] (.+)$` | Unordered list item | `- item` | `<li>item</li>` (wrapped in `<ul>`) |
-| `^\d+\. (.+)$` | Ordered list item | `1. item` | `<li>item</li>` (wrapped in `<ol>`) |
-| `<p>\s*</p>` | Empty paragraphs (cleanup) | `<p>   </p>` | *(removed)* |
+- Python-Markdown: Standards-compliant Markdown to HTML conversion
+  - Extensions: `fenced_code`, `tables`, `sane_lists`, `codehilite`, `toc`
+- Bleach: HTML sanitization with an allowlist of tags, attributes, and protocols
+
+Example configuration used by `MarkdownToSharePointConverter`:
+
+```python
+import markdown as md
+import bleach
+
+html = md.markdown(
+    markdown_text,
+    extensions=["fenced_code", "tables", "sane_lists", "codehilite", "toc"],
+)
+
+allowed_tags = [
+    "p", "pre", "code", "h1", "h2", "h3", "h4", "h5", "h6",
+    "strong", "em", "ul", "ol", "li", "a", "blockquote", "hr",
+    "table", "thead", "tbody", "tr", "th", "td"
+]
+allowed_attrs = {"a": ["href", "title", "target"], "code": ["class"]}
+
+safe_html = bleach.clean(html, tags=allowed_tags, attributes=allowed_attrs,
+                        protocols=["http", "https", "mailto"], strip=True)
+```
+
+Notes:
+- Code blocks render with `codehilite` classes for optional styling
+- If libraries are unavailable, converter degrades to a minimal, safe fallback
 
 #### 4.5.4 SharePoint Page Canvas Structure
 
@@ -895,7 +904,11 @@ SharePoint modern pages use a specific JSON structure. Here's how the converted 
             "webparts": [
               {
                 "id": "wp-1-abc123",
-                "innerHtml": "<h2>Problem</h2><p>The system has...</p>"
+                "instanceId": "wp-1-abc123",
+                "dataVersion": "1.0",
+                "properties": {
+                  "inlineHtml": "<h2>Problem</h2><p>The system has...</p>"
+                }
               }
             ]
           }
@@ -909,7 +922,11 @@ SharePoint modern pages use a specific JSON structure. Here's how the converted 
             "webparts": [
               {
                 "id": "wp-2-def456",
-                "innerHtml": "<h2>Solution</h2><p>We propose...</p>"
+                "instanceId": "wp-2-def456",
+                "dataVersion": "1.0",
+                "properties": {
+                  "inlineHtml": "<h2>Solution</h2><p>We propose...</p>"
+                }
               }
             ]
           }
