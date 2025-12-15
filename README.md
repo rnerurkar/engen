@@ -117,6 +117,7 @@ python agents/orchestrator/main.py
 
 Additional documentation:
 - [Design Critique v3.1](ingestion-service/DESIGN_CRITIQUE.md) - Issue tracking and status
+- [Critical Issues Log](ingestion-service/CRITICAL_ISSUES.md) - Known issues and resolutions
 - [ADK Implementation Summary](serving-service/IMPLEMENTATION_SUMMARY.md) - Agent framework overview
 - [ADK Quick Reference](serving-service/QUICK_REFERENCE.md) - Usage examples and patterns
 - [ADK & A2A Review](serving-service/REVIEW_ADK_A2A.md) - Detailed technical review
