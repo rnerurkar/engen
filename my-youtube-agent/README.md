@@ -69,3 +69,7 @@ python loop_agent_runner.py -t "How to speed up Python" -o out\\script.md
 ## Notes
 - This folder was imported from a larger example repository to keep your working set lightweight
 - If you later want to publish this as its own repository, it’s already self-contained
+
+## Demo Video
+Walkthrough and code overview:
+https://www.youtube.com/watch?si=y489WCWNJK8stvBZ&v=44C8u0CDtSo&feature=youtu.be
