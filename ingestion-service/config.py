@@ -64,4 +64,8 @@ class Config:
             logger.error(error_msg)
             raise ConfigurationError(error_msg)
         
+        # Basic format checks for critical IDs
+        if not self.SP_PAGES_LIBRARY or len(self.SP_PAGES_LIBRARY.strip()) == 0:
+            raise ConfigurationError("SP_PAGES_LIBRARY must be a non-empty string")
+
         logger.info(f"Configuration validated: {len(self.REQUIRED_VARS)} required variables loaded")

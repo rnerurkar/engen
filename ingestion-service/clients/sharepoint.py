@@ -135,7 +135,8 @@ class SharePointClient:
         # In prod, query the Site Pages library by FileLeafRef.
         filename = page_url.split('/')[-1]
         
-        query_url = f"https://graph.microsoft.com/v1.0/sites/{self.cfg.SP_SITE_ID}/lists/SitePages/items?filter=fields/FileLeafRef eq '{filename}'&expand=fields"
+        library = getattr(self.cfg, 'SP_PAGES_LIBRARY', 'SitePages')
+        query_url = f"https://graph.microsoft.com/v1.0/sites/{self.cfg.SP_SITE_ID}/lists/{library}/items?filter=fields/FileLeafRef eq '{filename}'&expand=fields"
         resp = self._get_with_retry(query_url)
         data = resp.json()
         
