@@ -1,8 +1,8 @@
 # EnGen Project - Comprehensive Design Critique
 
-**Date:** December 10, 2025  
-**Status:** ✅ ALL CRITICAL & HIGH PRIORITY ISSUES RESOLVED (Verified)  
-**Version:** 3.1  
+**Date:** December 15, 2025  
+**Status:** ✅ Critical items addressed; medium items pending alignment  
+**Version:** 3.2  
 
 ---
 
@@ -17,110 +17,68 @@ EnGen consists of two major services:
 ## Original Objectives
 
 1. **Synchronized Ingestion** - Ensure catalog metadata syncs with page content ✅
-2. **Atomic Transactions** - All three streams succeed or all rollback ✅
-3. **Simultaneous Stream Processing** - Parallel execution for performance ✅
+2. **Atomic Transactions** - Two-phase commit with rollback ✅
+3. **Bounded Concurrency** - Parallel execution with semaphore control ✅
 4. **Content Atomization** - Granular sections for retrieval ✅
 
 ---
 
 # PART 1: INGESTION SERVICE
 
-## ✅ All Issues Successfully Fixed
+## ✅ Current Architecture & Fixes (Verified)
 
-### ~~CRITICAL #1-3: Constructor & Method Call Issues~~ ✓ FIXED
-- Constructor now uses `pattern_id`, `pattern_title`, `staging_base`
-- Using `coordinator.execute_transaction()` properly
-- Processor dictionary keys now use `'A'`, `'B'`, `'C'`
+### Two-Phase Commit with Checkpoints ✓ Implemented
+- `IngestionTransaction`: parallel prepare (async), sequential commit, rollback in reverse
+- `TransactionCoordinator`: checkpoint save/load for idempotency and crash recovery (baseline in place)
+- Staging directories ensure atomic commit boundaries
 
-### ~~CRITICAL #4: Synchronized Validation~~ ✓ FIXED
-- Added content hash computation and comparison
-- Drift detection with warning logs
-- Hash stored in metadata for future validation
+### SharePoint Client Hardening ✓ Implemented
+- Pagination via `@odata.nextLink`
+- Retry/backoff for 429/503/timeouts
+- Token refresh with 5-minute buffer
+- Configurable pages library via `Config.SP_PAGES_LIBRARY`
 
-### ~~CRITICAL #5: SharePoint Pagination~~ ✓ FIXED
-- Implemented `@odata.nextLink` pagination loop
-- All patterns fetched regardless of catalog size
+### Config Validation & Pre-Flight Checks ✓ Implemented
+- `Config` validates required environment variables at startup
+- Main orchestration performs pre-flight environment checks
+- Fails fast with descriptive errors on misconfiguration
 
-### ~~CRITICAL #6: SharePoint Retry Logic~~ ✓ FIXED
-- Added `_get_with_retry()` with exponential backoff
-- Handles 429 (rate limit), 503 (service unavailable), timeouts
-
-### ~~CRITICAL #7: Transaction Coordinator Usage~~ ✓ FIXED
-- Now properly uses `coordinator.execute_transaction()`
-
-### ~~CRITICAL #8: Config Missing Required Environment Variables~~ ✓ FIXED
-- Added `ConfigurationError` exception class
-- Added `REQUIRED_VARS` list with 10 critical environment variables
-- Added `_validate()` method that raises descriptive error on startup
-
-### ~~CRITICAL #9: No Token Refresh in SharePoint Client~~ ✓ FIXED
-- Added `token_expires_at` tracking with 5-minute buffer
-- Added `_ensure_valid_token()` method called before each request
-- Added `_get_auth_headers()` that validates token
-
-### ~~CRITICAL #10: Semantic Processor LLM Call is Blocking~~ ✓ FIXED
-- LLM calls now wrapped in `asyncio.to_thread()` for non-blocking execution
-- Backoff delays use `asyncio.sleep()` instead of `time.sleep()`
-
-### ~~HIGH #1: Visual Processor Constructor~~ ✓ VERIFIED
-- `sp_client` is properly stored in `__init__`
-
-### ~~HIGH #2: Firestore Batch Chunking~~ ✓ FIXED
-- Implemented 500-operation chunking
-- Large documents (>500 sections) now supported
-
-### ~~HIGH #3: Staging Directory Paths~~ ✓ FIXED
-- Uses `tempfile.gettempdir()` for cross-platform support
-
-### ~~HIGH #4: No Firestore Write Retry Logic~~ ✓ FIXED
-- Added `_commit_batch_with_retry()` with 3 attempts
-- Exponential backoff (1s, 2s, 4s) between retries
-- Handles Firestore transient failures gracefully
-
-### ~~HIGH #5: Vector Search Upsert May Timeout~~ ✓ FIXED (Verified Dec 10)
-- Implemented `_upsert_vectors_with_retry()` method with 3 attempts
-- Added configurable timeout: `VECTOR_SEARCH_TIMEOUT` (default: 180 seconds)
-- Exponential backoff between retry attempts (1s, 2s, 4s)
-- Uses `asyncio.wait_for()` with timeout for each attempt
-
-### ~~HIGH #6: GCS Upload No Checksum Verification~~ ✓ FIXED
-- Computes MD5 checksum before upload
-- Validates uploaded blob checksum matches
-- Raises `ValueError` on checksum mismatch
+### Bounded Concurrency & Metrics ✓ Implemented
+- Bounded concurrency via `asyncio.Semaphore` at orchestration layer
+- Optional Prometheus metrics: counters and transaction duration histogram
+- Future: OpenTelemetry spans across processors (planned)
 
 ---
 
-## 🟡 PRIORITY 3: Medium Priority Issues (REMAINING)
+## 🟡 PRIORITY 3: Medium Priority Items (Pending)
 
-### MEDIUM #1: Hardcoded "SitePages" List Name
-**Location:** `clients/sharepoint.py` line 105
+### MEDIUM #1: Error Classification
+Introduce structured classification (retryable vs permanent) across processors to refine retry/rollback.
 
-### MEDIUM #2: No Error Classification (Retryable vs Permanent)
-**Location:** All processor files
+### MEDIUM #2: Checkpoint Granularity
+Enhance per-processor checkpoint flags; implement robust crash-resume validation.
 
-### MEDIUM #3: No Progress Persistence During Execution
-**Location:** `main.py`
+### MEDIUM #3: Discovery Engine Import Async
+Make `import_documents()` non-blocking or run in a thread; add backpressure controls.
 
-### MEDIUM #4: Discovery Engine Import is Synchronous
-**Location:** `processors/semantic.py` commit phase
-
-The `import_documents()` call blocks the event loop.
+### MEDIUM #4: Expanded Metrics & Tracing
+Adopt OpenTelemetry spans for prepare/commit/rollback, per-stream metrics, and standardized labels.
 
 ---
 
 ## 🔵 PRIORITY 4: Low Priority / Enhancements
 
-### LOW #1: No Metrics/Telemetry
-### LOW #2: No Rate Limiting for Vertex AI Calls
-### LOW #3: Image Download Memory Usage (should stream to disk)
-### LOW #4: No Dry-Run Mode
-### LOW #5: No Input Validation on Pattern Metadata
+### LOW #1: Vertex AI Call Rate Limiting
+### LOW #2: Image Download Streaming to Disk
+### LOW #3: Dry-Run Mode for Ingestion
+### LOW #4: Input Validation on Pattern Metadata
+### LOW #5: Async SharePoint Client (optional)
 
 ---
 
 # PART 2: SERVING SERVICE
 
-## ✅ All Critical & High Priority Issues Fixed
+## ✅ Serving Service Status
 
 ### ~~CRITICAL #1: Agent Constructors Inconsistent~~ ✓ FIXED
 - All agents now properly inherit from ADKAgent
@@ -177,7 +135,7 @@ The `import_documents()` call blocks the event loop.
 
 ---
 
-## 🟡 PRIORITY 3: Medium Priority Issues (REMAINING)
+## 🟡 PRIORITY 3: Medium Priority Issues (Remaining)
 
 ### MEDIUM #1: Agent Port Configuration Inconsistent
 Different agents hardcode different patterns for getting port
@@ -220,9 +178,8 @@ Should be configurable
 
 **Recommendation:** Create shared data models/contracts
 
----
 
-### MEDIUM #2: Collection Name Mismatch Possible
+# 📊 OVERALL ASSESSMENT
 **Ingestion:** Uses `config.FIRESTORE_COLLECTION` (default: "patterns")
 **Serving:** Uses `FIRESTORE_COLLECTION_PATTERNS` (default: "patterns")
 
@@ -251,10 +208,10 @@ Each service has own config pattern - should use shared secret manager
 ## Ingestion Service
 | Aspect | Score | Notes |
 |--------|-------|-------|
-| Architecture | 9/10 | Two-phase commit well designed |
-| Implementation | 9/10 | All critical bugs fixed, robust retry logic |
+| Architecture | 9/10 | Two-phase commit, checkpoints, bounded concurrency |
+| Implementation | 9/10 | SharePoint hardening, config validation, metrics optional |
 | Production Readiness | 90% | Ready for integration testing |
-| Objective Coverage | 95% | All 4 objectives fully met |
+| Objective Coverage | 95% | Objectives met with pending medium items |
 
 ## Serving Service
 | Aspect | Score | Notes |
@@ -306,10 +263,11 @@ Each service has own config pattern - should use shared secret manager
 - [x] Config validation with missing env vars ✅
 - [x] Token refresh after 1 hour ✅
 - [x] Parallel stream processing (verify truly async) ✅
+- [x] Bounded concurrency via semaphore ✅
 - [ ] Large catalog (>100 patterns) - needs integration test
 - [x] Large document (>500 sections) ✅
 - [x] Rollback on failure (all streams) ✅
-- [ ] Crash recovery (checkpoint restore) - pending
+- [ ] Crash recovery (checkpoint restore) - pending (baseline implemented)
 
 ## Serving Service
 - [x] Single agent startup ✅
@@ -325,7 +283,7 @@ Each service has own config pattern - should use shared secret manager
 
 ---
 
-**Generated:** December 10, 2025  
-**Version:** 3.1 (All Critical & High Priority Issues Resolved & Verified)  
-**Latest Update:** December 10, 2025 - Fixed missing Vector Search retry implementation and refactored Orchestrator to use A2AClient  
-**Next Steps:** Integration Testing, Phase 3 & 4 items
+**Generated:** December 15, 2025  
+**Version:** 3.2 (Critical fixes verified; medium items prioritized)  
+**Latest Update:** Added two-phase commit overview, checkpoints, pre-flight checks, bounded concurrency, configurable SharePoint pages library, and optional metrics  
+**Next Steps:** Integration Testing; enhance checkpoints and tracing; async Discovery Engine import
