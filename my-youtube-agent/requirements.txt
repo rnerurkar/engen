@@ -1,3 +1,5 @@
-google-adk==0.1.0
+google-adk==1.8.0
 google-genai>=0.3.0
 python-dotenv>=1.0.1
+google-cloud-aiplatform==1.130.0
+vertexai==1.43.0
