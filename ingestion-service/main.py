@@ -22,7 +22,7 @@ async def run_ingestion():
     sp_client = SharePointClient(cfg)
     proc_a = StreamAProcessor(cfg)
     proc_b = StreamBProcessor(cfg, sp_client)
-    proc_c = StreamCProcessor(cfg)
+    proc_c = StreamCProcessor(cfg, sp_client)
 
     # Initialize Transaction Coordinator with platform-appropriate staging
     staging_root = Path(tempfile.gettempdir()) / "engen_staging"
