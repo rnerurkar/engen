@@ -75,7 +75,21 @@ class StreamBProcessor:
             staged_images = []
             vectors = []
             
+            # SYSTEM DESIGN NOTE: Targeted Visual Ingestion
+            # We strictly limit processing to the first 2 images.
+            # Why?
+            # 1. Relevance: In our Wiki template, Image #1 is always the Component Diagram and 
+            #    Image #2 is the Sequence Diagram. These are high-value for visual search.
+            # 2. Noise Reduction: Subsequent images are often minor screenshots or logos which 
+            #    pollute the vector space.
+            valid_image_count = 0
+            TARGET_IMAGE_LIMIT = 2
+
             for idx, img in enumerate(imgs):
+                if valid_image_count >= TARGET_IMAGE_LIMIT:
+                    logger.info(f"[Stream B] Reached target limit of {TARGET_IMAGE_LIMIT} diagrams. Stopping image processing.")
+                    break
+
                 src = img.get('src')
                 if not src or "icon" in src.lower():
                     continue
@@ -133,11 +147,34 @@ class StreamBProcessor:
                         'image_bytes_size': len(image_bytes)
                     })
                     
+                    # Prepare Restricts for filtering
+                    # Base restriction is always the pattern_id
+                    restricts_list = [
+                        {'namespace': 'pattern_id', 'allow': [metadata['id']]}
+                    ]
+                    
+                    # Map metadata fields to Vector Search restricts (tokens)
+                    # This enables upstream filtering by status, owner, etc.
+                    for field in ['status', 'owner', 'category']:
+                        if field in metadata and metadata[field]:
+                            val = metadata[field]
+                            # Ensure value is a list of strings
+                            if not isinstance(val, list):
+                                val = [str(val)]
+                            else:
+                                val = [str(v) for v in val]
+                            
+                            restricts_list.append({
+                                'namespace': field, 
+                                'allow': val
+                            })
+
                     # The Vector Payload: This is what gets returned when we search later.
                     # We store the GCS URI so the UI can display the image.
                     vectors.append({
                         'id': vector_id,
                         'embedding': emb,
+                        'restricts': restricts_list,
                         'payload': {
                             'pattern_id': metadata['id'],
                             'gcs_uri': gcs_uri,
@@ -147,6 +184,7 @@ class StreamBProcessor:
                     })
                     
                     logger.info(f"[Stream B] Prepared image {idx + 1}: {image_id}")
+                    valid_image_count += 1
                     
                 except Exception as e:
                     logger.error(f"[Stream B] Error processing image {src}: {e}")
@@ -293,15 +331,29 @@ class StreamBProcessor:
             # Prepare datapoints for Vector Search
             datapoints = []
             for vec in vectors:
-                datapoint = aiplatform.matching_engine.MatchingEngineIndexEndpoint.Datapoint(
-                    datapoint_id=vec['id'],
-                    feature_vector=vec['embedding'],
-                    restricts=[
+                # Construct restriction objects from prepared data
+                restriction_objects = []
+                if 'restricts' in vec:
+                    for r in vec['restricts']:
+                        restriction_objects.append(
+                            aiplatform.matching_engine.MatchingEngineIndexEndpoint.Restriction(
+                                namespace=r['namespace'],
+                                allow_list=r['allow']
+                            )
+                        )
+                else:
+                    # Fallback for legacy payloads
+                    restriction_objects = [
                         aiplatform.matching_engine.MatchingEngineIndexEndpoint.Restriction(
                             namespace="pattern_id",
                             allow_list=[vec['payload']['pattern_id']]
                         )
                     ]
+
+                datapoint = aiplatform.matching_engine.MatchingEngineIndexEndpoint.Datapoint(
+                    datapoint_id=vec['id'],
+                    feature_vector=vec['embedding'],
+                    restricts=restriction_objects
                 )
                 datapoints.append(datapoint)
             

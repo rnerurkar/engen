@@ -208,170 +208,100 @@ Sort by relevance_score (descending). Include top 5 matches only.
         context: Optional[Dict[str, Any]] = None
     ) -> str:
         """
-        Comprehensive prompt for generating documentation sections
+        Comprehensive prompt for generating specific documentation sections.
+        Dynamically adjusts instructions based on the section type and uses
+        the reference content (Donor) as a strict structural template.
         """
-        prompt = f"""You are a Senior Technical Writer specializing in software architecture documentation.
+        
+        # 1. Base identity and core task
+        prompt = f"""You are a Senior Technical Writer specializing in software architecture.
 
-**TASK:** Write the '{section_name}' section for architecture documentation
+**TASK:** Write the '{section_name}' section for a new architecture pattern.
 
-**PROJECT DESCRIPTION:**
-{description}
+**PROJECT CONTEXT:**
+The user is designing a system described as:
+"{description}"
 
-**REFERENCE STYLE & CONTENT:**
-The following is a high-quality example from a similar project. Match this style, structure, and technical depth:
+**THE GOAL:**
+We have retrieved a high-quality "Donor Pattern" (Reference Content) to serve as a style guide. 
+Your job is to generate the '{section_name}' for the NEW project, but mimicking the exact **structure, depth, tone, and formatting** of the Reference Content.
+
 ---
+**REFERENCE CONTENT (DONOR):**
 {reference_content}
 ---
-
-**SECTION REQUIREMENTS:**
-
 """
-        
-        # Section-specific guidelines
-        section_guidelines = {
+
+        # 2. Section-Specific Strategy (The "Why" and "How" for each unique section)
+        # This provides the unique "angle" request by the user.
+        section_strategies = {
             "Problem": """
-**Problem Statement Guidelines:**
-1. **Context Setting** (1-2 paragraphs)
-   - Business background and current situation
-   - Stakeholders and their needs
-   - Existing systems and limitations
-
-2. **Core Challenges** (bullet points or paragraphs)
-   - Technical challenges (scalability, performance, integration)
-   - Business challenges (time-to-market, cost, compliance)
-   - Organizational challenges (team skills, resources)
-
-3. **Constraints & Requirements** (structured list)
-   - Technical constraints (technology stack, infrastructure)
-   - Business constraints (budget, timeline, compliance)
-   - Quality attributes (performance, security, availability)
-
-4. **Success Criteria**
-   - Measurable outcomes and KPIs
-   - Acceptance criteria for the solution
+**STRATEGY FOR 'PROBLEM' SECTION:**
+- **Tone:** Empathetic but analytical. Focus on the "pain".
+- **Structure:** Start with context/background, move to specific challenges, end with consequences of doing nothing.
+- **Key Elements:** Mention specific technical bottlenecks (latency, coupling) and business impacts (cost, time-to-market).
+- **Differentiation:** Ensure the problem clearly justifies why a complex pattern is needed.
 """,
             "Solution": """
-**Solution Overview Guidelines:**
-1. **High-Level Approach** (2-3 paragraphs)
-   - Overall architectural strategy
-   - Key design decisions and rationale
-   - Alignment with requirements
-
-2. **Architecture Components** (detailed description)
-   - Core services and their responsibilities
-   - Data storage and management
-   - Integration points and APIs
-   - Infrastructure and deployment
-
-3. **Technology Choices** (justified selections)
-   - Programming languages and frameworks (with rationale)
-   - Databases and storage solutions (with rationale)
-   - Cloud services and infrastructure (with rationale)
-   - Third-party services and libraries (with rationale)
-
-4. **Design Patterns & Principles**
-   - Architectural patterns applied (microservices, event-driven, etc.)
-   - Design patterns used (Circuit Breaker, CQRS, etc.)
-   - SOLID principles and best practices
-
-5. **Data Flow & Integration**
-   - Request/response flows
-   - Event propagation and handling
-   - Data synchronization strategies
-   - API contracts and versioning
-
-6. **Non-Functional Requirements**
-   - Scalability approach (horizontal/vertical, auto-scaling)
-   - Performance optimization (caching, CDN, database indexing)
-   - Security measures (authentication, authorization, encryption)
-   - Reliability & resilience (redundancy, failover, disaster recovery)
-   - Monitoring & observability (logging, metrics, tracing)
+**STRATEGY FOR 'SOLUTION' SECTION:**
+- **Tone:** Authoritative and descriptive.
+- **Structure:** High-level overview -> Component deep dive -> Interaction flow.
+- **Key Elements:** Justify technology choices. Explain *how* it solves the specific problems defined earlier.
+- **Visuals:** Refer to standard diagrams (Context, Container) textually.
 """,
             "Implementation": """
-**Implementation Details Guidelines:**
-1. **Development Approach**
-   - Implementation phases and milestones
-   - Team structure and responsibilities
-   - Development methodology (Agile, Scrum, etc.)
-
-2. **Code Organization**
-   - Repository structure
-   - Module boundaries
-   - Dependency management
-
-3. **Key Implementation Patterns**
-   - Code-level design patterns
-   - Testing strategies (unit, integration, e2e)
-   - CI/CD pipeline configuration
-
-4. **Deployment Strategy**
-   - Environment setup (dev, staging, prod)
-   - Deployment automation
-   - Rollback procedures
+**STRATEGY FOR 'IMPLEMENTATION' SECTION:**
+- **Tone:** Instructional and pragmatic.
+- **Structure:** Prerequisites -> Step-by-step logic -> Configuration samples.
+- **Key Elements:** Include pseudo-code or configuration snippets. Discuss sequencing (what to build first).
+- **Detail Level:** High. This is for the developers building it.
 """,
             "Trade-offs": """
-**Trade-offs & Considerations Guidelines:**
-1. **Design Trade-offs**
-   - Performance vs. Complexity
-   - Cost vs. Scalability
-   - Flexibility vs. Simplicity
-   - Time-to-market vs. Technical Debt
-
-2. **Alternative Approaches Considered**
-   - Other architectural options evaluated
-   - Why they were not chosen
-   - Scenarios where alternatives might be better
-
-3. **Known Limitations**
-   - Current system constraints
-   - Areas for future improvement
-   - Technical debt acknowledgment
-
-4. **Risk Assessment**
-   - Technical risks and mitigation
-   - Business risks and contingencies
-   - Dependencies on external factors
+**STRATEGY FOR 'TRADE-OFFS' SECTION:**
+- **Tone:** Objective and balanced.
+- **Structure:** Pros vs. Cons comparison.
+- **Key Elements:** Highlight complexity, cost, and operational overhead. Discuss when NOT to use this pattern.
+""",
+            "Overview": """
+**STRATEGY FOR 'OVERVIEW' SECTION:**
+- **Tone:** Executive summary style.
+- **Structure:** One paragraph summary -> Key capabilities -> Business value.
+- **Key Elements:** Be concise. This is the "Hook" for the reader.
 """
         }
-        
-        prompt += section_guidelines.get(section_name, "Write a comprehensive, technical section that follows the reference style.")
-        
+
+        # Inject the specific strategy or a generic fallback
+        prompt += section_strategies.get(section_name, "**STRATEGY:** Follow the structure of the reference content precisely.")
+
+        # 3. Handling Critique (Iterative refinement)
         if critique:
             prompt += f"""
 
-**PREVIOUS FEEDBACK TO ADDRESS:**
+**CRITICAL FEEDBACK TO ADDRESS (Previous Draft):**
+The previous attempt had issues. You MUST fix these specific points:
 {critique}
-
-**IMPORTANT:** Specifically address all points raised in the feedback above.
 """
-        
-        prompt += """
 
-**WRITING STYLE REQUIREMENTS:**
-- Use clear, professional technical language
-- Be specific with technical details (versions, configurations, numbers)
-- Use active voice where possible
-- Include concrete examples and code snippets where appropriate
-- Structure with clear headings and subheadings
-- Use bullet points for lists and key points
-- Include diagrams references where applicable (e.g., "See Figure 1")
+        # 4. Universal Instructions
+        prompt += f"""
 
-**FORMAT:**
-- Use Markdown formatting
-- Include appropriate heading levels (##, ###, ####)
-- Use code blocks with language specification for code examples
-- Use tables for comparisons or structured data
-
-**LENGTH:**
-Aim for 800-1500 words for major sections (Problem, Solution)
-Aim for 400-800 words for supporting sections
+**EXECUTION INSTRUCTIONS:**
+1. **Analyze the Reference:** Look at the headers, list styles, and paragraph length in the Reference Content above.
+2. **Apply to New Context:** Write the content for the *new* project described in "PROJECT CONTEXT", but fit it into the Reference's structure.
+3. **Format:** Use Markdown. Do NOT output the "Strategy" text or meta-comments. Just the documentation content.
+4. **Consistency:** If the reference uses bold key terms, you use bold key terms. If it uses tables, you use tables.
+5. **VISUAL ADAPTATION (CRITICAL):** 
+   - The Reference Content may contain image placeholders like `[Image Description: ... | GCS Link: ...]`.
+   - If you see such a marker, it means this section REQUIRES a diagram.
+   - You must generate a **Mermaid.js** code block (e.g., `mermaid`) representing the equivalent diagram for the NEW project.
+   - If a Mermaid diagram is too complex, write a clear placeholder: `> **[Suggested Diagram]:** <Detailed description of what the new image should show>`
 
 **OUTPUT:**
-Return ONLY the section content in Markdown format. Do not include meta-commentary or explanations about your writing process.
+Generate the '{section_name}' markdown content now.
 """
         
         if context:
-            prompt += f"\n\n**ADDITIONAL CONTEXT:**\n{context}"
+            prompt += f"\n\n**ADDITIONAL SYSTEM DETAILS:**\n{context}"
         
         return prompt
 

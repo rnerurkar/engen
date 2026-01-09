@@ -94,16 +94,18 @@ class RetrievalAgent(ADKAgent):
         {
             "description": "text description...", 
             "image_base64": "optional_base64_string...",
-            "top_k": 5
+            "top_k": 5,
+            "filters": {"status": ["active"], "owner": ["engineering"]}
         }
         """
         desc = request.payload.get('description') or request.payload.get('desc', '')
         image_data = request.payload.get('image_base64')
         top_k = request.payload.get('top_k', 5)
+        filters = request.payload.get('filters')
         
         # 1. Hybrid Search (Text + Visual)
         # Execute the complex search logic to get a ranked list of IDs.
-        ranked_pattern_ids = await self._hybrid_search(desc, image_data, top_k)
+        ranked_pattern_ids = await self._hybrid_search(desc, image_data, top_k, filters=filters)
         
         if not ranked_pattern_ids:
             return {"donor_id": None, "sections": {}, "error": "No matching patterns found"}
@@ -133,7 +135,7 @@ class RetrievalAgent(ADKAgent):
             "alternatives": ranked_pattern_ids[1:5]
         }
 
-    async def _hybrid_search(self, text: str, image_b64: Optional[str], top_k: int) -> List[str]:
+    async def _hybrid_search(self, text: str, image_b64: Optional[str], top_k: int, filters: Optional[Dict] = None) -> List[str]:
         """
         Queries Discovery Engine (Text) and Vector Search (Image) 
         and fuses results using Reciprocal Rank Fusion (RRF).
@@ -150,7 +152,7 @@ class RetrievalAgent(ADKAgent):
         
         # Task B: Image Search (Vector Search)
         if image_b64 and self.vector_endpoint:
-            tasks.append(self._search_image_vector(image_b64))
+            tasks.append(self._search_image_vector(image_b64, filters=filters))
             
         if not tasks:
             return []
@@ -187,7 +189,7 @@ class RetrievalAgent(ADKAgent):
             self.logger.error(f"Discovery Engine search error: {e}")
             return []
 
-    async def _search_image_vector(self, b64_str: str) -> List[str]:
+    async def _search_image_vector(self, b64_str: str, filters: Optional[Dict] = None) -> List[str]:
         """Generates image embedding and searches vector index"""
         if not self.embedding_model or not self.vector_endpoint:
             return []
@@ -196,10 +198,29 @@ class RetrievalAgent(ADKAgent):
             embeddings = self.embedding_model.get_embeddings(
                 image=image
             )
+            
+            # Construct restrictions if filters are provided (Stream B only)
+            restrictions = []
+            if filters:
+                for key, val in filters.items():
+                    # Ensure val is a list of strings
+                    if not isinstance(val, list):
+                        val = [str(val)]
+                    else:
+                        val = [str(v) for v in val]
+                        
+                    restrictions.append(
+                        aiplatform.matching_engine.MatchingEngineIndexEndpoint.Restriction(
+                            namespace=key,
+                            allow_list=val
+                        )
+                    )
+            
             response = self.vector_endpoint.find_neighbors(
                 deployed_index_id=self.deployed_index_id,
                 queries=[embeddings.image_embedding],
-                num_neighbors=10
+                num_neighbors=10,
+                filter=restrictions if restrictions else None
             )
             # IDs in Vector Search are usually "img_<pattern_id>_<uuid>"
             pattern_ids = []

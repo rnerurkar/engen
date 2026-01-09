@@ -29,20 +29,40 @@ from lib.sharepoint_publisher import SharePointPublisher, SharePointPageConfig
 
 
 class Orchestrator(ADKAgent):
+    """
+    The Orchestrator is the "Project Manager" of the agent swarm.
+    
+    SYSTEM DESIGN: Coordinator Pattern
+    ----------------------------------
+    This agent does not do any 'real work' (like writing or seeing). 
+    Its job is to manage the workflow and state between other agents.
+    
+    Workflow Steps:
+    1. Input: Receives an image (diagram) and a title.
+    2. Vision: Asks Vision Agent to "see" the image -> gets text description.
+    3. Retrieval: Asks Retrieval Agent to find similar past patterns -> gets context.
+    4. Loop (Writer + Reviewer):
+       - For each section (Problem, Solution, etc.):
+         a. Ask Writer to draft content.
+         b. Ask Reviewer to grade it.
+         c. If grade < 90, send feedback back to Writer (Result: Iterative refinement).
+    5. Publish: If successful, pushes the final HTML to SharePoint.
+    """
     def __init__(self, port: int = 8080, config: dict = None):
         super().__init__("Orchestrator", port=port)
         self.config = config or {}
         
         # Agent URLs from config or environment
+        # These are the endpoints of the other microservices in the swarm.
         self.vis_url = os.getenv("VISION_URL") or self.config.get("vision_url", "http://localhost:8081")
         self.ret_url = os.getenv("RETRIEVAL_URL") or self.config.get("retrieval_url", "http://localhost:8082")
         self.writ_url = os.getenv("WRITER_URL") or self.config.get("writer_url", "http://localhost:8083")
         self.rev_url = os.getenv("REVIEWER_URL") or self.config.get("reviewer_url", "http://localhost:8084")
         
         # Configuration
-        self.max_revisions = int(os.getenv("MAX_REVISIONS", 3))
-        self.min_score = int(os.getenv("MIN_REVIEW_SCORE", 90))
-        self.timeout = int(os.getenv("AGENT_TIMEOUT", 60))
+        self.max_revisions = int(os.getenv("MAX_REVISIONS", 3))  # How many times to loop Writer-Reviewer
+        self.min_score = int(os.getenv("MIN_REVIEW_SCORE", 90))  # Quality bar
+        self.timeout = int(os.getenv("AGENT_TIMEOUT", 60))       # HTTP timeout
         
         # SharePoint publishing configuration
         self.publish_to_sharepoint = os.getenv("PUBLISH_TO_SHAREPOINT", "false").lower() == "true"
@@ -58,7 +78,10 @@ class Orchestrator(ADKAgent):
                 self.publish_to_sharepoint = False
 
     async def process(self, req: AgentRequest) -> dict:
-        """Process architecture diagram through the agent pipeline"""
+        """
+        Main Workflow Engine.
+        This is where the linear and circular dependencies between agents are managed.
+        """
         img = req.payload.get('image') or req.payload.get('image_uri')
         if not img:
             raise ValueError("Missing 'image' or 'image_uri' in payload")
@@ -71,9 +94,11 @@ class Orchestrator(ADKAgent):
         self.logger.info(f"Title: {title}, Publish to SharePoint: {should_publish}")
         
         # Use A2AClient for all agent communication
+        # A2A (Agent-to-Agent) client handles retries and connection errors.
         async with A2AClient("Orchestrator", default_timeout=self.timeout) as client:
             
             # 1. Vision - Analyze the diagram
+            # "Eyes": Convert pixels to text because other agents (Writer/Retrieval) are text-based.
             self.logger.info("Step 1: Analyzing diagram with Vision agent...")
             try:
                 vis = await client.call_agent(self.vis_url, "interpret", {"image": img})
@@ -88,6 +113,8 @@ class Orchestrator(ADKAgent):
                 raise
             
             # 2. Retrieval - Find similar patterns
+            # "Memory": Query the database for what we already know.
+            # This implements RAG (Retrieval Augmented Generation).
             self.logger.info("Step 2: Finding donor patterns with Retrieval agent...")
             try:
                 ret = await client.call_agent(self.ret_url, "find_donor", {
@@ -102,6 +129,7 @@ class Orchestrator(ADKAgent):
                 raise
             
             # 3. Reflection Loop - Write and review sections
+            # "Brain": The Generate -> Critique -> Refine loop.
             sections_to_generate = req.payload.get('sections', ["Problem", "Solution"])
             final_doc = {}
             
@@ -116,7 +144,7 @@ class Orchestrator(ADKAgent):
                             "section": sec,
                             "description": description,
                             "donor_context": ret,
-                            "critique": critique
+                            "critique": critique # Empty on first pass, contains Reviewer feedback on subsequent passes
                         })
                     except A2AError as e:
                         self.logger.error(f"Writer agent failed: {e}")
@@ -134,6 +162,7 @@ class Orchestrator(ADKAgent):
                     score = review.get('score', 0)
                     self.logger.info(f"Section '{sec}' revision {revision + 1}: score={score}")
                     
+                    # Threshold check
                     if score >= self.min_score:
                         final_doc[sec] = draft.get('text', draft)
                         break
@@ -187,6 +216,7 @@ class Orchestrator(ADKAgent):
                     }
             
             return response
+
 
     def get_supported_tasks(self):
         return ["generate", "process", "create_document", "generate_and_publish"]

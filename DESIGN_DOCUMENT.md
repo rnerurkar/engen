@@ -195,19 +195,21 @@ sequenceDiagram
 15. Returns `prepared_data_A` with document structure
 
 **Stream B (Visual/Vector)**:
-16. Parses HTML to extract all `<img>` tags
+16. Parses HTML to extract all `<img>` tags (Limit: Top 2, prioritizing diagrams)
 17. Downloads images from SharePoint using `download_image()` with retry logic
 18. Generates multimodal embeddings using Vertex AI Vision API
-19. Stages images in local directory and prepares vector datapoints
-20. Returns `prepared_data_B` with image paths and vector metadata
+19. Stages images locally and prepares vector datapoints
+20. **Extracts metadata** (status, owner, category) for vector filtering (`restricts`)
+21. Returns `prepared_data_B` with GCS URIs (`gs://.../patterns/{id}/{filename}`) and vector metadata
 
 **Stream C (Content/Sections)**:
-21. Parses HTML by heading structure (h1, h2, h3, h4)
-22. Groups content into logical sections (Problem, Solution, Implementation, Trade-offs)
-23. Converts each section HTML to Markdown using markdownify
-24. Validates minimum content length (>10 chars per section)
-25. Stages section documents in JSON format
-26. Returns `prepared_data_C` with section array
+22. Parses HTML by heading structure (h1, h2, h3, h4)
+23. Replaces `<img>` tags with deterministic placeholders: `[Image Description: ... | GCS Link: gs://...]`
+24. Groups content into logical sections (Problem, Solution, Implementation, Trade-offs)
+25. Converts each section HTML to Markdown using markdownify
+26. Validates minimum content length (>10 chars per section)
+27. Stages section documents in JSON format
+28. Returns `prepared_data_C` with section array
 
 #### Validation and Decision Point
 27. Transaction Manager checks if **all three streams** returned success
@@ -227,7 +229,7 @@ sequenceDiagram
 35. Validates uploaded blob checksum matches computed checksum
 36. Calls `_upsert_vectors_with_retry()` with 180-second timeout
 37. Upserts vector embeddings to Vertex AI Vector Search index
-38. Includes pattern_id in restrictions for filtering
+38. Includes `restricts` tokens (pattern_id, status, ownership) for upstream filtering
 39. Confirms successful upsert before proceeding
 
 **Commit Stream C**:
@@ -315,13 +317,15 @@ The Serving Plane uses a multi-agent system to analyze architecture diagrams and
 **Responsibilities**:
 - Performs semantic search against Discovery Engine
 - Finds most relevant donor patterns based on diagram description
+- **Applies upstream filtering** to Vector Search results (e.g., status=active)
 - Retrieves section content from Firestore
-- Ranks and filters results by relevance
+- Ranks and fuses results using RRF (Reciprocal Rank Fusion)
 
 **Key Behaviors**:
-- Real Vertex AI Discovery Engine integration (not mocked)
+- Real Vertex AI Discovery Engine integration
+- **Hybrid Search**: Fuses text (Stream A) and visual (Stream B) results
 - Uses Firestore to hydrate full section content
-- Implements fallback strategies when no matches found
+- Supports `filters` in request payload for granular search scope
 - Returns `donor_id` and `sections` dictionary
 
 #### Writer Agent (Port 8083)
@@ -330,11 +334,12 @@ The Serving Plane uses a multi-agent system to analyze architecture diagrams and
 **Responsibilities**:
 - Generates specific documentation sections (Problem, Solution, etc.)
 - Adapts donor pattern style to new architecture
+- **Interprets Stream C image placeholders** and requests Mermaid.js diagrams
 - Incorporates critique feedback from Reviewer
 - Maintains consistent technical writing style
 
 **Key Behaviors**:
-- Uses `PromptTemplates.writer_generate_section()` with full context
+- Uses **Strategy Pattern** for dynamic prompt generation based on section type
 - Receives `description`, `donor_context`, `critique` as inputs
 - Generates 800-1500 words for major sections
 - Returns markdown-formatted text
@@ -453,6 +458,7 @@ sequenceDiagram
 1. **Client** sends POST request to Orchestrator's `/invoke` endpoint with:
    - `image_uri`: URL or base64-encoded architecture diagram
    - `sections`: Array of section names to generate (default: ["Problem", "Solution"])
+   - `filters`: Optional dictionary for search constraints (e.g., `{"status": ["active"]}`)
    - Optional: `request_id`, `timeout_seconds`
 
 2. **Orchestrator** validates request payload:
@@ -480,89 +486,92 @@ sequenceDiagram
 11. Orchestrator makes A2A call to **Retrieval Agent** with task `"find_donor"`:
    - `description`: Technical description from Vision Agent
    - `image`: Original image URI for context
+   - `filters`: Constraints passed from client request
 
-12. Retrieval Agent receives request and prepares semantic search query
-13. Calls **Vertex AI Discovery Engine** `search()` method:
-   - `serving_config`: Pre-configured search endpoint
-   - `query`: Technical description (may be enhanced with keywords)
-   - `page_size`: 1 (only need top match)
+12. Retrieval Agent receives request and prepares search queries
+   
+13. **Parallel Scatter-Gather Search**:
+   - **Task A (Text)**: Calls Discovery Engine `search()` with technical description.
+   - **Task B (Visual)**: Calls Vector Search `find_neighbors()` with image embedding and `filters` (restricts).
 
-14. Discovery Engine performs semantic search across indexed patterns
-15. Returns top matching pattern with `pattern_id` in derived_struct_data
-16. If no matches found, Retrieval Agent falls back to first pattern in Firestore
+14. **Fusion**:
+   - Combines results using Reciprocal Rank Fusion (RRF).
+   - Returns top matching pattern IDs.
 
-17. Retrieval Agent hydrates full content from **Firestore**:
+15. Defaults to top match or falls back if no matches found.
+
+16. Retrieval Agent hydrates full content from **Firestore**:
    - Queries `collection(patterns).document(donor_id).collection(sections)`
    - Streams all section documents
    - Builds `sections` dictionary: `{section_name: {plain_text, char_count, ...}}`
 
-18. Returns to Orchestrator: `{donor_id: "pat_101", sections: {...}}`
+17. Returns to Orchestrator: `{donor_id: "pat_101", sections: {...}}`
 
 #### Step 3: Reflection Loop (Per Section)
-19. Orchestrator iterates over requested sections (e.g., "Problem", "Solution")
-20. For each section, enters **reflection loop** with max iterations (default: 3)
+18. Orchestrator iterates over requested sections (e.g., "Problem", "Solution")
+19. For each section, enters **reflection loop** with max iterations (default: 3)
 
 **Iteration 1: Initial Draft**
-21. Orchestrator makes A2A call to **Writer Agent** with task `"write"`:
+20. Orchestrator makes A2A call to **Writer Agent** with task `"write"`:
    - `section`: Section name (e.g., "Problem")
    - `description`: Diagram description from Vision
    - `donor_context`: Full retrieval results including donor sections
    - `critique`: Empty string (first iteration)
 
-22. Writer Agent receives request and calls `PromptTemplates.writer_generate_section()`:
-   - Builds comprehensive prompt with section-specific guidelines
-   - Includes reference content from donor pattern
-   - Specifies word count targets and formatting requirements
+21. Writer Agent receives request and selects strategy via `PromptTemplates`:
+   - Uses Strategy Pattern to select template based on section name.
+   - Includes reference content from donor pattern.
+   - **Visual Adaptation**: If donor has image placeholders, prompts LLM to generate Mermaid.js diagrams to match new architecture.
 
-23. Writer sends prompt to **Gemini 1.5 Pro LLM**
-24. LLM generates section content (800-1500 words) in Markdown format
-25. Writer returns `{text: "## Problem\n\nThe organization faced..."}` to Orchestrator
+22. Writer sends prompt to **Gemini 1.5 Pro LLM**
+23. LLM generates section content (800-1500 words) in Markdown format
+24. Writer returns `{text: "## Problem\n\nThe organization faced..."}` to Orchestrator
 
 **Review Phase**
-26. Orchestrator makes A2A call to **Reviewer Agent** with task `"review"`:
+25. Orchestrator makes A2A call to **Reviewer Agent** with task `"review"`:
    - `draft`: Generated text from Writer
 
-27. Reviewer Agent calls `PromptTemplates.reviewer_evaluate_draft()`:
+26. Reviewer Agent calls `PromptTemplates.reviewer_evaluate_draft()`:
    - Builds evaluation prompt with 6 scoring criteria
    - Each criterion has max points (Technical Accuracy: 25, Completeness: 20, etc.)
    - Requests structured JSON response
 
-28. Reviewer sends prompt to **Gemini 1.5 Pro LLM**
-29. LLM evaluates draft and returns JSON with:
+27. Reviewer sends prompt to **Gemini 1.5 Pro LLM**
+28. LLM evaluates draft and returns JSON with:
    - `overall_score`: 0-100 aggregate score
    - `category_scores`: Breakdown by dimension
    - `strengths`: List of positive aspects
    - `improvements_needed`: Specific issues with severity and suggestions
    - `detailed_feedback`: Narrative explanation
 
-30. Reviewer Agent parses JSON response:
+29. Reviewer Agent parses JSON response:
    - Tries direct `json.loads()` first
    - Falls back to regex extraction if markdown code blocks present
    - Returns default score (50) if parsing completely fails
 
-31. Returns to Orchestrator: `{score: 85, feedback: "Strong technical detail but needs more trade-off analysis..."}`
+30. Returns to Orchestrator: `{score: 85, feedback: "Strong technical detail but needs more trade-off analysis..."}`
 
 **Decision Point**
-32. Orchestrator compares score to threshold (default: 90):
+31. Orchestrator compares score to threshold (default: 90):
    - If `score >= 90`: Accept draft, add to `final_doc`, proceed to next section
    - If `score < 90` and `revision < max_revisions`: Continue to next iteration
    - If `max_revisions` reached: Accept last draft with warning log
 
 **Iteration 2+: Refinement**
-33. If score below threshold, Orchestrator prepares for next iteration:
+32. If score below threshold, Orchestrator prepares for next iteration:
    - Sets `critique` = feedback from Reviewer
-   - Returns to step 21 (Writer call) with critique included
+   - Returns to step 20 (Writer call) with critique included
 
-34. Writer receives critique and incorporates into prompt:
+33. Writer receives critique and incorporates into prompt:
    - Prompt includes "PREVIOUS FEEDBACK TO ADDRESS:" section
    - Emphasizes specific improvements needed
 
-35. Steps 22-31 repeat with refined draft
-36. Loop continues until score meets threshold or max revisions reached
+34. Steps 21-30 repeat with refined draft
+35. Loop continues until score meets threshold or max revisions reached
 
 #### Multi-Section Completion
-37. Steps 19-36 repeat for each requested section
-38. Orchestrator accumulates results in `final_doc` dictionary:
+36. Steps 18-35 repeat for each requested section
+37. Orchestrator accumulates results in `final_doc` dictionary:
    ```json
    {
      "Problem": "## Problem\n\n...",

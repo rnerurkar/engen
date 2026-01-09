@@ -19,24 +19,55 @@ from vertexai.generative_models import GenerativeModel, Part
 
 
 class VisionAgent(ADKAgent):
+    """
+    The Vision Agent is the "Eyes" of the system.
+    
+    SYSTEM DESIGN: Multimodal Input
+    -------------------------------
+    This agent bridges the gap between the Visual World (diagrams) and the Textual World (LLMs).
+    
+    Workflow:
+    1. Input: GCS URI of an image (e.g. "gs://my-bucket/diagram.png").
+    2. Processing: Uses Gemini 1.5 Pro Vision to "see" the image.
+    3. Output: textual description of the architecture components, flow, and styles.
+    
+    Why separate this?
+    - It allows us to cache descriptions.
+    - It isolates the costly multimodal model access.
+    - Other agents (Writer, Retrieval) can just consume the clean text description.
+    """
     def __init__(self, port: int = 8081):
         super().__init__("VisionAgent", port=port)
+        # Using Gemini 1.5 Pro for best-in-class visual reasoning
         self.model = GenerativeModel("gemini-1.5-pro")
 
     async def process(self, request: AgentRequest) -> dict:
+        """
+        Interprets an architecture diagram.
+        Input: {"image_uri": "gs://..."}
+        Output: {"description": "This diagram shows a 3-tier app with..."}
+        """
         uri = request.payload.get('image_uri') or request.payload.get('image')
         if not uri:
             raise ValueError("Missing 'image_uri' or 'image' in payload")
         
         # Use structured prompt from PromptTemplates
+        # This prompt guides the model to look for specific architectural elements
+        # (Load Balancers, Databases, Arrows/Flows) rather than just "captioning" the image.
         prompt = PromptTemplates.vision_analyze_architecture_diagram()
         
-        # Handle image bytes loading if not using GCS URI directly
+        # Determine mime_type based on extension, default to png
+        mime_type = "image/png"
+        if uri.lower().endswith('.jpg') or uri.lower().endswith('.jpeg'):
+            mime_type = "image/jpeg"
+        
+        # Send Multimodal Prompt to Vertex AI
         response = await self.model.generate_content_async(
-            [Part.from_uri(uri, mime_type="image/png"), prompt]
+            [Part.from_uri(uri, mime_type=mime_type), prompt]
         )
         
         return {"description": response.text, "desc": response.text}
+
 
     async def check_dependencies(self) -> dict:
         """Check Vertex AI availability"""
