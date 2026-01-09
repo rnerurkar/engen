@@ -1,4 +1,5 @@
 from google.cloud import firestore
+from vertexai.generative_models import GenerativeModel, Part
 from bs4 import BeautifulSoup
 import markdownify
 import logging
@@ -12,23 +13,37 @@ logger = logging.getLogger(__name__)
 class StreamCProcessor:
     """Stream C: Content Atomization (Firestore)"""
     
-    def __init__(self, config):
+    def __init__(self, config, sp_client=None):
         self.config = config
         self.db = firestore.Client()
         self.collection = config.FIRESTORE_COLLECTION
+        self.sp_client = sp_client
+        self.llm = GenerativeModel("gemini-1.5-pro")
 
     async def prepare(self, metadata: Dict[str, Any], html_content: str, staging_dir: Path) -> Dict[str, Any]:
         """
-        Phase 1: Parse and prepare content sections (not written to Firestore yet)
+        Phase 1: Parse and prepare content sections.
         
+        This method parses HTML into logical sections, enriches images with LLM descriptions, 
+        and saves JSON to a local staging file. NO database writes happen here.
+        
+        Args:
+            metadata: Properties from the SharePoint list item (e.g. title, id)
+            html_content: Raw HTML string of the wiki page
+            staging_dir: Local path to write temporary files
+            
         Returns:
-            Dict containing prepared sections
+            Dict containing the list of prepared section objects
         """
         try:
             if not html_content or len(html_content) < 100:
                 raise ValueError("Insufficient HTML content")
             
+            # 1. Process Images: Replace <img> with LLM descriptions
             soup = BeautifulSoup(html_content, 'html.parser')
+            if self.sp_client:
+                await self._enrich_images_with_descriptions(soup)
+
             sections = []
             
             # Parse sections by H2 headers
@@ -45,7 +60,8 @@ class StreamCProcessor:
                             section_data = self._create_section_data(
                                 metadata['id'],
                                 current_section,
-                                buffer
+                                buffer,
+                                metadata
                             )
                             if section_data:
                                 sections.append(section_data)
@@ -64,7 +80,8 @@ class StreamCProcessor:
                 section_data = self._create_section_data(
                     metadata['id'],
                     current_section,
-                    buffer
+                    buffer,
+                    metadata
                 )
                 if section_data:
                     sections.append(section_data)
@@ -73,7 +90,7 @@ class StreamCProcessor:
             if not sections:
                 # Try alternative parsing strategy - split by any heading
                 logger.warning(f"[Stream C] No H2 sections found, trying alternative parsing")
-                sections = self._parse_by_any_heading(soup, metadata['id'])
+                sections = self._parse_by_any_heading(soup, metadata['id'], metadata)
             
             if not sections:
                 raise ValueError("No content sections could be extracted from HTML")
@@ -103,8 +120,40 @@ class StreamCProcessor:
             logger.error(f"[Stream C] Preparation failed: {e}", exc_info=True)
             raise
 
-    def _create_section_data(self, pattern_id: str, section_name: str, html_list: List[str]) -> Dict[str, Any]:
-        """Create section data from HTML elements"""
+    async def _enrich_images_with_descriptions(self, soup: BeautifulSoup) -> None:
+        """Finds images, generates descriptions using LLM, and replaces tags"""
+        imgs = soup.find_all('img')
+        if not imgs: return
+
+        logger.info(f"[Stream C] enriching {len(imgs)} images with descriptions...")
+        
+        for img in imgs:
+            src = img.get('src')
+            if not src or "icon" in src.lower(): continue
+            
+            try:
+                # Download image
+                image_bytes = self.sp_client.download_image(src)
+                if not image_bytes or len(image_bytes) < 1000: continue
+
+                # Generate description
+                prompt = "Describe this architecture diagram in detail for search indexing. Focus on components and relationships."
+                # We use the synchronous generate_content because wrapping it in async for every image might be complex within the loop,
+                # but since prepare is async, we should use generate_content_async if available.
+                # Assuming Vertex AI SDK has generate_content_async
+                response = await self.llm.generate_content_async([Part.from_data(image_bytes, mime_type="image/png"), prompt])
+                description = response.text.replace('\n', ' ').strip()
+
+                # Replace tag
+                new_tag = soup.new_tag("p")
+                new_tag.string = f"\n[Image Description: {description} | Original Source: {src}]\n"
+                img.replace_with(new_tag)
+                
+            except Exception as e:
+                logger.warning(f"[Stream C] Failed to enrich image {src}: {e}")
+
+    def _create_section_data(self, pattern_id: str, section_name: str, html_list: List[str], metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Create section data from HTML elements with metadata injection"""
         if not html_list:
             return None
         
@@ -126,7 +175,7 @@ class StreamCProcessor:
         # Sanitize section name for Firestore document ID
         safe_section_name = section_name.replace('/', '_').replace('\\', '_')[:100]
         
-        return {
+        data = {
             'section_name': section_name,
             'safe_section_name': safe_section_name,
             'plain_text': md_text,
@@ -135,7 +184,16 @@ class StreamCProcessor:
             'word_count': len(md_text.split())
         }
 
-    def _parse_by_any_heading(self, soup: BeautifulSoup, pattern_id: str) -> List[Dict[str, Any]]:
+        # Inject Pattern Metadata
+        if metadata:
+            # Add specific useful fields
+            for key in ['title', 'maturity', 'frequency', 'status', 'owner', 'last_reviewed']:
+                if key in metadata:
+                    data[f'pattern_{key}'] = metadata[key]
+        
+        return data
+
+    def _parse_by_any_heading(self, soup: BeautifulSoup, pattern_id: str, metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Alternative parsing strategy using any heading level"""
         sections = []
         current_section = "Overview"
@@ -144,7 +202,7 @@ class StreamCProcessor:
         for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'p', 'table', 'ul', 'ol', 'div']):
             if element.name in ['h1', 'h2', 'h3', 'h4']:
                 if buffer:
-                    section_data = self._create_section_data(pattern_id, current_section, buffer)
+                    section_data = self._create_section_data(pattern_id, current_section, buffer, metadata)
                     if section_data:
                         sections.append(section_data)
                 current_section = element.get_text().strip() or f"Section_{len(sections) + 1}"
@@ -154,7 +212,7 @@ class StreamCProcessor:
                     buffer.append(str(element))
         
         if buffer:
-            section_data = self._create_section_data(pattern_id, current_section, buffer)
+            section_data = self._create_section_data(pattern_id, current_section, buffer, metadata)
             if section_data:
                 sections.append(section_data)
         

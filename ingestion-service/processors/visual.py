@@ -28,10 +28,18 @@ class StreamBProcessor:
 
     async def prepare(self, metadata: Dict[str, Any], html_content: str, staging_dir: Path) -> Dict[str, Any]:
         """
-        Phase 1: Prepare visual embeddings and stage images (not uploaded to GCS yet)
+        Phase 1: Prepare visual embeddings.
         
+        This method finds <img> tags, downloads the binary data, generates 
+        a vector embedding using the Multimodal model, and saves both to staging.
+        
+        Args:
+            metadata: SharePoint item metadata
+            html_content: Raw HTML content
+            staging_dir: Local staging directory
+            
         Returns:
-            Dict containing prepared image data and embeddings
+            Dict containing list of image paths and their vector embeddings
         """
         try:
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -109,7 +117,7 @@ class StreamBProcessor:
                         'id': vector_id,
                         'embedding': emb,
                         'payload': {
-                            'pattern_id': metadata['id'],
+                            'pattern_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      ': metadata['id'],
                             'gcs_uri': gcs_uri,
                             'type': 'diagram',
                             'source_url': src

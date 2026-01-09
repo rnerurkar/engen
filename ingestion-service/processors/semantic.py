@@ -21,10 +21,18 @@ class StreamAProcessor:
 
     async def prepare(self, metadata: Dict[str, Any], html_content: str, staging_dir: Path) -> Dict[str, Any]:
         """
-        Phase 1: Prepare semantic document without committing to Vertex AI
+        Phase 1: Prepare semantic document.
         
+        This method cleans HTML, generates an LLM summary, formats the Discovery Engine document object,
+        and saves it to staging. NO calls to Discovery Engine API happen here.
+        
+        Args:
+            metadata: Properties from the SharePoint list (used for filtering tags)
+            html_content: Raw HTML page content
+            staging_dir: Local temproary directory
+            
         Returns:
-            Dict containing prepared document data
+            Dict containing the prepared document ID and data payload
         """
         try:
             # Validate inputs
