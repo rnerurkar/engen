@@ -58,8 +58,24 @@ class TransactionState:
 
 class IngestionTransaction:
     """
-    Manages atomic ingestion transaction across three streams
-    Implements two-phase commit: prepare → commit (with rollback on failure)
+    Manages atomic ingestion transaction across three streams.
+    
+    SYSTEM DESIGN NOTE: Two-Phase Commit (2PC) Pattern
+    --------------------------------------------------
+    We are ingesting data into 3 disparate systems (Discovery Engine, Vector Search, Firestore).
+    Since these systems do not share a transaction log, we must implement a distributed transaction manually.
+    
+    Phase 1: Prepare (Parallel)
+    - Validate the data for all streams.
+    - Transform data into the required formats.
+    - Save prepared data to a temporary staging area.
+    - DO NOT write to production yet.
+    - If ANY stream fails here, we abort the whole process safely.
+    
+    Phase 2: Commit (Sequential)
+    - Take the staged data and write to production.
+    - If ANY stream fails here, we must ROLLBACK the already committed streams 
+      to ensure we don't end up with partial data (e.g., text exists but images are missing).
     """
     
     def __init__(self, pattern_id: str, pattern_title: str, staging_base: str = "/tmp/engen_staging"):
@@ -75,7 +91,10 @@ class IngestionTransaction:
         logger.debug(f"Staging directory: {self.state.staging_dir}")
     
     def _cleanup_staging(self):
-        """Remove staging directory"""
+        """
+        Clean up the temporary files used during the 'Prepare' phase.
+        This is called after a successful Commit or after a Rollback.
+        """
         try:
             if self.state.staging_dir.exists():
                 shutil.rmtree(self.state.staging_dir)
@@ -90,7 +109,11 @@ class IngestionTransaction:
         html_content: str
     ) -> bool:
         """
-        Phase 1: Prepare all streams in parallel without committing to production storage
+        Phase 1: Prepare all streams in parallel without committing to production storage.
+        
+        SYSTEM DESIGN NOTE: Parallel Execution
+        We use `asyncio.gather` here because the work for Stream A, B, and C is independent 
+        at this stage. They can all process the HTML concurrently, improving performance.
         
         Returns:
             True if all streams prepared successfully, False otherwise
@@ -102,6 +125,8 @@ class IngestionTransaction:
         
         try:
             # Execute all three streams in parallel
+            # We catch exceptions so one failure doesn't crash the loop immediately,
+            # allowing us to log specific errors for each stream.
             results = await asyncio.gather(
                 self._prepare_stream(processors['A'], 'A', metadata, html_content),
                 self._prepare_stream(processors['B'], 'B', metadata, html_content),
@@ -134,6 +159,9 @@ class IngestionTransaction:
                 else:
                     logger.info(f"[{self.state.pattern_id}] Stream {stream_name} prepared successfully")
             
+            # ATOMICITY CHECK:
+            # If even one stream failed to prepare, the entire transaction is marked as failed.
+            # We do NOT proceed to Phase 2 (Commit).
             if failures:
                 self.state.phase = 'failed'
                 self.state.error = f"Streams {', '.join(failures)} failed during preparation"
@@ -185,7 +213,14 @@ class IngestionTransaction:
     
     async def commit(self, processors: Dict[str, Any]) -> bool:
         """
-        Phase 2: Commit all prepared streams to production storage
+        Phase 2: Commit all prepared streams to production storage.
+        
+        SYSTEM DESIGN NOTE: Sequential Commit
+        Unlike the 'Prepare' phase, we commit sequentially (A -> B -> C).
+        Why?
+        1. Fault Isolation: If A fails, we don't even try B or C. We just fail.
+        2. Rollback Simplicity: If C fails, we know exactly what to rollback (A and B).
+           If we did this in parallel and 2 out of 3 failed, calculating the compensation logic is harder.
         
         Returns:
             True if all commits succeeded, False otherwise (triggers rollback)
@@ -233,6 +268,9 @@ class IngestionTransaction:
             self.state.error = f"Commit failed: {str(e)}"
             logger.error(f"[{self.state.pattern_id}] Commit failed, rolling back...", exc_info=True)
             
+            # TRIGGER ROLLBACK:
+            # This is the "Compensating Transaction" logic.
+            # We undo whatever we successfully did before the error occurred.
             await self.rollback(processors, committed_streams)
             return False
     
@@ -266,7 +304,18 @@ class IngestionTransaction:
         committed_streams: Optional[List[str]] = None
     ) -> None:
         """
-        Rollback any committed streams (in reverse order)
+        Rollback any committed streams (in reverse order).
+        
+        SYSTEM DESIGN NOTE: Compensation Logic
+        This effectively "undoes" the Commit phase.
+        It uses a LIFO (Last-In-First-Out) stack approach.
+        If we committed A -> B, and then failed at C:
+        1. We are given committed_streams=['A', 'B']
+        2. We reverse it: ['B', 'A']
+        3. We call processor.rollback for B.
+        4. We call processor.rollback for A.
+        
+        This ensures we unwind the system state cleanly.
         """
         self.state.phase = 'rolling_back'
         
@@ -291,7 +340,9 @@ class IngestionTransaction:
                 
             except Exception as e:
                 logger.error(f"[{self.state.pattern_id}] Failed to rollback stream {stream_name}: {e}")
-                # Continue with other rollbacks even if one fails
+                # Continue with other rollbacks even if one fails. 
+                # In a real production system, this catastrophic failure (rollback failed) 
+                # might raise a critical alert to a human operator or Dead Letter Queue.
         
         self.state.phase = 'rolled_back'
         self._cleanup_staging()

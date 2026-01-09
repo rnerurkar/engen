@@ -16,25 +16,45 @@ logger = logging.getLogger(__name__)
 
 
 async def run_ingestion():
+    """
+    Main entry point for the Ingestion Service.
+    
+    SYSTEM DESIGN NOTE: Orchestration
+    This function orchestrates the entire lifecycle of importing patterns from SharePoint
+    into our disparate downstream systems (Discovery Engine, Vector Search, Firestore).
+    
+    It handles:
+    1. Infrastructure verification (Fail-fast)
+    2. Client initialization
+    3. Concurrency control (Throttling)
+    4. Transaction coordination (2PC)
+    """
     cfg = Config()
 
     # Initialize Clients
+    # Dependency Injection: We create single instances of our heavy clients here
+    # and pass them down. This is more efficient than creating new connections per pattern.
     sp_client = SharePointClient(cfg)
-    proc_a = StreamAProcessor(cfg)
-    proc_b = StreamBProcessor(cfg, sp_client)
-    proc_c = StreamCProcessor(cfg, sp_client)
+    proc_a = StreamAProcessor(cfg)                  # Stream A: Semantic Search (Discovery Engine)
+    proc_b = StreamBProcessor(cfg, sp_client)      # Stream B: Visual Search (Vertex AI Vector Search)
+    proc_c = StreamCProcessor(cfg, sp_client)      # Stream C: Content Retrieval (Firestore)
 
     # Initialize Transaction Coordinator with platform-appropriate staging
+    # We need a local scratchpad to "Prepare" our data before committing.
     staging_root = Path(tempfile.gettempdir()) / "engen_staging"
     staging_root.mkdir(parents=True, exist_ok=True)
     logger.info(f"Using staging directory: {staging_root}")
 
+    # Checkpoints allow us to see which patterns successfully completed if the script crashes.
     checkpoint_dir = Path(tempfile.gettempdir()) / "engen_checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     coordinator = TransactionCoordinator(str(checkpoint_dir))
 
     # 0. Pre-flight environment checks (critical)
+    # SYSTEM DESIGN NOTE: Fail-Fast
+    # Before starting a potentially long-running job processing hundreds of items,
+    # we verify that all dependent systems (GCP, SharePoint) are actually reachable.
     await verify_environment(cfg)
 
     # 1. Fetch Catalog
@@ -49,20 +69,31 @@ async def run_ingestion():
     logger.info(f"Found {total_patterns} patterns to process")
 
     # Bounded concurrency across patterns (high priority)
+    # SYSTEM DESIGN NOTE: Throttling / Backpressure
+    # We use a Semaphore to limit how many patterns we process in parallel.
+    # Why?
+    # 1. To avoid rate-limiting from SharePoint or GCP APIs.
+    # 2. To strictly control memory usage on this ingestion container.
     concurrency = int(os.getenv("INGEST_CONCURRENCY", "4"))
     sem = asyncio.Semaphore(concurrency)
 
     async def process_pattern(idx: int, pat: dict):
+        # The 'async with sem' block ensures we only enter here if a slot is open.
         async with sem:
             pattern_id = pat['id']
             pattern_title = pat['title']
             logger.info(f"[{idx}/{total_patterns}] Processing Pattern: {pattern_title} ({pattern_id})")
+            
+            # Idempotency Check: Don't re-process what we've already finished.
             if coordinator.is_completed(pattern_id):
                 logger.info(f"  ✓ Pattern {pattern_id} already completed (skipping)")
                 return 'skip'
+            
             if not pat.get('page_url'):
                 logger.warning(f"  ⚠ Pattern {pattern_id} has no page_url (skipping)")
                 return 'skip'
+            
+            # Extract
             try:
                 html_content = sp_client.fetch_page_html(pat['page_url'])
                 if not html_content:
@@ -71,15 +102,34 @@ async def run_ingestion():
             except Exception as e:
                 logger.error(f"  ✗ Failed to fetch HTML for {pattern_id}: {e}")
                 return 'fail'
+            
+            # Change Detection (CDC - Change Data Capture)
+            # Simple hash check to see if content effectively changed since last run.
+            # (Note: In a full production system, we might store this hash in a persistent state store)
             content_hash = hashlib.sha256(html_content.encode()).hexdigest()[:16]
             stored_hash = pat.get('content_hash')
             if stored_hash and stored_hash != content_hash:
                 logger.warning(f"  ⚠ Content changed for {pattern_id} (hash mismatch)")
             pat['content_hash'] = content_hash
-            transaction = IngestionTransaction(pattern_id=pattern_id, pattern_title=pattern_title, staging_base=str(staging_root))
+            
+            # Transform & Load (via 2PC Transaction)
+            # We wrap the logic for A, B, and C streams into a single atomic transaction.
+            transaction = IngestionTransaction(
+                pattern_id=pattern_id, 
+                pattern_title=pattern_title, 
+                staging_base=str(staging_root)
+            )
             processors = {'A': proc_a, 'B': proc_b, 'C': proc_c}
+            
             try:
-                success = await coordinator.execute_transaction(transaction=transaction, processors=processors, metadata=pat, html_content=html_content)
+                # The coordinator handles the Prepare -> Commit lifecycle.
+                success = await coordinator.execute_transaction(
+                    transaction=transaction, 
+                    processors=processors, 
+                    metadata=pat, 
+                    html_content=html_content
+                )
+                
                 if success:
                     logger.info(f"  ✓ Successfully ingested {pattern_title}")
                     return 'success'
@@ -90,6 +140,7 @@ async def run_ingestion():
                 logger.error(f"  ✗ Failed to process {pattern_title}: {e}", exc_info=True)
                 return 'fail'
 
+    # Gather all tasks and run them (respecting the semaphore limits)
     tasks = [process_pattern(idx, pat) for idx, pat in enumerate(patterns, 1)]
     results = await asyncio.gather(*tasks)
 
@@ -116,7 +167,14 @@ if __name__ == "__main__":
     asyncio.run(run_ingestion())
 
 async def verify_environment(cfg: Config):
-    """Pre-flight checks for critical dependencies with short timeouts."""
+    """
+    Pre-flight checks for critical dependencies with short timeouts.
+    
+    SYSTEM DESIGN NOTE: Defensive Deep Health Checks
+    Unlike a simple 'ping', these checks verify that we have the necessary permissions
+    (AIM, Service Account) and that the specific resources (Buckets, Indexes) exist.
+    It is better to crash here in 2 seconds than to fail 30 mins into a job.
+    """
     from google.cloud import storage, firestore
     from google.cloud import discoveryengine_v1 as discoveryengine
     from google.cloud import aiplatform

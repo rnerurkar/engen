@@ -25,6 +25,20 @@ from google.cloud import aiplatform
 
 
 class RetrievalAgent(ADKAgent):
+    """
+    The Retrieval Agent is the "Knowledge Broker" of the system.
+    
+    SYSTEM DESIGN: Hybrid Retrieval & RAG
+    -------------------------------------
+    This agent does not generate text directly. Its job is to find the most relevant
+    "Design Patterns" (documents) based on a user's intent.
+    
+    It uses a "Hybrid Search" strategy:
+    1. Semantic Search (Text): Understanding concepts like "secure login" via Discovery Engine.
+    2. Visual Search (Image): Finding UI patterns that look like a provided sketch via Vector Search.
+    
+    The results are fused together to provide the best matches.
+    """
     def __init__(self, port: int = 8082, config: dict = None):
         super().__init__("RetrievalAgent", port=port)
         self.db = firestore.Client()
@@ -35,6 +49,8 @@ class RetrievalAgent(ADKAgent):
         vertexai.init(project=self.config.get('project_id'), location=self.config.get('location', 'us-central1'))
         
         # 1. Load Multimodal Embedding Model
+        # This model (Titan Multimodal) converts Images -> Vectors (numbers)
+        # We need this to search the vector database.
         try:
             self.embedding_model = MultiModalEmbeddingModel.from_pretrained("multimodalembedding")
             self.logger.info("Multimodal embedding model loaded")
@@ -43,6 +59,8 @@ class RetrievalAgent(ADKAgent):
             self.embedding_model = None
 
         # 2. Initialize Vector Search Endpoint
+        # SYSTEM DESIGN NOTE: Stream B (Visual) Connection
+        # This is where we query the image embeddings created by the Ingestion Service.
         if self.config.get('vector_endpoint_id'):
             self.vector_endpoint = aiplatform.MatchingEngineIndexEndpoint(
                 index_endpoint_name=self.config.get('vector_endpoint_id')
@@ -52,6 +70,8 @@ class RetrievalAgent(ADKAgent):
             self.vector_endpoint = None
 
         # Initialize Discovery Engine client for semantic search
+        # SYSTEM DESIGN NOTE: Stream A (Semantic) Connection
+        # This is where we query the text embeddings created by the Ingestion Service.
         if self.config.get('search_datastore'):
             self.search_client = discoveryengine.SearchServiceClient()
             self.serving_config = (
@@ -66,6 +86,10 @@ class RetrievalAgent(ADKAgent):
 
     async def process(self, request: AgentRequest) -> dict:
         """
+        Main request handler. 
+        Receives a query (text description and/or image), finds the best pattern, 
+        and returns the full content from Firestore.
+        
         Payload expectations:
         {
             "description": "text description...", 
@@ -78,6 +102,7 @@ class RetrievalAgent(ADKAgent):
         top_k = request.payload.get('top_k', 5)
         
         # 1. Hybrid Search (Text + Visual)
+        # Execute the complex search logic to get a ranked list of IDs.
         ranked_pattern_ids = await self._hybrid_search(desc, image_data, top_k)
         
         if not ranked_pattern_ids:
@@ -87,6 +112,10 @@ class RetrievalAgent(ADKAgent):
         best_match_id = ranked_pattern_ids[0]
         
         # 2. Hydrate from Firestore
+        # SYSTEM DESIGN NOTE: The "hydrate" pattern
+        # Search engines (Discovery Engine/Vector Search) are fast but store limited data (indexes).
+        # Firestore is slower to search but stores the full, rich content (HTML blocks, metadata).
+        # So we Search First -> Get ID -> Fetch Details from Firestore.
         context = {}
         try:
             docs = self.db.collection(self.collection_name).document(best_match_id).collection('sections').stream()
@@ -108,6 +137,10 @@ class RetrievalAgent(ADKAgent):
         """
         Queries Discovery Engine (Text) and Vector Search (Image) 
         and fuses results using Reciprocal Rank Fusion (RRF).
+        
+        SYSTEM DESIGN NOTE: Scatter-Gather Pattern
+        We "scatter" the query to two different search engines in parallel.
+        Then we "gather" the results and merge them.
         """
         tasks = []
         
@@ -122,10 +155,11 @@ class RetrievalAgent(ADKAgent):
         if not tasks:
             return []
 
-        # Run searches in parallel
+        # Run searches in parallel (Scatter)
+        # Why? Because network calls are slow. Waiting for Text then Image would double the latency.
         results_list = await asyncio.gather(*tasks)
         
-        # Merge results using RRF
+        # Merge results using RRF (Gather)
         return self._reciprocal_rank_fusion(results_list, k=60)
 
     async def _search_text_discovery(self, text: str) -> List[str]:
@@ -184,7 +218,17 @@ class RetrievalAgent(ADKAgent):
     def _reciprocal_rank_fusion(self, lists_of_ids: List[List[str]], k: int = 60) -> List[str]:
         """
         Combines multiple ranked lists into one using RRF.
-        Score = sum(1 / (k + rank))
+        
+        SYSTEM DESIGN NOTE: Ranking Strategy
+        RRF is an algorithm that merges search results without needing to normalize scores.
+        Formula: Score = sum(1 / (k + rank))
+        
+        Why does this help?
+        - If Item A is rank #1 in Text and rank #1 in Image, it gets a massive score.
+        - If Item B is rank #1 in Text but not found in Image, it gets a good score.
+        - If Item C is rank #50 in both, it gets a low score.
+        
+        'k' is a constant (usually 60) that smoothes the importance of high rankings.
         """
         scores: Dict[str, float] = {}
         
@@ -193,9 +237,10 @@ class RetrievalAgent(ADKAgent):
                 if not item_id: continue
                 if item_id not in scores:
                     scores[item_id] = 0
+                # The lower the rank (0, 1, 2...), the higher the added score.
                 scores[item_id] += 1 / (k + rank)
         
-        # Sort by score descending
+        # Sort by score descending (Highest score = Best match)
         sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return [item[0] for item in sorted_items]
 
