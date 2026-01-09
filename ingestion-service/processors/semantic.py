@@ -11,7 +11,21 @@ logger = logging.getLogger(__name__)
 
 
 class StreamAProcessor:
-    """Stream A: Semantic Search (Vertex AI Discovery Engine)"""
+    """
+    Stream A: Semantic Search (Vertex AI Discovery Engine)
+    
+    SYSTEM DESIGN: High-Level Concepts (Semantic Search)
+    ----------------------------------------------------
+    Goal: Enable "Concept Matching". 
+    If a user searches for "scalable user management", we want to return this pattern,
+    even if the words "scalable" or "user management" don't appear verbatim in the text.
+    
+    How:
+    1. We extract raw text from HTML.
+    2. We use an LLM (Gemini 1.5 Pro) to summarize it into a density-optimized abstract.
+    3. We ingest this abstract into Vertex AI Discovery Engine (Stream A).
+       Discovery Engine handles the embedding generation and semantic indexing automatically.
+    """
     
     def __init__(self, config):
         self.config = config
@@ -22,6 +36,11 @@ class StreamAProcessor:
     async def prepare(self, metadata: Dict[str, Any], html_content: str, staging_dir: Path) -> Dict[str, Any]:
         """
         Phase 1: Prepare semantic document.
+        
+        SYSTEM DESIGN NOTE: LLM Enrichment
+        We don't just dump raw HTML into the search engine. HTML is noisy (<div>, <span>).
+        We use an LLM here as a "data cleaner" and "synthesizer" to create a standard
+        summary format (Problem, Solution, Trade-offs) that indexes much better than raw text.
         
         This method cleans HTML, generates an LLM summary, formats the Discovery Engine document object,
         and saves it to staging. NO calls to Discovery Engine API happen here.
@@ -40,6 +59,7 @@ class StreamAProcessor:
                 raise ValueError("Insufficient HTML content for processing")
             
             # 1. Clean HTML
+            # Beautiful Soup parses the DOM tree and gives us human-readable text.
             soup = BeautifulSoup(html_content, 'html.parser')
             text_dossier = soup.get_text(separator="\n")[:30000]
             
@@ -75,6 +95,8 @@ class StreamAProcessor:
             }
             
             # Save to staging for commit phase
+            # Why save to disk? Because in 2PC, if Stream B fails, we need to know 
+            # exactly what we *would* have committed so we can inspect it for debugging.
             staging_file = staging_dir / "stream_a_doc.json"
             with open(staging_file, 'w') as f:
                 json.dump({
@@ -120,7 +142,12 @@ class StreamAProcessor:
 
     async def commit(self, prepared_data: Dict[str, Any]) -> None:
         """
-        Phase 2: Commit prepared document to Vertex AI Discovery Engine
+        Phase 2: Commit prepared document to Vertex AI Discovery Engine.
+        
+        SYSTEM DESIGN NOTE: Incremental Updates
+        Discovery Engine supports 'reconciliation_mode=INCREMENTAL'.
+        This means if the document already exists, we update it. If not, we create it.
+        This provides idempotency: running this function twice has the same effect as running it once.
         """
         try:
             doc_id = prepared_data['doc_id']

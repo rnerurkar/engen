@@ -11,7 +11,21 @@ logger = logging.getLogger(__name__)
 
 
 class StreamCProcessor:
-    """Stream C: Content Atomization (Firestore)"""
+    """
+    Stream C: Content Atomization (Firestore)
+    
+    SYSTEM DESIGN: High-Level Concepts (RAG Persistence)
+    ----------------------------------------------------
+    Goal: Enable "Precise Retrieval" and "Source Attribution".
+    When an agent answers a question, we want to give it the exact paragraph 
+    that contains the answer, not the whole 50-page document.
+    
+    How:
+    1. We split the HTML document into logical "sections" (e.g., Overview, Pros/Cons).
+    2. We "enrich" images by converting them to text descriptions (Multimodal-to-Text).
+    3. We store each section as a separate document in a NoSQL database (Firestore).
+    This allows us to fetch just the "Pricing" section for Pattern A without loading everything.
+    """
     
     def __init__(self, config, sp_client=None):
         self.config = config
@@ -23,6 +37,12 @@ class StreamCProcessor:
     async def prepare(self, metadata: Dict[str, Any], html_content: str, staging_dir: Path) -> Dict[str, Any]:
         """
         Phase 1: Parse and prepare content sections.
+        
+        SYSTEM DESIGN NOTE: Data Atomization
+        We break the monolith (one large HTML page) into atoms (many small sections).
+        Why?
+        1. Context Window: LLMs have token limits. Providing 5 small relevant snippets is better than 1 giant irrelevant one.
+        2. Relevance: If a user asks about "security", we want to retrieve only the security section.
         
         This method parses HTML into logical sections, enriches images with LLM descriptions, 
         and saves JSON to a local staging file. NO database writes happen here.
@@ -40,6 +60,10 @@ class StreamCProcessor:
                 raise ValueError("Insufficient HTML content")
             
             # 1. Process Images: Replace <img> with LLM descriptions
+            # SYSTEM DESIGN NOTE: Multimodal Enrichment
+            # Text-only LLMs (like GPT-4-turbo-preview or Claude 3 Opus) cannot "see" images in a database.
+            # So we turn the images into text descriptions right here.
+            # <img src="diagram.png"> -> [Image Description: A flowchart showing User login flow...]
             soup = BeautifulSoup(html_content, 'html.parser')
             if self.sp_client:
                 await self._enrich_images_with_descriptions(soup)
@@ -220,7 +244,12 @@ class StreamCProcessor:
 
     async def commit(self, prepared_data: Dict[str, Any]) -> None:
         """
-        Phase 2: Write sections to Firestore with chunking and retry for large documents
+        Phase 2: Write sections to Firestore with chunking and retry for large documents.
+        
+        SYSTEM DESIGN NOTE: Batch Writes & Pagination
+        Firestore has a hard limit of 500 operations per batch.
+        If a document has 2000 sections (rare but possible), we split them into 4 chunks.
+        We also implement exponential backoff retry logic, because network blips happen.
         """
         try:
             sections = prepared_data['sections']

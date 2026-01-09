@@ -12,7 +12,21 @@ logger = logging.getLogger(__name__)
 
 
 class StreamBProcessor:
-    """Stream B: Visual Search (Vector Index + GCS)"""
+    """
+    Stream B: Visual Search (Vector Index + GCS)
+    
+    SYSTEM DESIGN: High-Level Concepts (Visual Search)
+    --------------------------------------------------
+    Goal: Enable "Visual Retrieval".
+    If a user draws a box on a whiteboard, we want to find patterns with similar diagrams.
+    Or if they search for "UML Sequence Diagram", we find images that look like that.
+    
+    How:
+    1. We scrape images from the SharePoint page.
+    2. We vectorize them using Titan Multimodal Embeddings (Image -> Numbers).
+    3. We store the raw binary image in Google Cloud Storage (GCS).
+    4. We store the vector + metadata in Vertex AI Vector Search (Matching Engine).
+    """
     
     def __init__(self, config, sp_client):
         self.config = config
@@ -29,6 +43,12 @@ class StreamBProcessor:
     async def prepare(self, metadata: Dict[str, Any], html_content: str, staging_dir: Path) -> Dict[str, Any]:
         """
         Phase 1: Prepare visual embeddings.
+        
+        SYSTEM DESIGN NOTE: Vectorization
+        We invoke the Embedding Model here in the 'Prepare' phase.
+        Why?
+        1. It's expensive and slow. We want to do the heavy lifting before we start the commit transaction.
+        2. If embedding fails (e.g., image is corrupt), we want to fail early.
         
         This method finds <img> tags, downloads the binary data, generates 
         a vector embedding using the Multimodal model, and saves both to staging.
@@ -113,11 +133,13 @@ class StreamBProcessor:
                         'image_bytes_size': len(image_bytes)
                     })
                     
+                    # The Vector Payload: This is what gets returned when we search later.
+                    # We store the GCS URI so the UI can display the image.
                     vectors.append({
                         'id': vector_id,
                         'embedding': emb,
                         'payload': {
-                            'pattern_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      ': metadata['id'],
+                            'pattern_id': metadata['id'],
                             'gcs_uri': gcs_uri,
                             'type': 'diagram',
                             'source_url': src
