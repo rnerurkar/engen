@@ -14,8 +14,11 @@ Key Features:
 
 import logging
 import base64
+import os
+import sys
 from typing import Dict, List, Any, Tuple
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 # Google Cloud Imports
 from google.cloud import storage
@@ -267,7 +270,50 @@ class VertexSearchPipeline:
         self.doc_client.write_document(request=request)
         logger.info(f"Successfully indexed document: {metadata['id']}")
 
-# Example Usage
 if __name__ == "__main__":
-    # This block allows testing the module independently if config is provided
-    pass
+    # 0. Load Environment Variables from .env file
+    load_dotenv()
+    
+    # 1. Setup Python Path to include 'ingestion-service' root
+    # This ensures we can import 'config' and 'clients' modules
+    current_file_path = os.path.abspath(__file__)
+    pipeline_dir = os.path.dirname(current_file_path)   # .../pipelines
+    service_root = os.path.dirname(pipeline_dir)        # .../ingestion-service
+    
+    if service_root not in sys.path:
+        sys.path.append(service_root)
+
+    # 2. Local Imports (now resolvable)
+    from config import Config
+    from clients.sharepoint import SharePointClient
+
+    # 3. Configure Logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    
+    try:
+        logger.info("Initializing Vertex Search Pipeline...")
+        
+        # 4. Initialize Configuration & Clients
+        config = Config()
+        
+        # Validate critical inputs
+        if not all([config.PROJECT_ID, config.GCS_BUCKET, config.SEARCH_DATA_STORE_ID]):
+             logger.error("Missing required Env variables: GCP_PROJECT_ID, GCS_IMAGE_BUCKET, or VERTEX_SEARCH_DS_ID")
+             sys.exit(1)
+
+        sp_client = SharePointClient(config)
+        
+        # 5. Instantiate Pipeline
+        pipeline = VertexSearchPipeline(
+            sp_client=sp_client,
+            project_id=config.PROJECT_ID,
+            location=config.LOCATION,
+            data_store_id=config.SEARCH_DATA_STORE_ID,
+            gcs_bucket_name=config.GCS_BUCKET
+        )
+        
+        # 6. Run
+        pipeline.run_ingestion()
+        
+    except Exception as e:
+        logger.error(f"Pipeline execution failed: {e}", exc_info=True)
