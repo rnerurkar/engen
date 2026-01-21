@@ -28,24 +28,24 @@ EnGen is an intelligent system that automates the creation of high-quality archi
 graph TB
     subgraph EnGen["EnGen System"]
         subgraph Ingestion["INGESTION PLANE"]
-            SP_Client[SharePoint Client]
-            Ingest_Pipe[Vertex Search Pipeline]
-            Gemini_Flash[Gemini 1.5 Flash<br/>(Vision Enrichment)]
+            SP_Client["SharePoint Client"]
+            Ingest_Pipe["Vertex Search Pipeline"]
+            Gemini_Flash["Gemini 1.5 Flash<br/>(Vision Enrichment)"]
             
             SP_Client --> Ingest_Pipe
             Ingest_Pipe --> Gemini_Flash
         end
         
         subgraph Serving["SERVING PLANE (Agent Swarm)"]
-            Orch[Orchestrator Agent]
-            Generator[Generator Agent<br/>(Writer + Mermaid)]
-            Reviewer[Reviewer Agent<br/>(Critique & Score)]
-            Retriever[Retriever Agent<br/>(Vertex Search)]
+            Orch["Orchestrator Agent"]
+            Generator["Generator Agent<br/>(Writer + Mermaid)"]
+            Reviewer["Reviewer Agent<br/>(Critique & Score)"]
+            Retriever["Retriever Agent<br/>(Vertex Search)"]
             
             subgraph Publishing["Publishing & Vis"]
-                Viz[Visualizer Lib<br/>(Kroki Wrapper)]
-                Pub[SharePoint Publisher]
-                Kroki[Kroki Service<br/>(Docker)]
+                Viz["Visualizer Lib<br/>(Kroki Wrapper)"]
+                Pub["SharePoint Publisher"]
+                Kroki["Kroki Service<br/>(Docker)"]
             end
             
             Orch --> Generator
@@ -57,8 +57,8 @@ graph TB
         end
         
         subgraph GCP["Google Cloud Platform"]
-            VAS[Vertex AI Search<br/>(Discovery Engine)]
-            GCS[Cloud Storage<br/>(Image Host)]
+            VAS["Vertex AI Search<br/>(Discovery Engine)"]
+            GCS["Cloud Storage<br/>(Image Host)"]
         end
         
         Ingest_Pipe --> VAS
