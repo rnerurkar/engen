@@ -220,15 +220,51 @@ sequenceDiagram
         Eval->>BQ: Insert Row (Status="PASS")
     end
 ```
-Description: This sequence highlights the "waterfall" of delegation.
+Description: This detailed flow breakdown highlights exactly where each engineering optimization (Caching, Async, MCP, EvalOps) is executed in the runtime path.
 
-Retrieval Phase: The Orchestrator calls the Retrieval Agent. Note the internal optimization loop: Search 50 items (cheap) -> Rerank with Ranking API (quality) -> Return Top 5. This ensures high signal-to-noise.
+### Phase 1: Initiation & The "Zero-Latency" Check
 
-Enrichment Phase: The Orchestrator passes the retrieved text to the Enrichment Agent. This agent performs a "reasoning step" (using Gemini Flash) to decide if it needs external tools, then executes them via MCP.
+* **Step 1:** The **User** submits a query (e.g., "Analysis of T-100 specs?") via the **Streamlit UI**.
+* **Step 2:** The UI sends the request asynchronously to the **Primary Orchestrator Agent** running on Cloud Run. A distributed trace ID is generated here to track the request across all microservices.
+* **Step 3:** **(Semantic Caching)** The Orchestrator immediately hashes the query and checks **Redis** for a semantic match. This is the "Fast Path" designed to return an answer in <100ms if the question has been asked before.
+* **Step 4:** **(Cache Hit Scenario)** If a match is found (Similarity > 0.95), Redis returns the stored answer immediately.
+* **Step 5:** The Orchestrator streams this cached response back to the UI, bypassing all subsequent expensive steps.
 
-Synthesis Phase: All data (Docs + Tool Results) is fed back to the Orchestrator for the final answer generation.
+### Phase 2: Optimized Retrieval (The "Librarian")
 
-Async Eval: Crucially, the evaluation event is fired "fire-and-forget" (-) arrow) so the user sees the response stream immediately.
+* **Step 6:** **(Cache Miss)** If Redis returns null, the Orchestrator delegates the task to the **Retrieval Agent**. This is a deterministic code block, not an LLM.
+* **Step 7:** **(Hybrid Chunking)** The Retrieval Agent executes a search against **Vertex AI Search**. It uses a high-precision query against 100-token "Child" chunks but requests the return of the 500-token "Parent" metadata.
+* **Step 8:** Vertex AI returns ~50 candidate Parent chunks. This is a "wide" fetch to ensure recall.
+* **Step 9:** **(Context Compression)** The Agent sends these 50 candidates to the **Vertex AI Ranking API**.
+* **Step 10:** The Ranking API uses a cross-encoder model to score relevance and discards the bottom 45 chunks, returning only the **Top 5 High-Value Chunks**.
+* **Step 11:** **(Context Caching)** If these 5 chunks exceed a token threshold (e.g., >10k tokens), the Agent registers them with **Vertex AI Context Cache** to reduce future latency. It returns the `Context_ID` (or raw text) to the Orchestrator.
+
+### Phase 3: Enrichment (The "Researcher")
+
+* **Step 12:** The Orchestrator passes the query and the retrieved context to the **Enrichment Agent**.
+* **Step 13:** **(Reasoning)** The Enrichment Agent asks **Gemini 1.5 Flash** (optimized for speed) if the current context is sufficient or if external tools are needed.
+* **Step 14:** Gemini Flash reasons: "The user asked for *current* warranty status, which is not in the static docs. Yes, use a tool."
+* **Step 15:** **(MCP Discovery)** The Agent uses the **Model Context Protocol (MCP)** to query the **MCP Server** for available tools (`list_tools`).
+* **Step 16:** **(MCP Execution)** The Agent dynamically calls the `get_warranty` tool on the MCP Server.
+* **Step 17:** The MCP Server returns the live structured data (e.g., `{warranty: "Active", expires: "2027"}`), which is returned to the Orchestrator.
+
+### Phase 4: Generation & Async Write-Back
+
+* **Step 18:** The Orchestrator sends the prompt (System Instructions + Optimized Context + Live MCP Data) to **Gemini 1.5 Pro**.
+* **Step 19:** **(Streaming)** Gemini 1.5 Pro begins streaming tokens immediately (Time-to-First-Token).
+* **Step 20:** The Orchestrator forwards these tokens to the **Streamlit UI** via Server-Sent Events (SSE) so the user sees the answer being typed out in real-time.
+* **Step 21:** **(Async Write)** Simultaneously (without blocking the stream), the Orchestrator updates **Redis** with the new Query-Response pair for future semantic hits.
+* **Step 22:** **(Async Trace)** The Orchestrator fires a "fire-and-forget" event to **Pub/Sub** containing the full interaction trace. This concludes the user-facing latency path.
+
+### Phase 5: EvalOps & Human-in-the-Loop (The Background Worker)
+
+* **Step 23:** The **Eval Worker Service** consumes the trace event from Pub/Sub.
+* **Step 24:** The Worker calls the **Vertex AI Evaluation API**, triggering an AutoSxS (Side-by-Side) task or a custom rubric check.
+* **Step 25:** **(The Judge)** The Vertex AI "Judge" model scores the response (e.g., Faithfulness: 0.75, Relevance: 0.9).
+* **Step 26:** The Worker compares this score against the pre-defined **Quality Threshold** (e.g., 0.85).
+* **Step 27:** **(HITL Trigger)** Since 0.75 < 0.85, the Worker flags this transaction.
+* **Step 28:** The Worker inserts a record into **BigQuery** with the status `NEEDS_HUMAN_REVIEW`.
+* **Step 29:** (Optional) The Worker pushes a notification back to the frontend or an admin dashboard, signaling that this specific response requires human verification or user feedback to improve the Golden Dataset.
 
 2.3 DevSecOps Pipeline Diagram (Harness)
 ```mermaid
