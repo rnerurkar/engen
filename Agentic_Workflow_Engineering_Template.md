@@ -153,41 +153,71 @@ EvalOps Layer: A completely decoupled, asynchronous pipeline where a dedicated "
 sequenceDiagram
     autonumber
     actor User
-    participant UI as Streamlit
-    participant Orch as Primary Orchestrator (Pro)
+    participant UI as Streamlit UI
+    participant Orch as Primary Orchestrator
+    participant Redis as Redis Cache
     participant RetAgent as Retrieval Agent
-    participant Enrich as Enrichment Agent (Flash)
+    participant Enrich as Enrichment Agent
     participant MCP as MCP Server
     participant Google as Vertex AI (Search/Rank/LLM)
-    participant PubSub as Pub/Sub (Eval)
+    participant PubSub as Pub/Sub (Trace Topic)
+    participant Eval as Eval Worker Service
+    participant BQ as BigQuery (Metrics)
 
-    User->>UI: Query: "Analysis of T-100 specs + current stock?"
-    UI->>Orch: Submit Query
+    User->>UI: Query: "Analysis of T-100 specs?"
+    UI->>Orch: Submit Query (Start Trace)
 
-    %% --- Step 1: Retrieval (Optimized) ---
-    Orch->>RetAgent: Call(query)
-    RetAgent->>Google: 1. Semantic Search (Hybrid)
-    Google-->>RetAgent: Return 50 Candidates (Parent Metadata)
-    RetAgent->>Google: 2. Ranking API (Compress to Top 5)
-    Google-->>RetAgent: Return Top 5 High-Value Chunks
-    RetAgent->>Google: 3. Create Context Cache (if large)
-    RetAgent-->>Orch: Return Context_ID / Text
-
-    %% --- Step 2: Enrichment (MCP) ---
-    Orch->>Enrich: Call(query, context_summary)
-    Enrich->>Google: Reason("Do I need tools?")
-    Google-->>Enrich: "Yes, get_stock_price"
-    Enrich->>MCP: List & Call Tool(get_stock_price)
-    MCP-->>Enrich: {price: 150.00}
-    Enrich-->>Orch: Return Enriched Data
-
-    %% --- Step 3: Synthesis & Eval ---
-    Orch->>Google: Generate Final Answer (Pro)
-    Google-->>Orch: Stream Tokens
+    %% --- PHASE 1: CACHE CHECK (The Fast Path) ---
+    Orch->>Redis: Check Semantic Cache(query_vector)
     
-    par Async Delivery
-        Orch-->>UI: Stream Response to User
-        Orch-)PubSub: Publish Trace Event (For Eval Worker)
+    alt Cache HIT
+        Redis-->>Orch: Return Cached Answer
+        Orch-->>UI: Stream Cached Answer
+    else Cache MISS
+        Note right of Orch: Start Agentic Workflow
+        
+        %% --- PHASE 2: OPTIMIZED RETRIEVAL ---
+        Orch->>RetAgent: Call(query)
+        RetAgent->>Google: 1. Hybrid Search (50 Candidates)
+        Google-->>RetAgent: Return Parent Metadata
+        RetAgent->>Google: 2. Ranking API (Top 5)
+        Google-->>RetAgent: Return High-Value Context
+        RetAgent-->>Orch: Return Context
+
+        %% --- PHASE 3: ENRICHMENT (MCP) ---
+        Orch->>Enrich: Call(query, context)
+        Enrich->>Google: Reason("Need external tools?")
+        Google-->>Enrich: "Yes, check warranty status"
+        Enrich->>MCP: List & Call Tool(get_warranty)
+        MCP-->>Enrich: {warranty: "Active"}
+        Enrich-->>Orch: Return Enriched Data
+
+        %% --- PHASE 4: GENERATION ---
+        Orch->>Google: Generate Final Answer (Pro)
+        Google-->>Orch: Stream Tokens
+        
+        par Async Operations
+            Orch-->>UI: Stream Response to User
+            Orch->>Redis: Update Cache(query, answer)
+            Orch-)PubSub: Publish Trace Event {Query, Response, Context}
+        end
+    end
+
+    %% --- PHASE 5: ASYNC EVAL & HITL TRIGGER ---
+    Note over PubSub, BQ: Asynchronous Evaluation Loop
+    
+    PubSub-)Eval: Consume Trace
+    Eval->>Google: Run Vertex AutoSxS (Judge)
+    Google-->>Eval: Score (Faithfulness: 0.75)
+    
+    Eval->>Eval: Check Threshold (Threshold = 0.85)
+    
+    alt Score < Threshold (Low Confidence)
+        Note right of Eval: TRIGGER HITL
+        Eval->>BQ: Insert Row (Status="NEEDS_HUMAN_REVIEW")
+        Eval-)UI: (Optional) Push "Request Feedback" Notification
+    else Score >= Threshold
+        Eval->>BQ: Insert Row (Status="PASS")
     end
 ```
 Description: This sequence highlights the "waterfall" of delegation.
