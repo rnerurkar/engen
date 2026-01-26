@@ -1,8 +1,60 @@
 GCP Multi-Agent RAG Accelerator: Engineering Template
 Version: 1.0.0 Status: Production Ready Architecture: Multi-Agent (A2A) with Actor Model Key Features: Hybrid Chunking, Vertex Ranking API, MCP Tooling, Async EvalOps, Harness CI/CD.
 
-1. Architectural Diagrams & Descriptions
-1.1 End-to-End Component Diagram
+1. Template Repository Structure
+This directory structure is designed for separation of concerns, scalability, and ease of deployment via modern CI/CD systems.
+```bash
+gcp-mcp-rag-accelerator/
+├── README.md                   # The high-level User Guide (see Section 2 below)  
+├── Makefile                    # Shortcuts for local dev, linting, and testing    
+│
+├── terraform/                  # Infrastructure as Code (IaC)
+│   ├── main.tf                 # Entry point linking modules
+│   ├── variables.tf            # Global variables (Project ID, Region)
+│   └── modules/
+│       ├── cloudrun_agents/    # Hosts the Main A2A Service & Eval Worker
+│       ├── redis/              # Memorystore for Semantic Caching
+│       ├── pubsub/             # Async Eval trace topic & subscription
+│       ├── bigquery/           # Datasets for Eval Metrics & Golden Sets
+│       └── iam/                # Least-privilege service accounts
+│
+├── harness/                    # CI/CD Pipeline Definitions
+│   ├── pipelines/
+│   │   └── evalops_pipeline.yaml # The Dev->PreProd->Prod promotion gate logic    
+│   └── templates/
+│       └── vertex_eval_step.yaml # Reusable step for running AutoSxS
+│
+├── config/                     # Environment-specific application configurations  
+│   ├── dev.yaml                # e.g., Smaller instance sizes, debug logging      
+│   ├── preprod.yaml            # e.g., Production data mirror, strict thresholds  
+│   └── prod.yaml               # e.g., High HA, production endpoints
+│
+├── data_prep/                  # Utilities for data ingestion
+│   └── parent_child_indexer.py # Script to convert raw text into JSONL for Hybrid Chunking
+│
+└── src/                        # Application Source Code
+    ├── main.py                 # FastAPI entry point for the Main Agent Service   
+    │
+    ├── agents/                 # The A2A Core Logic (Actor Model)
+    │   ├── base_agent.py       # Abstract base class for event-driven agents      
+    │   ├── orchestrator.py     # Primary Agent: Gemini Pro planner, state manager 
+    │   ├── retrieval_agent.py  # Deterministic Worker: Wraps the optimized lib    
+    │   └── enrichment_agent.py # Reasoning Worker: Gemini Flash MCP Client        
+    │
+    ├── lib/                    # Shared, Optimized Utilities (The "Secret Sauce") 
+    │   ├── async_utils.py      # Decorators for non-blocking I/O
+    │   ├── cache_mgr.py        # Unified client for Redis & Vertex Context Caching
+    │   ├── vertex_retriever.py # Implements Hybrid Chunking & Ranking API calls   
+    │   ├── mcp_client.py       # Generic client for discovering/calling MCP servers
+    │   └── tracing.py          # OpenTelemetry setup for distributed agent tracing
+    │
+    └── eval_worker/            # The Separate Async Evaluation Microservice       
+        ├── main.py             # entry point listening to Pub/Sub
+        └── judge.py            # Implements Vertex Eval SDK & Custom Rubrics      
+```
+
+2. Architectural Diagrams & Descriptions
+2.1 End-to-End Component Diagram
 ```mermaid
 
 graph TD
@@ -91,7 +143,7 @@ Enrichment Agent: An LLM-based worker that uses the Model Context Protocol (MCP)
 
 EvalOps Layer: A completely decoupled, asynchronous pipeline where a dedicated "Eval Worker" listens to Pub/Sub events to score responses against rubrics without slowing down the user.
 
-1.2 End-to-End Sequence Diagram
+2.2 End-to-End Sequence Diagram
 ```mermaid
 
 sequenceDiagram
@@ -144,7 +196,7 @@ Synthesis Phase: All data (Docs + Tool Results) is fed back to the Orchestrator 
 
 Async Eval: Crucially, the evaluation event is fired "fire-and-forget" (-) arrow) so the user sees the response stream immediately.
 
-1.3 DevSecOps Pipeline Diagram (Harness)
+2.3 DevSecOps Pipeline Diagram (Harness)
 ```mermaid
 
 graph LR
@@ -182,8 +234,8 @@ Pre-Prod: The critical gate. Runs a "Deep Eval" using Vertex AI AutoSxS against 
 
 Quality Gate: Harness specifically checks the numeric scores (Faithfulness > 0.9). If failed, Production deployment is blocked automatically.
 
-2. Infrastructure as Code (Terraform Modules)
-2.1 terraform/modules/cloudrun_agents/main.tf
+3. Infrastructure as Code (Terraform Modules)
+3.1 terraform/modules/cloudrun_agents/main.tf
 Deploys the main Agent Service and the background Eval Worker.
 
 ```hcl
@@ -228,7 +280,7 @@ resource "google_cloud_run_service" "eval_worker" {
   }
 }
 ```
-2.2 terraform/modules/redis/main.tf
+3.2 terraform/modules/redis/main.tf
 Provisions Memorystore for the Semantic Cache.
 
 ```hcl
@@ -245,7 +297,7 @@ output "host" {
   value = google_redis_instance.cache.host
 }
 ```
-2.3 terraform/modules/pubsub/main.tf
+3.3 terraform/modules/pubsub/main.tf
 Sets up the async trace pipeline.
 
 ```hcl
@@ -267,7 +319,7 @@ resource "google_pubsub_subscription" "eval_worker_sub" {
   }
 }
 ```
-2.4 terraform/modules/bigquery/main.tf
+3.4 terraform/modules/bigquery/main.tf
 Creates the datasets for Golden Sets and Runtime Metrics.
 
 ```hcl
@@ -286,7 +338,7 @@ resource "google_bigquery_table" "metrics" {
   schema     = file("${path.module}/schemas/metrics_schema.json")
 }
 ```
-2.5 terraform/modules/iam/main.tf
+3.5 terraform/modules/iam/main.tf
 Defines the Service Accounts for the agents.
 
 ```hcl
@@ -310,8 +362,8 @@ resource "google_project_iam_member" "search_user" {
   member  = "serviceAccount:${google_service_account.agent_sa.email}"
 }
 ```
-3. Harness Pipeline Definitions
-3.1 harness/pipelines/evalops_pipeline.yaml
+4. Harness Pipeline Definitions
+4.1 harness/pipelines/evalops_pipeline.yaml
 The master pipeline logic.
 
 ```yaml
@@ -382,7 +434,7 @@ pipeline:
                           msg := "Faithfulness below 90%. Deployment Blocked."
                         }
 ```
-3.2 harness/templates/vertex_eval_step.yaml
+4.2 harness/templates/vertex_eval_step.yaml
 Reusable template for running Google's evaluation.
 
 ```yaml
@@ -407,8 +459,8 @@ template:
         - name: faithfulness
         - name: answer_relevance
 ```
-4. Configuration Files
-4.1 config/dev.yaml
+5. Configuration Files
+5.1 config/dev.yaml
 ```yaml
 
 environment: "dev"
@@ -429,7 +481,7 @@ agents:
       - name: "mock-tools"
         url: "http://mock-mcp:8080"
 ```
-4.2 config/prod.yaml
+5.2 config/prod.yaml
 ```yaml
 
 environment: "prod"
@@ -453,8 +505,8 @@ agents:
       - name: "weather-api"
         url: "https://weather-mcp.internal"
 ```
-5. Data Preparation
-5.1 data_prep/parent_child_indexer.py
+6. Data Preparation
+6.1 data_prep/parent_child_indexer.py
 Utility to chunk data for the Hybrid Chunking strategy.
 
 ```python
@@ -496,8 +548,8 @@ def main():
 if __name__ == "__main__":
     main()
 ```
-6. Source Code (src/)
-6.1 src/main.py
+7. Source Code (src/)
+7.1 src/main.py
 FastAPI Entry Point.
 
 ```python
@@ -524,7 +576,7 @@ async def chat_endpoint(query_request: dict, background_tasks: BackgroundTasks):
     
     return {"answer": response}
 ```
-6.2 src/agents/base_agent.py
+7.2 src/agents/base_agent.py
 Abstract Base Class.
 
 ```python
@@ -540,7 +592,7 @@ class BaseAgent(ABC):
         """Core logic for the agent."""
         pass
 ```
-6.3 src/agents/orchestrator.py
+7.3 src/agents/orchestrator.py
 The "Manager" agent.
 
 ```python
@@ -589,7 +641,7 @@ class OrchestratorAgent(BaseAgent):
         # Use PubSub client to push to 'agent-traces' topic
         pass 
 ```
-6.4 src/agents/retrieval_agent.py
+7.4 src/agents/retrieval_agent.py
 Wrapper for the optimized library.
 
 ```python
@@ -609,7 +661,7 @@ class RetrievalAgent(BaseAgent):
         # It calls the optimized pipeline
         return await self.lib.search_rank_and_cache(query)
 ```
-6.5 src/agents/enrichment_agent.py
+7.5 src/agents/enrichment_agent.py
 The "Reasoning" agent using MCP.
 
 ```python
@@ -642,8 +694,8 @@ class EnrichmentAgent(BaseAgent):
             
         return "No external data needed."
 ```
-7. Library (src/lib/)
-7.1 src/lib/async_utils.py
+8. Library (src/lib/)
+8.1 src/lib/async_utils.py
 ```python
 
 import asyncio
@@ -657,7 +709,7 @@ def async_timer(func):
         return await func(*args, **kwargs)
     return wrapper
 ```
-7.2 src/lib/cache_mgr.py
+8.2 src/lib/cache_mgr.py
 Handles Redis and Context Caching.
 
 ```python
@@ -678,7 +730,7 @@ class CacheManager:
         # Return resource ID
         return "projects/.../locations/.../cachedContents/12345"
 ```
-7.3 src/lib/vertex_retriever.py (The Core Engine)
+8.3 src/lib/vertex_retriever.py (The Core Engine)
 Implements Hybrid Chunking and Ranking.
 
 ```python
@@ -700,7 +752,7 @@ class VertexRetriever:
         # See section 3.2 in user guide for full logic
         return ["Optimized Context Chunk 1", "Optimized Context Chunk 2"]
 ```
-7.4 src/lib/mcp_client.py
+8.4 src/lib/mcp_client.py
 Generic MCP Tooling.
 
 ```python
@@ -721,7 +773,7 @@ class MCPClient:
             resp = await client.post(f"{self.base_url}/tools/{tool_name}/call", json=args)
             return resp.json()
 ```
-7.5 src/lib/tracing.py
+8.5 src/lib/tracing.py
 OpenTelemetry Boilerplate.
 
 ```python
@@ -745,8 +797,8 @@ def trace_span(name):
         return wrapper
     return decorator
 ```
-8. Eval Worker (src/eval_worker/)
-8.1 src/eval_worker/main.py
+9. Eval Worker (src/eval_worker/)
+9.1 src/eval_worker/main.py
 Pub/Sub Listener.
 
 ```python
@@ -768,7 +820,7 @@ async def process_trace_event(request: Request):
     
     return {"status": "ok"}
 ```
-8.2 src/eval_worker/judge.py
+9.2 src/eval_worker/judge.py
 Vertex Eval SDK + Rubrics.
 
 ```python
