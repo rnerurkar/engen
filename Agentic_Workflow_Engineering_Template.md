@@ -56,57 +56,56 @@ gcp-mcp-rag-accelerator/
 2. Architectural Diagrams & Descriptions
 2.1 End-to-End Component Diagram
 ```mermaid
-
 graph TD
     %% Styling
     classDef frontend fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
     classDef orchestrator fill:#fff3e0,stroke:#e65100,stroke-width:3px;
     classDef subagent fill:#ffe0b2,stroke:#ef6c00,stroke-width:2px;
     classDef mcp fill:#d1c4e9,stroke:#512da8,stroke-width:2px;
-    classDef optimized fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef optimized fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,stroke-dasharray:5 5;
     classDef google fill:#f3e5f5,stroke:#4a148c,stroke-width:2px;
-    classDef async fill:#eceff1,stroke:#546e7a,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef async fill:#eceff1,stroke:#546e7a,stroke-width:2px,stroke-dasharray:5 5;
 
     User([User])
     
     subgraph "Frontend Layer"
-        Streamlit[Streamlit UI\n(Chat + HITL Feedback)]:::frontend
+        Streamlit["Streamlit UI<br/>(Chat + HITL Feedback)"]:::frontend
     end
 
     subgraph "Multi-Agent Host Service (Cloud Run)"
-        OrchAgent[Primary Orchestrator Agent\n(Gemini Pro - Planner)]:::orchestrator
-        Memory[(Short-Term Memory)]:::orchestrator
+        OrchAgent["Primary Orchestrator Agent<br/>(Gemini Pro - Planner)"]:::orchestrator
+        Memory[("Short-Term Memory")]:::orchestrator
 
         %% Agent 2: The Librarian
         subgraph "Retrieval Agent (Deterministic)"
-            RetAgent[Retrieval Logic Wrapper]:::subagent
-            AsyncCtrl[Async Controller]:::optimized
-            Redis[(Redis Semantic Cache)]:::optimized
+            RetAgent["Retrieval Logic Wrapper"]:::subagent
+            AsyncCtrl["Async Controller"]:::optimized
+            Redis[("Redis Semantic Cache")]:::optimized
         end
 
         %% Agent 3: The Researcher
         subgraph "Enrichment Agent (Reasoning)"
-            EnrichAgent[Enrichment Agent\n(Gemini Flash)]:::subagent
-            MCPClient[MCP Client]:::mcp
+            EnrichAgent["Enrichment Agent<br/>(Gemini Flash)"]:::subagent
+            MCPClient["MCP Client"]:::mcp
         end
     end
 
     subgraph "External Tooling"
-        MCPServer[MCP ServerHost\n(e.g. APIs)]:::mcp
+        MCPServer["MCP ServerHost<br/>(e.g. APIs)"]:::mcp
     end
 
     subgraph "Google Cloud Services (Runtime)"
-        VertexSearch[Vertex AI Search\n(Hybrid Store)]:::google
-        RankingAPI[Vertex AI Ranking API]:::google
-        ContextCache[Vertex AI Context Cache]:::google
-        VertexLLM[Vertex AI LLM API]:::google
+        VertexSearch["Vertex AI Search<br/>(Hybrid Store)"]:::google
+        RankingAPI["Vertex AI Ranking API"]:::google
+        ContextCache["Vertex AI Context Cache"]:::google
+        VertexLLM["Vertex AI LLM API"]:::google
     end
 
     subgraph "EvalOps Layer (Asynchronous)"
-        PubSub{Pub/Sub\nTrace Topic}:::async
-        EvalWorker[Eval Worker Service]:::async
-        VertexEval[Vertex AI Eval API\n(Judge + Rubric)]:::google
-        BigQuery[(BigQuery\nMetrics Store)]:::async
+        PubSub{"Pub/Sub<br/>Trace Topic"}:::async
+        EvalWorker["Eval Worker Service"]:::async
+        VertexEval["Vertex AI Eval API<br/>(Judge + Rubric)"]:::google
+        BigQuery[("BigQuery<br/>Metrics Store")]:::async
     end
 
     %% Flows
@@ -123,14 +122,19 @@ graph TD
 
     %% Optimization Internals
     RetAgent --> AsyncCtrl
-    AsyncCtrl --> Redis & VertexSearch & RankingAPI & ContextCache
+    AsyncCtrl --> Redis
+    AsyncCtrl --> VertexSearch
+    AsyncCtrl --> RankingAPI
+    AsyncCtrl --> ContextCache
 
     %% MCP Flow
     EnrichAgent --> MCPClient --> MCPServer
 
     %% Eval Flow
     OrchAgent -.->|Fire-and-Forget Trace| PubSub
-    PubSub -.-> EvalWorker -.-> VertexEval -.-> BigQuery
+    PubSub -.-> EvalWorker
+    EvalWorker -.-> VertexEval
+    VertexEval -.-> BigQuery
     Streamlit -.->|HITL Feedback| BigQuery
 ```
 Description: This diagram represents a microservices-based Multi-Agent architecture hosted on Google Cloud Run.
@@ -198,28 +202,27 @@ Async Eval: Crucially, the evaluation event is fired "fire-and-forget" (-) arrow
 
 2.3 DevSecOps Pipeline Diagram (Harness)
 ```mermaid
-
 graph LR
     subgraph "Harness CI/CD Pipeline"
         
         subgraph "Dev (Commit)"
             Commit[Git Push] --> Build[Build Container]
             Build --> DeployDev[Deploy to Dev]
-            DeployDev --> Smoke[Run Vertex Rapid Eval\n(Sanity Check)]
+            DeployDev --> Smoke["Run Vertex Rapid Eval<br/>(Sanity Check)"]
         end
 
         Smoke --> Gate1{Pass Smoke?}
         
         subgraph "Pre-Prod (Merge)"
             Gate1 -- Yes --> Merge[Merge to Main]
-            Merge --> DeployPre[Deploy to Pre-Prod\n(Prod Mirror)]
-            DeployPre --> DeepEval[Run AutoSxS Eval\n(Golden Dataset)]
+            Merge --> DeployPre["Deploy to Pre-Prod<br/>(Prod Mirror)"]
+            DeployPre --> DeepEval["Run AutoSxS Eval<br/>(Golden Dataset)"]
         end
 
         DeepEval --> Gate2{Faithfulness > 0.9?}
 
         subgraph "Prod (Release)"
-            Gate2 -- Yes --> Canary[Canary Deploy (10%)]
+            Gate2 -- Yes --> Canary["Canary Deploy (10%)"]
             Canary --> Rollout[Full Rollout]
         end
 
