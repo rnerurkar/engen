@@ -820,20 +820,160 @@ Wrapper for the optimized library.
 
 ```python
 
-from src.agents.base_agent import BaseAgent
-from src.lib.vertex_retriever import VertexRetriever
-from src.lib.tracing import trace_span
+import asyncio
+import json
+import logging
+from typing import List, Dict, Optional
 
-class RetrievalAgent(BaseAgent):
+# Google Cloud Async Clients
+from google.cloud import discoveryengine_v1 as discoveryengine
+# Redis Async Client
+import redis.asyncio as redis
+
+# Configuration (Simulated)
+PROJECT_ID = "acme-ai-prod"
+LOCATION = "global"
+DATA_STORE_ID = "acme-docs-ds"
+REDIS_URL = "redis://10.0.0.5:6379"
+
+class AsyncControl:
+    """
+    The High-Performance I/O Engine.
+    Wraps all external network calls in non-blocking async methods.
+    """
     def __init__(self):
-        super().__init__("RetrievalAgent")
-        self.lib = VertexRetriever() # Handles the heavy lifting
+        # Initialize Google Async Clients (Grpc/AsyncIO)
+        self.search_client = discoveryengine.SearchServiceAsyncClient()
+        self.rank_client = discoveryengine.RankServiceAsyncClient()
+        
+        # Initialize Redis Async Connection Pool
+        self.redis = redis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
+        
+        self.serving_config = f"projects/{PROJECT_ID}/locations/{LOCATION}/collections/default_collection/dataStores/{DATA_STORE_ID}/servingConfigs/default_search"
+        self.ranking_config = f"projects/{PROJECT_ID}/locations/{LOCATION}/rankingConfigs/default_ranking_config"
 
-    @trace_span("retrieval_agent_execution")
-    async def execute(self, query: str):
-        # This is a deterministic agent (Tool Wrapper)
-        # It calls the optimized pipeline
-        return await self.lib.search_rank_and_cache(query)
+    async def check_cache(self, query_hash: str) -> Optional[str]:
+        """Check Redis for existing answer (Zero Latency Path)"""
+        return await self.redis.get(f"cache:{query_hash}")
+
+    async def update_cache_bg(self, query_hash: str, response: str):
+        """Fire-and-forget cache update"""
+        try:
+            # Set with TTL (e.g., 1 hour)
+            await self.redis.setex(f"cache:{query_hash}", 3600, response)
+            logging.info(f"Cache updated for {query_hash}")
+        except Exception as e:
+            logging.error(f"Failed to update cache: {e}")
+
+    async def hybrid_search(self, query: str, top_k: int = 50) -> List[Dict]:
+        """
+        Executes Vertex AI Search (Hybrid).
+        Fetches WIDE (50 docs) to ensure recall.
+        """
+        request = discoveryengine.SearchRequest(
+            serving_config=self.serving_config,
+            query=query,
+            page_size=top_k,
+            # content_search_spec={"snippet_spec": {"return_snippet": True}}
+        )
+        
+        # Await the network call non-blockingly
+        response = await self.search_client.search(request=request)
+        
+        # Extract results (Parent-Child Logic)
+        candidates = []
+        async for result in response:
+            data = result.document.derived_struct_data
+            # HYBRID CHUNKING: We searched 'Child', but we extract 'Parent'
+            parent_text = data.get("parent_context", result.document.content)
+            candidates.append({
+                "id": result.document.id, 
+                "content": parent_text
+            })
+            
+        return candidates
+
+    async def semantic_rerank(self, query: str, candidates: List[Dict], top_n: int = 5) -> List[str]:
+        """
+        Executes Vertex AI Ranking API.
+        Compresses 50 candidates down to 5 high-value chunks.
+        """
+        if not candidates:
+            return []
+
+        # Convert candidates to Ranking Records
+        records = [
+            discoveryengine.RankingRecord(
+                id=c["id"], 
+                content=c["content"]
+            ) for c in candidates
+        ]
+
+        request = discoveryengine.RankRequest(
+            ranking_config=self.ranking_config,
+            model="semantic-ranker-512@latest",
+            top_n=top_n,
+            query=query,
+            records=records
+        )
+
+        # Await the heavy ranking operation
+        response = await self.rank_client.rank(request=request)
+        
+        # Return only the text of the top ranked items
+        return [r.content for r in response.records]
+
+    async def register_context_cache(self, content_list: List[str]) -> str:
+        """
+        Simulated: If content > 32k tokens, register with Vertex Context Cache.
+        Returns a cache ID or the raw text if small.
+        """
+        full_text = "\n".join(content_list)
+        if len(full_text) > 100000: # Arbitrary large threshold
+            # await context_cache_client.create(...)
+            return "context_cache_resource_id_123" 
+        return full_text
+
+
+class RetrievalAgent:
+    """
+    The Deterministic Logic Layer.
+    Orchestrates the 'Fan-Out' using AsyncControl.
+    """
+    def __init__(self):
+        self.async_ctrl = AsyncControl()
+
+    async def execute(self, query: str) -> str:
+        query_hash = str(hash(query))
+
+        # --- STEP 1: FAST PATH (Cache Check) ---
+        cached_result = await self.async_ctrl.check_cache(query_hash)
+        if cached_result:
+            logging.info("Redis Cache Hit - Returning immediately")
+            return cached_result
+
+        logging.info("Cache Miss - Starting Optimized Retrieval Pipeline")
+
+        # --- STEP 2: RETRIEVAL (Search) ---
+        # We await this because we can't proceed without data
+        candidates = await self.async_ctrl.hybrid_search(query, top_k=50)
+        
+        # --- STEP 3: COMPRESSION (Ranking) ---
+        # We await this because quality is paramount
+        top_chunks = await self.async_ctrl.semantic_rerank(query, candidates, top_n=5)
+
+        # --- STEP 4: CONTEXT CACHING (Optimization) ---
+        final_context = await self.async_ctrl.register_context_cache(top_chunks)
+
+        # --- STEP 5: ASYNC WRITE-BACK (Fire-and-Forget) ---
+        # We do NOT await this. We schedule it on the event loop.
+        # This ensures the agent returns data to the LLM immediately 
+        # without waiting for Redis to confirm the write.
+        asyncio.create_task(
+            self.async_ctrl.update_cache_bg(query_hash, final_context)
+        )
+
+        return final_context
 ```
 7.5 src/agents/enrichment_agent.py
 The "Reasoning" agent using MCP.
