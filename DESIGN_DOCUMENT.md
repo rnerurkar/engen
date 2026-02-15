@@ -372,7 +372,7 @@ sequenceDiagram
         Orch->>Rev: review_pattern(draft)
         Rev-->>Orch: {score, approved, critique}
         opt Approved
-            break
+            break Approved
         end
     end
     
