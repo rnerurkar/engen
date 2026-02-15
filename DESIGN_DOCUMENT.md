@@ -396,7 +396,7 @@ sequenceDiagram
     Orch->>SP: publish_page(content + artifacts)
     SP-->>Orch: page_url
     
-    Orch-->>Client: {url, status: published}
+    Orch-->>Client: Return result (url, status=published)
 ```
 
 ### 4.4 End-to-End Flow Description
