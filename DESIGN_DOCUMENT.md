@@ -359,43 +359,44 @@ sequenceDiagram
     participant SP as SharePoint
 
     Client->>Orch: POST /invoke {image, title}
-    
     Note over Orch,Gen: Step 1: Analyze & Retrieve
     Orch->>Gen: describe_image(image)
     Gen-->>Orch: description
     Orch->>Orch: retrieve_donor(description)
-    
-    Note over Orch,Rev: Step 2: Generation Loop
-    loop Max 3 Iterations
+
+    Note over Orch,Rev: Step 2: Generation Loop (Max 3 times)
+    loop Generation cycle (max 3)
         Orch->>Gen: generate_pattern(desc, donor, critique)
         Gen-->>Orch: draft_sections
         Orch->>Rev: review_pattern(draft)
         Rev-->>Orch: {score, approved, critique}
-        opt Approved
-            break Approved
+        alt Pattern approved
+            Orch->>Orch: Approve and exit loop
+        else Not approved
+            Orch->>Orch: Continue loop with critique
         end
     end
-    
+
     Note over Orch,Verifier: Step 3: Human Check (Pattern)
     Orch->>Verifier: request_approval(sections)
     Verifier-->>Orch: {status: APPROVED}
-    
+
     Note over Orch,Artifact: Step 4: Infrastructure Code
     Orch->>Artifact: generate_component_spec(doc)
     Artifact-->>Orch: components[]
-    loop Each Component
+    loop For each component
         Orch->>Artifact: generate_artifact(comp)
         Artifact-->>Orch: terraform_json
     end
-    
+
     Note over Orch,Verifier: Step 5: Human Check (Artifacts)
     Orch->>Verifier: request_approval(artifacts)
     Verifier-->>Orch: {status: APPROVED}
-    
+
     Note over Orch,SP: Step 6: Publish
     Orch->>SP: publish_page(content + artifacts)
     SP-->>Orch: page_url
-    
+
     Orch-->>Client: Return result
 ```
 
