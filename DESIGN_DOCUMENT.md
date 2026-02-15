@@ -263,101 +263,88 @@ sequenceDiagram
 
 ## 4. Serving Plane
 
-The Serving Plane uses a multi-agent system to analyze architecture diagrams and generate comprehensive documentation by retrieving and adapting relevant donor patterns.
+The Serving Plane uses a multi-agent system to analyze architecture diagrams, retrieve relevant "donor" patterns, generate comprehensive documentation, create Infrastructure-as-Code (IaC) artifacts, and publish the results to SharePoint after human verification.
 
 ### 4.1 Design Principles
 
-1. **Specialization**: Each agent has a single, well-defined responsibility
-2. **Agent-to-Agent Communication**: Standardized A2A protocol with retry and timeout
-3. **Reflection Loop**: Iterative refinement until quality threshold met
-4. **Prompt Engineering**: Centralized, structured prompts via `PromptTemplates`
-5. **Error Resilience**: Graceful degradation when agents unavailable
-6. **Observability**: Health checks with dependency status reporting
+1.  **Specialization**: Each agent has a single, well-defined responsibility (e.g., Retrieval, Generation, Review, Artifact Creation).
+2.  **Agent-to-Agent Communication (A2A)**: Standardized HTTP-based protocol with retry and timeout.
+3.  **Reflection Loop**: Iterative refinement (Generate -> Review -> Generate) until quality threshold met.
+4.  **Human-in-the-Loop**: Critical governance steps where human approval is required before proceeding (Pattern Approval, Artifact Approval).
+5.  **Artifact Generation**: Automated creation of deployable code (Terraform/CloudFormation) based on authoritative interfaces.
+6.  **Observability**: Centralized logging and status tracking via `ADKAgent` framework.
 
 ### 4.2 Agent Swarm Architecture
 
-#### Orchestrator Agent (Port 8080)
-**Role**: Workflow coordinator, traffic controller, and SharePoint publisher
+The system consists of the following agents, orchestrating a complex workflow:
 
+#### Orchestrator Agent (Port 9000)
+**Role**: Workflow coordinator, traffic controller, state manager.
 **Responsibilities**:
-- Receives document generation requests with architecture diagram
-- Routes tasks to specialized agents in correct sequence
-- Manages reflection loop for quality refinement
-- Implements retry logic and timeout handling
-- **Converts final markdown to SharePoint modern page format**
-- **Publishes .aspx pages to SharePoint using MS Graph API**
-- Returns final document with optional SharePoint URL
-
+-   Receives initial request (Title + Image).
+-   Orchestrates the `Retrieve -> Generate -> Review` loop.
+-   **Manages Human Verification**: Pauses workflow to request human approval via the `HumanVerifierAgent`.
+-   **Triggers Artifact Generation**: Calls `ArtifactGenerationAgent` once the pattern is approved.
+-   **Publishes to SharePoint**: Converts final Markdown and Artifacts to a SharePoint Page.
 **Key Behaviors**:
-- Uses `A2AClient` for all inter-agent communication
-- Configurable max revisions (default: 3) and min quality score (default: 90)
-- Implements exponential backoff for agent failures
-- Maintains session context across agent calls
-- **Uses `SharePointPublisher` to create and publish pages**
-- **Supports optional news promotion for high-visibility documents**
+-   Implements the "Loop Agent" pattern (max 3 iterations for refinement).
+-   Integrates strictly with `HumanVerifierAgent` for gatekeeping.
+-   Aggregates results from all agents before publishing.
 
-#### Vision Agent (Port 8081)
-**Role**: Architecture diagram interpreter
-
+#### Retriever Agent (Port 9001)
+**Role**: Context provider.
 **Responsibilities**:
-- Analyzes uploaded architecture diagrams using Gemini Vision
-- Extracts components, data flows, and relationships
-- Identifies architectural patterns and technologies
-- Provides structured JSON description
+-   Takes a search query (derived from the diagram description).
+-   Searches the Vector Store (Vertex AI Search) for relevant "Donor Patterns".
+-   Returns the most relevant pattern's text and metadata to ground the generation.
 
-**Key Behaviors**:
-- Uses `PromptTemplates.vision_analyze_architecture_diagram()`
-- Validates diagram quality and provides confidence scores
-- Handles multiple diagram formats (PNG, JPEG, SVG references)
-- Returns detailed technical description for downstream agents
-
-#### Retrieval Agent (Port 8082)
-**Role**: Semantic search and pattern matching
-
+#### Generator Agent (Port 9002)
+**Role**: Content creator.
 **Responsibilities**:
-- Performs semantic search against Discovery Engine
-- Finds most relevant donor patterns based on diagram description
-- **Applies upstream filtering** to Vector Search results (e.g., status=active)
-- Retrieves section content from Firestore
-- Ranks and fuses results using RRF (Reciprocal Rank Fusion)
+-   Uses Gemini 1.5 Pro to generate technical documentation sections (Problem, Solution, Implementation).
+-   Takes inputs: Diagram Description, Donor Pattern Context, Previous Critiques.
+-   Outputs: Structured dictionary of sections.
 
-**Key Behaviors**:
-- Real Vertex AI Discovery Engine integration
-- **Hybrid Search**: Fuses text (Stream A) and visual (Stream B) results
-- Uses Firestore to hydrate full section content
-- Supports `filters` in request payload for granular search scope
-- Returns `donor_id` and `sections` dictionary
-
-#### Writer Agent (Port 8083)
-**Role**: Documentation section generator
-
+#### Reviewer Agent (Port 9003)
+**Role**: Quality assurance.
 **Responsibilities**:
-- Generates specific documentation sections (Problem, Solution, etc.)
-- Adapts donor pattern style to new architecture
-- **Interprets Stream C image placeholders** and requests Mermaid.js diagrams
-- Incorporates critique feedback from Reviewer
-- Maintains consistent technical writing style
+-   Evaluates generated content against specific criteria (clarity, completeness, relevance to donor).
+-   Outputs: A numerical score (0-100), an `approved` boolean, and a text critique.
+-   Acts as the feedback mechanism for the Generator loop.
 
-**Key Behaviors**:
-- Uses **Strategy Pattern** for dynamic prompt generation based on section type
-- Receives `description`, `donor_context`, `critique` as inputs
-- Generates 800-1500 words for major sections
-- Returns markdown-formatted text
-
-#### Reviewer Agent (Port 8084)
-**Role**: Quality assurance and evaluation
-
+#### Artifact Generation Agent (Port 9004)
+**Role**: Infrastructure coder.
 **Responsibilities**:
-- Evaluates draft sections against quality criteria
-- Scores on 6 dimensions: technical accuracy, completeness, clarity, structure, practical value, style alignment
-- Provides constructive feedback for improvements
-- Determines if revision needed or content acceptable
+1.  **Component Specification**: Analyzes the textual documentation to identify system components (e.g., "GCS Bucket", "Cloud Run").
+2.  **Enrichment**: Matches components to "Authoritative Interfaces" (standardized Terraform variable definitions stored in GCS).
+3.  **Dependency Resolution**: Sorts components topologically (e.g., VPC before VM) to ensure valid execution order.
+4.  **Code Generation**: Generates actual Terraform/CloudFormation code for each component using Gemini 1.5 Pro, strictly adhering to the interface.
 
-**Key Behaviors**:
-- Uses `PromptTemplates.reviewer_evaluate_draft()`
-- Returns structured JSON with score (0-100) and detailed feedback
-- Robust JSON parsing with regex fallback for malformed responses
-- Returns default scores if LLM response unparseable
+#### Human Verifier Agent (Port 9005)
+**Role**: Governance and Gatekeeper.
+**Responsibilities**:
+-   **Persistence**: Stores review requests in CloudSQL (PostgreSQL).
+-   **Notification**: Sends notifications (via Pub/Sub) to human reviewers.
+-   **Feedback Loop**: Captures human feedback (reason for rejection) to potentially improve future prompts.
+-   **Dual-Stage Verification**:
+    1.  **Pattern Stage**: Verifies the textual design before code generation.
+    2.  **Artifact Stage**: Verifies the generated IaC code before publishing.
+
+### 4.3 End-to-End Workflow
+
+1.  **Analyze**: Orchestrator sends the input Diagram to the Generator (or Vision tool) to get a text description.
+2.  **Retrieve**: Orchestrator queries the Retriever for a "Donor Pattern" based on the description.
+3.  **Generate/Review Loop**:
+    *   **Generate**: Generator creates a draft pattern based on the diagram + donor.
+    *   **Review**: Reviewer critiques the draft.
+    *   *Loop*: If rejected, feedback is sent back to Generator (max 3 times).
+4.  **Human Verification 1 (Pattern)**: The best draft is sent to the `HumanVerifierAgent`. The workflow pauses (or polls) until a human approves the text.
+5.  **Artifact Generation**:
+    *   Orchestrator sends approved text to `ArtifactGenerationAgent`.
+    *   Agent extracts components -> Enriches with Interface -> Sorts -> Generates IaC.
+6.  **Human Verification 2 (Artifacts)**: The generated Terraform/CF code is sent to `HumanVerifierAgent` for a final safety check.
+7.  **Publish**: If approved, the Orchestrator uses the `SharePointPublisher` module to create a new page containing both the design documentation and the code snippets. The status is saved, and the URL is returned.
+
 
 ### 4.3 End-to-End Sequence Diagram
 
@@ -365,191 +352,81 @@ The Serving Plane uses a multi-agent system to analyze architecture diagrams and
 sequenceDiagram
     participant Client as API Client
     participant Orch as Orchestrator Agent
-    participant Vision as Vision Agent
-    participant Retr as Retrieval Agent
-    participant Writer as Writer Agent
-    participant Review as Reviewer Agent
-    participant GCP as GCP Services
+    participant Gen as Generator Agent
+    participant Rev as Reviewer Agent
+    participant Verifier as Human Verifier
+    participant Artifact as Artifact Agent
     participant SP as SharePoint
 
-    Client->>Orch: POST /invoke
-    Note right of Client: {image_uri, title, sections[], publish}
-    Orch->>Orch: Validate request payload
+    Client->>Orch: POST /invoke {image, title}
     
-    Note over Orch,Vision: Step 1: Vision Analysis
-    Orch->>Vision: A2A call: task=interpret
-    Note right of Orch: {image: uri}
-    Vision->>GCP: Gemini Vision API
-    Note right of Vision: analyze diagram
-    GCP-->>Vision: Technical description
-    Note left of GCP: components, patterns
-    Vision-->>Orch: {description, confidence}
+    Note over Orch,Gen: Step 1: Analyze & Retrieve
+    Orch->>Gen: describe_image(image)
+    Gen-->>Orch: description
+    Orch->>Orch: retrieve_donor(description)
     
-    alt Description invalid or empty
-        Orch-->>Client: Error: Empty description
-    end
-    
-    Note over Orch,Retr: Step 2: Pattern Retrieval
-    Orch->>Retr: A2A call: task=find_donor
-    Note right of Orch: {description, image}
-    Retr->>GCP: Discovery Engine
-    Note right of Retr: semantic search
-    GCP-->>Retr: Top matching pattern_id
-    Retr->>GCP: Firestore: get sections
-    GCP-->>Retr: Section documents
-    Retr-->>Orch: {donor_id, sections}
-    
-    Note over Orch,Review: Step 3: Reflection Loop (per section)
-    
-    loop For each section
-        loop Max 3 revisions
-            Note over Orch,Writer: Generate Draft
-            Orch->>Writer: A2A call: task=write
-            Note right of Orch: {section, description, donor_context, critique}
-            Writer->>GCP: Gemini LLM with prompt
-            GCP-->>Writer: Generated section text
-            Writer-->>Orch: {text: markdown_content}
-            
-            Note over Orch,Review: Review Draft
-            Orch->>Review: A2A call: task=review
-            Note right of Orch: {draft: text}
-            Review->>GCP: Gemini LLM
-            Note right of Review: evaluation criteria
-            GCP-->>Review: Score + feedback JSON
-            Review->>Review: Parse JSON with fallback
-            Review-->>Orch: {score: 85, feedback}
-            
-        alt Score >= 90 threshold met
-            break Threshold Met
-                Orch->>Orch: Accept draft, next section
-            end
-        else Score < 90 and revisions < max
-            Orch->>Orch: Prepare critique for Writer
-            Note over Orch: Loop with critique feedback
-        else Max revisions reached
-            break Max Revisions
-                Orch->>Orch: Accept last draft with warning
-            end
-        end
+    Note over Orch,Rev: Step 2: Generation Loop
+    loop Max 3 Iterations
+        Orch->>Gen: generate_pattern(desc, donor, critique)
+        Gen-->>Orch: draft_sections
+        Orch->>Rev: review_pattern(draft)
+        Rev-->>Orch: {score, approved, critique}
+        opt Approved
+            break
         end
     end
     
-    Note over Orch,SP: Step 4: SharePoint Publishing
-    alt publish=true and SP configured
-        Orch->>Orch: Convert markdown to HTML
-        Orch->>SP: POST /sites/{siteId}/pages
-        Note right of Orch: Create modern page
-        SP-->>Orch: {pageId, name}
-        Orch->>SP: PATCH /pages/{pageId}
-        Note right of Orch: Set canvas content
-        SP-->>Orch: 200 OK
-        Orch->>SP: POST /pages/{pageId}/publish
-        SP-->>Orch: {webUrl}
+    Note over Orch,Verifier: Step 3: Human Check (Pattern)
+    Orch->>Verifier: request_approval(sections)
+    Verifier-->>Orch: {status: APPROVED}
+    
+    Note over Orch,Artifact: Step 4: Infrastructure Code
+    Orch->>Artifact: generate_component_spec(doc)
+    Artifact-->>Orch: components[]
+    loop Each Component
+        Orch->>Artifact: generate_artifact(comp)
+        Artifact-->>Orch: terraform_json
     end
     
-    Note over Orch,Client: Return Complete Response
-    Orch->>Orch: Assemble final response
-    Orch-->>Client: Response with SharePoint URL
+    Note over Orch,Verifier: Step 5: Human Check (Artifacts)
+    Orch->>Verifier: request_approval(artifacts)
+    Verifier-->>Orch: {status: APPROVED}
+    
+    Note over Orch,SP: Step 6: Publish
+    Orch->>SP: publish_page(content + artifacts)
+    SP-->>Orch: page_url
+    
+    Orch-->>Client: {url, status: published}
 ```
 
 ### 4.4 End-to-End Flow Description
 
-#### Request Initiation
-1. **Client** sends POST request to Orchestrator's `/invoke` endpoint with:
-   - `image_uri`: URL or base64-encoded architecture diagram
-   - `sections`: Array of section names to generate (default: ["Problem", "Solution"])
-   - `filters`: Optional dictionary for search constraints (e.g., `{"status": ["active"]}`)
-   - Optional: `request_id`, `timeout_seconds`
+#### Phase 1: Contextualization
+1.  **Analysis**: The Orchestrator sends the input diagram to the `Generator Agent`. The agent uses Gemini Vision to extract a detailed technical description.
+2.  **Retrieval**: The Orchestrator uses this description to query the `Retriever Agent`. This agent performs a hybrid search (Vector + Keyword) in Vertex AI Search to find the best matching "Donor Pattern" to serve as a structural template.
 
-2. **Orchestrator** validates request payload:
-   - Checks for required `image` or `image_uri` field
-   - Initializes `A2AClient` context manager for agent communication
-   - Sets timeout from environment variable `AGENT_TIMEOUT` (default: 60s)
+#### Phase 2: Content Generation Loop
+3.  **Drafting**: The Orchestrator invokes the `Generator Agent` with the diagram description and the donor pattern context. Gemini 1.5 Pro generates a first draft of the documentation (Problem, Solution, Architecture).
+4.  **Review**: The `Reviewer Agent` analyzes the draft against quality guidelines. It returns a score and specific critique.
+5.  **Refinement**: If the score is below threshold, the Orchestrator feeds the critique back into the `Generator Agent` for a revised draft. This repeats for up to 3 iterations.
 
-#### Step 1: Vision Analysis
-3. Orchestrator makes A2A call to **Vision Agent** with task `"interpret"` and image payload
-4. Vision Agent receives request and validates image accessibility
-5. Vision Agent calls `PromptTemplates.vision_analyze_architecture_diagram()` to build structured prompt
-6. Sends diagram to **Gemini 1.5 Pro Vision API** with prompt
-7. LLM analyzes diagram and returns:
-   - Component inventory (services, databases, queues, etc.)
-   - Data flow patterns (request/response, pub/sub, etc.)
-   - Technology stack (languages, frameworks, cloud services)
-   - Architectural patterns identified (microservices, event-driven, etc.)
-   - Technical summary (2-3 paragraphs)
+#### Phase 3: Governance (Point 1)
+6.  **Pattern Verification**: The Orchestrator sends the final text draft to the `HumanVerifierAgent`.
+7.  **Notification**: The agent persists the request in CloudSQL and triggers a Pub/Sub notification to the engineering team.
+8.  **Wait State**: The workflow pauses (or polls) until a human reviewer approves the text via the Review Portal.
 
-8. Vision Agent formats response as structured JSON and returns to Orchestrator
-9. Orchestrator validates description is non-empty and substantive (>50 chars)
-10. If validation fails, returns error to Client immediately
+#### Phase 4: Infrastructure Synthesis
+9.  **Specification**: Once the text is approved, the `ArtifactGenerationAgent` analyzes it to extract a list of required infrastructure components.
+10. **Dependency Sorting**: The components are sorted topologically (e.g., Network -> Compute) to ensure valid deployment order.
+11. **Code Generation**: For each component, the agent consults "Authoritative Interfaces" (GCS-stored variable schemas) and uses Gemini to generate compliant Terraform/CloudFormation code.
 
-#### Step 2: Pattern Retrieval
-11. Orchestrator makes A2A call to **Retrieval Agent** with task `"find_donor"`:
-   - `description`: Technical description from Vision Agent
-   - `image`: Original image URI for context
-   - `filters`: Constraints passed from client request
+#### Phase 5: Governance (Point 2)
+12. **Artifact Verification**: The generated code bundles are sent to the `HumanVerifierAgent` for a second round of approval, specifically checking for security and standards compliance.
 
-12. Retrieval Agent receives request and prepares search queries
-   
-13. **Parallel Scatter-Gather Search**:
-   - **Task A (Text)**: Calls Discovery Engine `search()` with technical description.
-   - **Task B (Visual)**: Calls Vector Search `find_neighbors()` with image embedding and `filters` (restricts).
+#### Phase 6: Publication
+13. **Assembly**: The Orchestrator combines the approved text and the approved code snippets.
+14. **Publishing**: The `SharePointPublisher` module pushes the content to a new SharePoint Page, formatting the code blocks and embedding the original diagram. The final URL is returned to the user.
 
-14. **Fusion**:
-   - Combines results using Reciprocal Rank Fusion (RRF).
-   - Returns top matching pattern IDs.
-
-15. Defaults to top match or falls back if no matches found.
-
-16. Retrieval Agent hydrates full content from **Firestore**:
-   - Queries `collection(patterns).document(donor_id).collection(sections)`
-   - Streams all section documents
-   - Builds `sections` dictionary: `{section_name: {plain_text, char_count, ...}}`
-
-17. Returns to Orchestrator: `{donor_id: "pat_101", sections: {...}}`
-
-#### Step 3: Reflection Loop (Per Section)
-18. Orchestrator iterates over requested sections (e.g., "Problem", "Solution")
-19. For each section, enters **reflection loop** with max iterations (default: 3)
-
-**Iteration 1: Initial Draft**
-20. Orchestrator makes A2A call to **Writer Agent** with task `"write"`:
-   - `section`: Section name (e.g., "Problem")
-   - `description`: Diagram description from Vision
-   - `donor_context`: Full retrieval results including donor sections
-   - `critique`: Empty string (first iteration)
-
-21. Writer Agent receives request and selects strategy via `PromptTemplates`:
-   - Uses Strategy Pattern to select template based on section name.
-   - Includes reference content from donor pattern.
-   - **Visual Adaptation**: If donor has image placeholders, prompts LLM to generate Mermaid.js diagrams to match new architecture.
-
-22. Writer sends prompt to **Gemini 1.5 Pro LLM**
-23. LLM generates section content (800-1500 words) in Markdown format
-24. Writer returns `{text: "## Problem\n\nThe organization faced..."}` to Orchestrator
-
-**Review Phase**
-25. Orchestrator makes A2A call to **Reviewer Agent** with task `"review"`:
-   - `draft`: Generated text from Writer
-
-26. Reviewer Agent calls `PromptTemplates.reviewer_evaluate_draft()`:
-   - Builds evaluation prompt with 6 scoring criteria
-   - Each criterion has max points (Technical Accuracy: 25, Completeness: 20, etc.)
-   - Requests structured JSON response
-
-27. Reviewer sends prompt to **Gemini 1.5 Pro LLM**
-28. LLM evaluates draft and returns JSON with:
-   - `overall_score`: 0-100 aggregate score
-   - `category_scores`: Breakdown by dimension
-   - `strengths`: List of positive aspects
-   - `improvements_needed`: Specific issues with severity and suggestions
-   - `detailed_feedback`: Narrative explanation
-
-29. Reviewer Agent parses JSON response:
-   - Tries direct `json.loads()` first
-   - Falls back to regex extraction if markdown code blocks present
-   - Returns default score (50) if parsing completely fails
-
-30. Returns to Orchestrator: `{score: 85, feedback: "Strong technical detail but needs more trade-off analysis..."}`
 
 **Decision Point**
 31. Orchestrator compares score to threshold (default: 90):
