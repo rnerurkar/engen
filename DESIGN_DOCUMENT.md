@@ -152,7 +152,56 @@ sequenceDiagram
 
 #### Error Handling
 *   **Partial Failures**: If an image fails to download or analyze, the pipeline logs a warning and proceeds with the rest of the pattern (Best-effort delivery).
-*   **Pipeline Resilience**: Unhandled exceptions in one pattern are caught in the main loop, allowing subsequent patterns to process successfully.tion)
+*   **Pipeline Resilience**: Unhandled exceptions in one pattern are caught in the main loop, allowing subsequent patterns to process successfully.
+
+---
+
+## 4. Serving Plane
+
+The Serving Plane uses a multi-agent system to analyze architecture diagrams, retrieve relevant "donor" patterns, generate comprehensive documentation, create Infrastructure-as-Code (IaC) artifacts, and publish the results to SharePoint after human verification.
+
+### 4.1 Design Principles
+
+1.  **Specialization**: Each agent has a single, well-defined responsibility (e.g., Retrieval, Generation, Review, Artifact Creation).
+2.  **Agent-to-Agent Communication (A2A)**: Standardized HTTP-based protocol with retry and timeout.
+3.  **Reflection Loop**: Iterative refinement (Generate -> Review -> Generate) until quality threshold met.
+4.  **Human-in-the-Loop**: Critical governance steps where human approval is required before proceeding (Pattern Approval, Artifact Approval).
+5.  **Artifact Generation**: Automated creation of deployable code (Terraform/CloudFormation) based on authoritative interfaces.
+6.  **Observability**: Centralized logging and status tracking via `ADKAgent` framework.
+
+### 4.2 Agent Swarm Architecture
+
+The system consists of the following agents, orchestrating a complex workflow:
+
+*   **Orchestrator Agent**: Workflow coordinator, traffic controller, state manager.
+*   **Vision Agent**: "Eyes" of the system, converts pixels to technical descriptions.
+*   **Retrieval Agent**: "Memory", finds relevant prior art (RAG).
+*   **Generator Agent**: "Writer", drafts content using LLMs and donor context.
+*   **Reviewer Agent**: "Critic", evaluates quality using rubrics.
+*   **Artifact Generation Agent**: "Engineer", translates text specs into IaC code.
+*   **Human Verifier Agent**: "Gatekeeper", manages the approval lifecycle.
+
+### 4.3 High-Level Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Orch as Orchestrator Agent
+    participant Vision as Vision Agent
+    participant Ret as Retrieval Agent
+    participant Gen as Generator Agent
+    participant Rev as Reviewer Agent
+    participant Artifact as Artifact Gen Agent
+    participant Verifier as Human Verifier
+    participant SP as SharePoint Publisher
+
+    Client->>Orch: POST /process {image, title}
+    
+    Note over Orch,Ret: Step 1: Context
+    Orch->>Vision: analyze(image)
+    Vision-->>Orch: description
+    Orch->>Ret: find_donor(description)
+    Ret-->>Orch: donor_context
 
     Note over Orch,Rev: Step 2: Generation Loop (Max 3 times)
     loop Generation cycle (max 3)
@@ -219,168 +268,34 @@ sequenceDiagram
 14. **Publishing**: The `SharePointPublisher` module pushes the content to a new SharePoint Page, formatting the code blocks and embedding the original diagram. The final URL is returned to the user.
 
 
-**Decision Point**
-31. Orchestrator compares score to threshold (default: 90):
-   - If `score >= 90`: Accept draft, add to `final_doc`, proceed to next section
-   - If `score < 90` and `revision < max_revisions`: Continue to next iteration
-   - If `max_revisions` reached: Accept last draft with warning log
+### 4.5 Response Assembly
 
-**Iteration 2+: Refinement**
-32. If score below threshold, Orchestrator prepares for next iteration:
-   - Sets `critique` = feedback from Reviewer
-   - Returns to step 20 (Writer call) with critique included
+Upon completion of the generation and optional publication, the Orchestrator constructs the final response:
 
-33. Writer receives critique and incorporates into prompt:
-   - Prompt includes "PREVIOUS FEEDBACK TO ADDRESS:" section
-   - Emphasizes specific improvements needed
+-   `document`: Dictionary of section names to markdown content.
+-   `donor_pattern`: ID of the pattern used as reference.
+-   `diagram_description`: Technical description from Vision Agent.
+-   `sharepoint`: Publishing result (if `publish=true`), containing the Page URL and ID.
 
-34. Steps 21-30 repeat with refined draft
-35. Loop continues until score meets threshold or max revisions reached
+It then logs completion metrics (total sections, average quality score, total revisions) and returns the JSON payload to the client.
 
-#### Multi-Section Completion
-36. Steps 18-35 repeat for each requested section
-37. Orchestrator accumulates results in `final_doc` dictionary:
-   ```json
-   {
-     "Problem": "## Problem\n\n...",
-     "Solution": "## Solution\n\n...",
-     "Implementation": "## Implementation\n\n..."
-   }
-   ```
+### 4.6 Error Handling Strategy
 
-#### Step 4: SharePoint Publishing (Optional)
-When `publish=true` is set in the request, Orchestrator publishes the generated document to SharePoint.
-**Note:** The system publishes the *content* (Pattern Documentation and valid Artifact Code Blocks) as a SharePoint Modern Page. It does *not* upload raw artifact files (e.g., .tf, .zip) to a Document Library.
+The Orchestrator implements robust error handling for each agent interaction:
 
-39. Orchestrator checks `publish` flag from request payload (default: `false`)
-40. If publish enabled, combines all sections into unified markdown document:
-   - Orders sections by standard sequence: Problem → Solution → Implementation → etc.
-   - Appends generated artifacts as code blocks in an "Infrastructure" section (if available).
-   - Adds document title from `title` parameter or generates default
-
-**OAuth Authentication**
-41. SharePointPublisher acquires OAuth token:
-   - Uses MSAL Client Credentials Flow
-   - Requests scope: `https://graph.microsoft.com/.default`
-   - Caches token for subsequent calls (token lifetime ~60 min)
-
-42. Token request to Azure AD:
-   ```
-   POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
-   grant_type=client_credentials&client_id={id}&client_secret={secret}&scope=https://graph.microsoft.com/.default
-   ```
-
-**Page Creation**
-43. MarkdownToSharePointConverter transforms markdown:
-   - Converts markdown to HTML using Python markdown library
-   - Wraps HTML in SharePoint Text Web Part structure
-   - Creates canvas section with single-column layout
-
-44. Creates draft page via MS Graph API:
-   ```
-   POST https://graph.microsoft.com/v1.0/sites/{siteId}/pages
-   {
-     "name": "{title}.aspx",
-     "title": "{title}",
-     "pageLayout": "article",
-     "showPublishDate": true
-   }
-   ```
-
-45. Graph API returns page ID and draft URL
-
-**Content Setting**
-46. Sets page canvas content with converted markdown:
-   ```
-   PATCH https://graph.microsoft.com/v1.0/sites/{siteId}/pages/{pageId}/microsoft.graph.sitePage
-   {
-     "canvasLayout": {
-       "horizontalSections": [...]
-     }
-   }
-   ```
-
-**Publishing**
-47. Publishes the page to make it visible:
-   ```
-   POST https://graph.microsoft.com/v1.0/sites/{siteId}/pages/{pageId}/microsoft.graph.sitePage/publish
-   ```
-
-**News Promotion (Optional)**
-48. If `SHAREPOINT_PROMOTE_AS_NEWS=true`:
-   ```
-   PATCH https://graph.microsoft.com/v1.0/sites/{siteId}/pages/{pageId}/microsoft.graph.sitePage
-   {
-     "promotionKind": "newsPost"
-   }
-   ```
-
-49. SharePointPublisher returns `PublishResult`:
-   ```python
-   PublishResult(
-       success=True,
-       page_id="abc123",
-       page_url="https://tenant.sharepoint.com/sites/site/SitePages/title.aspx",
-       error=None,
-       publish_time_ms=2340
-   )
-   ```
-
-50. Orchestrator logs SharePoint publishing metrics:
-   - Page URL
-   - Page ID
-   - Publishing duration
-
-#### Response Assembly
-51. Orchestrator constructs final response:
-   - `document`: Dictionary of section names to markdown content
-   - `donor_pattern`: ID of the pattern used as reference
-   - `diagram_description`: Technical description from Vision Agent
-   - `sharepoint`: Publishing result (if publish=true)
-
-52. Logs completion metrics:
-   - Total sections generated
-   - Average quality score
-   - Total revisions across all sections
-   - Processing time
-   - SharePoint page URL (if published)
-
-53. Returns response to Client:
-   ```json
-   {
-     "status": "completed",
-     "result": {
-       "document": {...},
-       "donor_pattern": "pat_101",
-       "diagram_description": "...",
-       "sharepoint": {
-         "published": true,
-         "page_url": "https://tenant.sharepoint.com/sites/site/SitePages/title.aspx",
-         "page_id": "abc123",
-         "publish_time_ms": 2340
-       }
-     },
-     "execution_time_ms": 45230
-   }
-   ```
-
-#### Error Handling Paths
-- **Vision Agent Fails**: Orchestrator catches `A2AError`, retries 3x, returns error if exhausted
-- **Retrieval Agent Fails**: Same retry logic, may proceed with empty donor context if fallback succeeds
-- **Writer Agent Fails**: Logs error, attempts to continue with next section, returns partial document
-- **Reviewer Agent Fails**: Logs error, accepts draft without review (score = 100 bypass)
-- **Timeout Exceeded**: Returns partial results with timeout status
-- **SharePoint OAuth Fails**: Logs authentication error, returns document without publishing (graceful degradation)
-- **SharePoint Page Creation Fails**: Logs Graph API error, returns document with `sharepoint.published=false`
-- **SharePoint Publishing Fails**: Logs error, draft page remains accessible via admin, returns partial success
+-   **Vision Agent Fails**: Orchestrator catches `A2AError`, retries 3x, returns error if exhausted.
+-   **Retrieval Agent Fails**: Retries; if failures persist, proceeds with empty donor context (graceful degradation).
+-   **Writer Agent Fails**: Logs error, attempts to continue with next section, flags partial document.
+-   **Reviewer Agent Fails**: Logs error, accepts draft without review (bypasses check).
+-   **SharePoint Publishing Fails**: Logs error, returns document with `sharepoint.published=false` (does not block response).
 
 ---
 
-### 4.5 SharePoint Publishing - Detailed Sequence
+### 4.7 SharePoint Publishing - Detailed Sequence
 
 This section provides an in-depth look at how the Orchestrator converts markdown documentation to a SharePoint modern page using MS Graph API.
 
-#### 4.5.1 Overview
+#### 4.7.1 Overview
 
 When `publish=true` is set in the Orchestrator request, the generated markdown document goes through a conversion pipeline:
 
@@ -388,7 +303,7 @@ When `publish=true` is set in the Orchestrator request, the generated markdown d
 Markdown → HTML → SharePoint Web Parts → Page Canvas → Published Page
 ```
 
-#### 4.5.2 Detailed Sequence Diagram
+#### 4.7.2 Detailed Sequence Diagram
 
 ```mermaid
 sequenceDiagram
@@ -534,7 +449,7 @@ sequenceDiagram
     deactivate Pub
 ```
 
-#### 4.5.3 Markdown Conversion Libraries
+#### 4.7.3 Markdown Conversion Libraries
 
 The converter uses proven libraries instead of custom regex:
 
@@ -568,7 +483,7 @@ Notes:
 - Code blocks render with `codehilite` classes for optional styling
 - If libraries are unavailable, converter degrades to a minimal, safe fallback
 
-#### 4.5.4 SharePoint Page Canvas Structure
+#### 4.7.4 SharePoint Page Canvas Structure
 
 SharePoint modern pages use a specific JSON structure. Here's how the converted document maps to it:
 
@@ -617,7 +532,7 @@ SharePoint modern pages use a specific JSON structure. Here's how the converted 
 }
 ```
 
-#### 4.5.5 MS Graph API Endpoints Used
+#### 4.7.5 MS Graph API Endpoints Used
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -630,7 +545,7 @@ SharePoint modern pages use a specific JSON structure. Here's how the converted 
 | `/sites/{siteId}/pages/{pageId}` | GET | Retrieve page details (webUrl) |
 | `/sites/{siteId}/pages/{pageId}` | PATCH | Promote to news (`promotionKind: newsPost`) |
 
-#### 4.5.6 Required Azure AD App Permissions
+#### 4.7.6 Required Azure AD App Permissions
 
 To use SharePoint publishing, register an Azure AD application with these permissions:
 
@@ -651,18 +566,18 @@ SHAREPOINT_PROMOTE_AS_NEWS=false
 PUBLISH_TO_SHAREPOINT=true
 ```
 
-### 4.6 Artifact Generation Workflow
+### 4.8 Artifact Generation Workflow
 
 This workflow transforms the high-level architecture documentation into concrete, deployable infrastructure code (e.g., Terraform) or Service Catalog product configurations. It ensures that the documented pattern can be readily instantiated.
 
-#### 4.6.1 Workflow Overview
+#### 4.8.1 Workflow Overview
 The process follows a strict "Specification-First" approach:
 1.  **Specification Extraction**: The plain-text documentation is parsed to identify distinct architectural components and their relationships.
 2.  **Execution Planning**: A dependency graph is built to determine the order of creation.
 3.  **Artifact Generation**: For each component, specific IaC code is generated.
 4.  **Human Verification**: A critical gate where a human expert must review and approve the generated code before it is considered "final" or published.
 
-#### 4.6.2 Detailed Sequence Diagram
+#### 4.8.2 Detailed Sequence Diagram
 
 ```mermaid
 sequenceDiagram
@@ -730,7 +645,7 @@ sequenceDiagram
     end
 ```
 
-#### 4.6.3 Step-by-Step Flow Description
+#### 4.8.3 Step-by-Step Flow Description
 
 **Phase 1: Component Specification**
 1.  **Request**: Once the high-level documentation is approved, the `Orchestrator` sends the full text to the `ComponentSpecificationAgent`.
