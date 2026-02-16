@@ -31,7 +31,7 @@ graph TB
         subgraph Ingestion["INGESTION PLANE (Managed Pipeline)"]
             SP[SharePoint Client<br/>- OAuth Authentication<br/>- Page Extraction<br/>- Image Download]
             Pipeline[Vertex Search Pipeline<br/>- Consolidation Engine]
-            Streams[Merged Processing<br/>- Metadata Mapping (Stream A)<br/>- Diagram Analysis (Stream B)<br/>- Content Extraction (Stream C)]
+            Streams[Merged Processing<br/>- Metadata Mapping Stream A<br/>- Diagram Analysis Stream B<br/>- Content Extraction Stream C]
             
             SP --> Pipeline
             Pipeline --> Streams
@@ -51,7 +51,7 @@ graph TB
         end
         
         subgraph GCP["Google Cloud Platform"]
-            VertexAI[Vertex AI<br/>- Discovery Engine (Search)<br/>- Gemini 1.5 Flash (Vision)]
+            VertexAI[Vertex AI<br/>- Discovery Engine Search<br/>- Gemini 1.5 Flash Vision]
             GCS[Cloud Storage<br/>- Pattern Images]
         end
         
