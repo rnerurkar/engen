@@ -459,11 +459,13 @@ sequenceDiagram
    ```
 
 #### Step 4: SharePoint Publishing (Optional)
-When `publish=true` is set in the request, Orchestrator publishes the generated document to SharePoint:
+When `publish=true` is set in the request, Orchestrator publishes the generated document to SharePoint.
+**Note:** The system publishes the *content* (Pattern Documentation and valid Artifact Code Blocks) as a SharePoint Modern Page. It does *not* upload raw artifact files (e.g., .tf, .zip) to a Document Library.
 
 39. Orchestrator checks `publish` flag from request payload (default: `false`)
 40. If publish enabled, combines all sections into unified markdown document:
    - Orders sections by standard sequence: Problem → Solution → Implementation → etc.
+   - Appends generated artifacts as code blocks in an "Infrastructure" section (if available).
    - Adds document title from `title` parameter or generates default
 
 **OAuth Authentication**
@@ -857,6 +859,84 @@ SHAREPOINT_TARGET_FOLDER=Generated Documentation
 SHAREPOINT_PAGE_TEMPLATE=Article
 SHAREPOINT_PROMOTE_AS_NEWS=false
 PUBLISH_TO_SHAREPOINT=true
+```
+
+### 4.6 Artifact Generation Workflow
+
+This workflow transforms the high-level architecture documentation into concrete, deployable infrastructure code (e.g., Terraform) or Service Catalog product configurations. It ensures that the documented pattern can be readily instantiated.
+
+#### 4.6.1 Workflow Overview
+The process follows a strict "Specification-First" approach:
+1.  **Specification Extraction**: The plain-text documentation is parsed to identify distinct architectural components and their relationships.
+2.  **Execution Planning**: A dependency graph is built to determine the order of creation.
+3.  **Artifact Generation**: For each component, specific IaC code is generated.
+4.  **Human Verification**: A critical gate where a human expert must review and approve the generated code before it is considered "final" or published.
+
+#### 4.6.2 Detailed Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Orch as Orchestrator Agent
+    participant Spec as Component Spec Agent
+    participant Gen as Artifact Gen Agent
+    participant Ver as Human Verifier Agent
+    participant DB as Review DB (CloudSQL)
+    participant Pub as SharePoint Publisher
+
+    Note over Orch, Pub: Pre-requisite: Documentation Pattern is Approved
+
+    Orch->>Spec: generate_component_spec(documentation)
+    activate Spec
+    Spec->>Spec: Analyze Docs with LLM
+    Spec->>Spec: Extract Components (Resource, Type, Props)
+    Spec->>Spec: Build Dependency Graph
+    Spec-->>Orch: { execution_plan: [Comp A, Comp B] }
+    deactivate Spec
+
+    loop For each Component in Execution Plan
+        Orch->>Gen: generate_artifact(spec=Comp A, type="terraform")
+        activate Gen
+        Gen->>Gen: Load Templates / Context
+        Gen->>Gen: Generate IaC Code (LLM)
+        Gen->>Gen: Validate Syntax (tflint/check)
+        
+        alt Validation Fails
+            Gen-->>Orch: Error (Retry logic)
+        else Validation Passes
+            Gen-->>Orch: { artifact: "resource...", filename: "main.tf" }
+        end
+        deactivate Gen
+    end
+
+    Note over Orch, Ver: Phase: Human Verification (Artifacts)
+
+    Orch->>Ver: request_approval(title, stage="ARTIFACT", artifacts[])
+    activate Ver
+    
+    Ver->>DB: INSERT INTO reviews (status="PENDING", data=artifacts)
+    Ver->>Ver: Send Notification (Email/Slack)
+    Ver-->>Orch: { status: "PENDING", review_id: "123" }
+    deactivate Ver
+
+    loop Polling for Approval
+        Orch->>Ver: check_status(review_id="123")
+        Ver->>DB: SELECT status FROM reviews
+        DB-->>Ver: "APPROVED" | "REJECTED" | "PENDING"
+        Ver-->>Orch: status
+    end
+
+    alt Status == REJECTED
+        Orch->>Orch: Abort / Request Feedback
+    else Status == APPROVED
+        Note over Orch, Pub: Phase: Final Publishing
+        
+        Orch->>Orch: Append Artifacts to Markdown
+        Orch->>Pub: publish_document(sections + code_blocks)
+        activate Pub
+        Pub->>Pub: Create Page -> Set Content -> Publish
+        Pub-->>Orch: { success: true, url: "..." }
+        deactivate Pub
+    end
 ```
 
 ---
