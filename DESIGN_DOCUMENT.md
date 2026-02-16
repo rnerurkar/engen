@@ -28,13 +28,13 @@ EnGen is an intelligent system that automates the creation of high-quality archi
 ```mermaid
 graph TB
     subgraph EnGen["EnGen System"]
-        subgraph Ingestion["INGESTION PLANE (ETL Pipeline)"]
+        subgraph Ingestion["INGESTION PLANE (Managed Pipeline)"]
             SP[SharePoint Client<br/>- OAuth Authentication<br/>- Page Extraction<br/>- Image Download]
-            TM[Transaction Manager<br/>- Two-Phase Commit<br/>- Atomic Operations<br/>- Rollback Support]
-            Streams[3 Parallel Streams<br/>Stream A: Semantic<br/>Stream B: Visual<br/>Stream C: Content]
+            Pipeline[Vertex Search Pipeline<br/>- Consolidation Engine]
+            Streams[Merged Processing<br/>- Metadata Mapping (Stream A)<br/>- Diagram Analysis (Stream B)<br/>- Content Extraction (Stream C)]
             
-            SP --> TM
-            TM --> Streams
+            SP --> Pipeline
+            Pipeline --> Streams
         end
         
         subgraph Serving["SERVING PLANE (Agent Swarm)"]
@@ -51,13 +51,13 @@ graph TB
         end
         
         subgraph GCP["Google Cloud Platform"]
-            VertexAI[Vertex AI<br/>- Discovery Engine<br/>- Vector Search<br/>- Gemini LLM]
-            GCS[Cloud Storage<br/>- Images<br/>- Embeddings]
-            Firestore[Firestore<br/>- Sections<br/>- Metadata]
+            VertexAI[Vertex AI<br/>- Discovery Engine (Search)<br/>- Gemini 1.5 Flash (Vision)]
+            GCS[Cloud Storage<br/>- Pattern Images]
         end
         
-        Streams --> GCP
-        Serving --> GCP
+        Streams --> VertexAI
+        Streams --> GCS
+        Serving --> VertexAI
     end
     
     style Ingestion fill:#e1f5ff
@@ -69,300 +69,90 @@ graph TB
 
 ## 3. Ingestion Plane
 
-The Ingestion Plane is responsible for extracting architecture patterns from SharePoint and indexing them into a multi-modal knowledge graph on GCP.
+The Ingestion Plane handles the end-to-end processing of SharePoint patterns into Vertex AI Search. It has been modernized to use a single managed pipeline that consolidates metadata, diagrams, and text content into a unified indexing process.
 
 ### 3.1 Design Principles
 
-1. **Atomicity**: All three streams must succeed or all must rollback - no partial ingestion
-2. **Parallel Processing**: Streams A, B, and C execute concurrently for performance
-3. **Content Synchronization**: Catalog metadata always matches ingested page content
-4. **Granular Retrieval**: Content atomized into sections for precise RAG retrieval
-5. **Resilience**: Retry logic with exponential backoff for transient failures
-6. **Idempotency**: Safe re-ingestion of patterns without duplication
+1.  **Consolidation**: Eliminates complex distributed transactions by processing each pattern linearly in a single pipeline.
+2.  **Multimodal Extraction**: Uses Gemini 1.5 Flash to "read" architectural diagrams and convert them into searchable text descriptions.
+3.  **Content Enrichment**: Injects AI-generated diagram descriptions directly into the HTML content to improve RAG retrieval accuracy.
+4.  **Managed Indexing**: Leverages Google Cloud Discovery Engine's "Unstructured Data with Metadata" model for simplified state management.
+5.  **Media Offloading**: Stores images reliably in GCS while updating HTML references to point to the permanent storage.
 
 ### 3.2 End-to-End Sequence Diagram
 
 ```mermaid
 sequenceDiagram
-    participant Main as Main Orchestrator
+    participant Pipeline as Vertex Search Pipeline
     participant SP as SharePoint Client
-    participant TM as Transaction Manager
-    participant SA as Stream A (Semantic)
-    participant SB as Stream B (Visual)
-    participant SC as Stream C (Content)
-    participant DE as Discovery Engine
-    participant VS as Vector Search
-    participant FS as Firestore
+    participant Gemini as Gemini 1.5 Flash
     participant GCS as Cloud Storage
+    participant ES as Vertex Search (Discovery Engine)
 
-    Main->>SP: fetch_pattern_list()
-    SP->>SP: Authenticate (OAuth)
-    SP->>SP: GET /lists/{list_id}/items<br/>with pagination
-    SP-->>Main: patterns[] with metadata
+    Pipeline->>SP: fetch_pattern_list()
+    SP-->>Pipeline: patterns[] (Metadata)
 
     loop For each pattern
-        Main->>SP: fetch_page_html(page_url)
-        SP-->>Main: html_content
+        Pipeline->>SP: fetch_page_html(url)
+        SP-->>Pipeline: raw_html
         
-        Main->>TM: Create IngestionTransaction
-        TM->>TM: Create staging directory
+        Note over Pipeline,GCS: Image Processing Phase
+        Pipeline->>Pipeline: Extract <img> tags limit=2
         
-        Note over TM,SC: PHASE 1: PREPARE (Parallel)
-        TM->>SA: prepare(metadata, html)
-        TM->>SB: prepare(metadata, html)
-        TM->>SC: prepare(metadata, html)
-        
-        par Stream A: Semantic Processing
-            SA->>SA: Extract text from HTML
-            SA->>SA: Generate summary (LLM)
-            SA->>SA: Stage document JSON
-            SA-->>TM: prepared_data_A
-        and Stream B: Visual Processing
-            SB->>SP: download_image(img_url)
-            SB->>SB: Generate embedding (Vertex AI)
-            SB->>SB: Stage image + vector
-            SB-->>TM: prepared_data_B
-        and Stream C: Content Processing
-            SC->>SC: Parse HTML by sections
-            SC->>SC: Convert to Markdown
-            SC->>SC: Stage section documents
-            SC-->>TM: prepared_data_C
+        loop For each image
+            Pipeline->>SP: download_image(src)
+            SP-->>Pipeline: image_bytes
+            
+            par Parallel Analysis & Upload
+                Pipeline->>Gemini: generate_content(image + prompt)
+                Gemini-->>Pipeline: text_description
+            and
+                Pipeline->>GCS: upload_blob(image)
+                GCS-->>Pipeline: public_url
+            end
+            
+            Pipeline->>Pipeline: Update HTML <img> src & alt
         end
         
-        alt All streams prepared successfully
-            Note over TM,FS: PHASE 2: COMMIT (Sequential)
-            TM->>SA: commit(prepared_data_A)
-            SA->>DE: import_documents([doc])
-            DE-->>SA: success
-            SA-->>TM: committed
-            
-            TM->>SB: commit(prepared_data_B)
-            SB->>GCS: upload_blob(image)
-            GCS-->>SB: checksum verified
-            SB->>VS: upsert_vectors([vector])
-            VS-->>SB: success
-            SB-->>TM: committed
-            
-            TM->>SC: commit(prepared_data_C)
-            SC->>FS: batch.set(sections[])
-            FS-->>SC: success
-            SC-->>TM: committed
-            
-            TM->>TM: Cleanup staging directory
-            TM-->>Main: Transaction SUCCESS
-        else Any stream fails
-            Note over TM,FS: ROLLBACK
-            TM->>SA: rollback(prepared_data_A)
-            TM->>SB: rollback(prepared_data_B)
-            TM->>SC: rollback(prepared_data_C)
-            
-            SA->>DE: delete_documents([doc_id])
-            SB->>GCS: delete_blob(image_path)
-            SB->>VS: remove_datapoints([vector_id])
-            SC->>FS: delete_collection(sections)
-            
-            TM->>TM: Cleanup staging directory
-            TM-->>Main: Transaction FAILED
-        end
+        Note over Pipeline,ES: Enrichment & Indexing
+        Pipeline->>Pipeline: _enrich_html_content(html + descriptions)
+        Pipeline->>Pipeline: Map metadata to struct_data
+        
+        Pipeline->>ES: write_document(id, content=html, struct_data)
+        ES-->>Pipeline: 200 OK
     end
 ```
 
 ### 3.3 End-to-End Flow Description
 
-#### Initialization Phase
-1. **Main Orchestrator** initializes configuration with environment variables (GCP project, SharePoint credentials, etc.)
-2. **SharePoint Client** authenticates using MSAL OAuth Client Credentials Flow
-3. Main Orchestrator calls `fetch_pattern_list()` to retrieve all architecture patterns from the SharePoint catalog
+#### Initialization
+1.  **Configuration Loading**: The pipeline initializes with GCP Project ID, Location, Data Store ID, and GCS Bucket from environment variables.
+2.  **Client Setup**: Authenticates `SharePointClient` (MSAL), `StorageClient` (GCS), and `DocumentServiceClient` (Discovery Engine).
+3.  **Model Loading**: Initializes Vertex AI `GenerativeModel` ("gemini-1.5-flash") for efficient image analysis.
 
-#### Pattern List Retrieval
-4. SharePoint Client issues `GET /sites/{site_id}/lists/{list_id}/items?expand=fields` request
-5. Handles pagination using `@odata.nextLink` to fetch all patterns (handles catalogs >100 items)
-6. Returns array of patterns with metadata: `id`, `title`, `maturity`, `frequency`, `page_url`, `content_hash`
+#### Batch Execution (`run_ingestion`)
+4.  **Fetch Patterns**: Calls `sp_client.fetch_pattern_list()` to get the catalog of patterns (ID, Title, Status, etc.).
+5.  **Iterative Processing**: Loops through each pattern and calls `process_single_pattern` with error handling to ensure one failure doesn't stop the batch.
 
-#### Per-Pattern Processing Loop
-7. For each pattern, Main Orchestrator calls `fetch_page_html(page_url)` to retrieve page content
-8. SharePoint Client extracts `CanvasContent1` field containing the HTML structure
+#### Single Pattern Processing (`process_single_pattern`)
+6.  **Fetch HTML**: Retrieves the full HTML content of the SharePoint page. If empty, skips processing.
+7.  **Image Processing & Description Generation**:
+    *   **Extraction**: Parses HTML with BeautifulSoup to find the first 2 images (typically Component and Sequence diagrams).
+    *   **Download**: Fetches image bytes from SharePoint private URLs.
+    *   **Analysis (Gemini)**: Sends image bytes to Gemini 1.5 Flash with a prompt to "Analyze this technical architecture diagram...".
+    *   **Upload (GCS)**: Uploads the image to `gs://{bucket}/patterns/{id}/images/` and generates a public/accessible URL.
+    *   **rewrite**: Updates the in-memory HTML: replaces the old SharePoint link with the new GCS URL and sets the `alt` text to the AI-generated description.
+8.  **Content Enrichment**:
+    *   Injects a new HTML section `<div class="ai-generated-context">` at the top of the document.
+    *   Adds the generated diagram descriptions here. This ensures that when Vertex Search indexes the HTML, the "visual" knowledge is now "textual" and searchable.
+9.  **Indexing (Discovery Engine)**:
+    *   **Metadata Mapping**: Maps SharePoint fields (Title, Owner, Maturity) to the Vertex Search schema (`struct_data`).
+    *   **Document Creation**: Creates a `Document` object containing the enriched HTML (`content`) and the metadata (`struct_data`).
+    *   **Write**: Calls `doc_client.write_document()` to upsert the record into the Data Store.
 
-#### Two-Phase Commit: Phase 1 (PREPARE)
-9. **Transaction Manager** creates `IngestionTransaction` with unique `pattern_id` and creates staging directory
-10. Transaction Manager invokes `prepare()` on all three stream processors **in parallel** using `asyncio.gather()`
-
-**Stream A (Semantic Search)**:
-11. Extracts plain text from HTML using BeautifulSoup (up to 30,000 chars)
-12. Generates dense technical summary (300 words) using Gemini 1.5 Pro LLM
-13. Creates document JSON with title, summary, maturity, frequency, and metadata
-14. Saves to staging directory (`stream_a_doc.json`)
-15. Returns `prepared_data_A` with document structure
-
-**Stream B (Visual/Vector)**:
-16. Parses HTML to extract all `<img>` tags (Limit: Top 2, prioritizing diagrams)
-17. Downloads images from SharePoint using `download_image()` with retry logic
-18. Generates multimodal embeddings using Vertex AI Vision API
-19. Stages images locally and prepares vector datapoints
-20. **Extracts metadata** (status, owner, category) for vector filtering (`restricts`)
-21. Returns `prepared_data_B` with GCS URIs (`gs://.../patterns/{id}/{filename}`) and vector metadata
-
-**Stream C (Content/Sections)**:
-22. Parses HTML by heading structure (h1, h2, h3, h4)
-23. Replaces `<img>` tags with deterministic placeholders: `[Image Description: ... | GCS Link: gs://...]`
-24. Groups content into logical sections (Problem, Solution, Implementation, Trade-offs)
-25. Converts each section HTML to Markdown using markdownify
-26. Validates minimum content length (>10 chars per section)
-27. Stages section documents in JSON format
-28. Returns `prepared_data_C` with section array
-
-#### Validation and Decision Point
-27. Transaction Manager checks if **all three streams** returned success
-28. If any stream failed, immediately proceeds to **ROLLBACK** (skip Phase 2)
-
-#### Two-Phase Commit: Phase 2 (COMMIT)
-29. If all streams prepared successfully, Transaction Manager proceeds to **sequential commit**
-
-**Commit Stream A**:
-30. Reads staged document from `stream_a_doc.json`
-31. Calls Discovery Engine `import_documents()` with retry logic
-32. Discovery Engine indexes the document for semantic search
-33. Waits for successful completion before proceeding
-
-**Commit Stream B**:
-34. Uploads each image to GCS with MD5 checksum verification
-35. Validates uploaded blob checksum matches computed checksum
-36. Calls `_upsert_vectors_with_retry()` with 180-second timeout
-37. Upserts vector embeddings to Vertex AI Vector Search index
-38. Includes `restricts` tokens (pattern_id, status, ownership) for upstream filtering
-39. Confirms successful upsert before proceeding
-
-**Commit Stream C**:
-40. Chunks sections into batches of 500 (Firestore limit)
-41. For each chunk, calls `_commit_batch_with_retry()` (3 attempts, exponential backoff)
-42. Creates Firestore batch with `collection(patterns).document(pattern_id).collection(sections)`
-43. Commits batch and waits for acknowledgment
-44. Repeats for all chunks until all sections stored
-
-#### Success Path
-45. Transaction Manager marks transaction as `committed`
-46. Cleans up staging directory
-47. Logs success metrics (processing time, section count, image count)
-48. Returns `SUCCESS` to Main Orchestrator
-
-#### Failure Path (ROLLBACK)
-49. If any commit fails, Transaction Manager invokes `rollback()` on all streams
-50. **Stream A Rollback**: Deletes document from Discovery Engine using `doc_id`
-51. **Stream B Rollback**: Deletes images from GCS, removes vectors from Vector Search
-52. **Stream C Rollback**: Deletes all section documents from Firestore (handles >500 sections)
-53. Cleans up staging directory
-54. Logs failure details and error context
-55. Returns `FAILED` to Main Orchestrator
-
-#### Loop Continuation
-56. Main Orchestrator repeats steps 7-55 for each pattern in the catalog
-57. Logs summary statistics: total patterns, successful ingestions, failures
-58. System ready for next ingestion run
-
----
-
-## 4. Serving Plane
-
-The Serving Plane uses a multi-agent system to analyze architecture diagrams, retrieve relevant "donor" patterns, generate comprehensive documentation, create Infrastructure-as-Code (IaC) artifacts, and publish the results to SharePoint after human verification.
-
-### 4.1 Design Principles
-
-1.  **Specialization**: Each agent has a single, well-defined responsibility (e.g., Retrieval, Generation, Review, Artifact Creation).
-2.  **Agent-to-Agent Communication (A2A)**: Standardized HTTP-based protocol with retry and timeout.
-3.  **Reflection Loop**: Iterative refinement (Generate -> Review -> Generate) until quality threshold met.
-4.  **Human-in-the-Loop**: Critical governance steps where human approval is required before proceeding (Pattern Approval, Artifact Approval).
-5.  **Artifact Generation**: Automated creation of deployable code (Terraform/CloudFormation) based on authoritative interfaces.
-6.  **Observability**: Centralized logging and status tracking via `ADKAgent` framework.
-
-### 4.2 Agent Swarm Architecture
-
-The system consists of the following agents, orchestrating a complex workflow:
-
-#### Orchestrator Agent (Port 9000)
-**Role**: Workflow coordinator, traffic controller, state manager.
-**Responsibilities**:
--   Receives initial request (Title + Image).
--   Orchestrates the `Retrieve -> Generate -> Review` loop.
--   **Manages Human Verification**: Pauses workflow to request human approval via the `HumanVerifierAgent`.
--   **Triggers Artifact Generation**: Calls `ArtifactGenerationAgent` once the pattern is approved.
--   **Publishes to SharePoint**: Converts final Markdown and Artifacts to a SharePoint Page.
-**Key Behaviors**:
--   Implements the "Loop Agent" pattern (max 3 iterations for refinement).
--   Integrates strictly with `HumanVerifierAgent` for gatekeeping.
--   Aggregates results from all agents before publishing.
-
-#### Retriever Agent (Port 9001)
-**Role**: Context provider.
-**Responsibilities**:
--   Takes a search query (derived from the diagram description).
--   Searches the Vector Store (Vertex AI Search) for relevant "Donor Patterns".
--   Returns the most relevant pattern's text and metadata to ground the generation.
-
-#### Generator Agent (Port 9002)
-**Role**: Content creator.
-**Responsibilities**:
--   Uses Gemini 1.5 Pro to generate technical documentation sections (Problem, Solution, Implementation).
--   Takes inputs: Diagram Description, Donor Pattern Context, Previous Critiques.
--   Outputs: Structured dictionary of sections.
-
-#### Reviewer Agent (Port 9003)
-**Role**: Quality assurance.
-**Responsibilities**:
--   Evaluates generated content against specific criteria (clarity, completeness, relevance to donor).
--   Outputs: A numerical score (0-100), an `approved` boolean, and a text critique.
--   Acts as the feedback mechanism for the Generator loop.
-
-#### Artifact Generation Agent (Port 9004)
-**Role**: Infrastructure coder.
-**Responsibilities**:
-1.  **Component Specification**: Analyzes the textual documentation to identify system components (e.g., "GCS Bucket", "Cloud Run").
-2.  **Enrichment**: Matches components to "Authoritative Interfaces" (standardized Terraform variable definitions stored in GCS).
-3.  **Dependency Resolution**: Sorts components topologically (e.g., VPC before VM) to ensure valid execution order.
-4.  **Code Generation**: Generates actual Terraform/CloudFormation code for each component using Gemini 1.5 Pro, strictly adhering to the interface.
-
-#### Human Verifier Agent (Port 9005)
-**Role**: Governance and Gatekeeper.
-**Responsibilities**:
--   **Persistence**: Stores review requests in CloudSQL (PostgreSQL).
--   **Notification**: Sends notifications (via Pub/Sub) to human reviewers.
--   **Feedback Loop**: Captures human feedback (reason for rejection) to potentially improve future prompts.
--   **Dual-Stage Verification**:
-    1.  **Pattern Stage**: Verifies the textual design before code generation.
-    2.  **Artifact Stage**: Verifies the generated IaC code before publishing.
-
-### 4.3 End-to-End Workflow
-
-1.  **Analyze**: Orchestrator sends the input Diagram to the Generator (or Vision tool) to get a text description.
-2.  **Retrieve**: Orchestrator queries the Retriever for a "Donor Pattern" based on the description.
-3.  **Generate/Review Loop**:
-    *   **Generate**: Generator creates a draft pattern based on the diagram + donor.
-    *   **Review**: Reviewer critiques the draft.
-    *   *Loop*: If rejected, feedback is sent back to Generator (max 3 times).
-4.  **Human Verification 1 (Pattern)**: The best draft is sent to the `HumanVerifierAgent`. The workflow pauses (or polls) until a human approves the text.
-5.  **Artifact Generation**:
-    *   Orchestrator sends approved text to `ArtifactGenerationAgent`.
-    *   Agent extracts components -> Enriches with Interface -> Sorts -> Generates IaC.
-6.  **Human Verification 2 (Artifacts)**: The generated Terraform/CF code is sent to `HumanVerifierAgent` for a final safety check.
-7.  **Publish**: If approved, the Orchestrator uses the `SharePointPublisher` module to create a new page containing both the design documentation and the code snippets. The status is saved, and the URL is returned.
-
-
-### 4.3 End-to-End Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant Client as API Client
-    participant Orch as Orchestrator Agent
-    participant Gen as Generator Agent
-    participant Rev as Reviewer Agent
-    participant Verifier as Human Verifier
-    participant Artifact as Artifact Agent
-    participant SP as SharePoint
-
-    Client->>Orch: POST /invoke {image, title}
-    Note over Orch,Gen: Step 1: Analyze & Retrieve
-    Orch->>Gen: describe_image(image)
-    Gen-->>Orch: description
-    Orch->>Orch: retrieve_donor(description)
+#### Error Handling
+*   **Partial Failures**: If an image fails to download or analyze, the pipeline logs a warning and proceeds with the rest of the pattern (Best-effort delivery).
+*   **Pipeline Resilience**: Unhandled exceptions in one pattern are caught in the main loop, allowing subsequent patterns to process successfully.tion)
 
     Note over Orch,Rev: Step 2: Generation Loop (Max 3 times)
     loop Generation cycle (max 3)
@@ -876,6 +666,7 @@ The process follows a strict "Specification-First" approach:
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant Orch as Orchestrator Agent
     participant Spec as Component Spec Agent
     participant Gen as Artifact Gen Agent
@@ -938,6 +729,34 @@ sequenceDiagram
         deactivate Pub
     end
 ```
+
+#### 4.6.3 Step-by-Step Flow Description
+
+**Phase 1: Component Specification**
+1.  **Request**: Once the high-level documentation is approved, the `Orchestrator` sends the full text to the `ComponentSpecificationAgent`.
+2.  **Analysis**: The agent uses an LLM to parse natural language descriptions into a structured list of infrastructure components (e.g., "GCS Bucket", "Cloud Run Service").
+3.  **Graph Build**: It constructs a dependency graph (DAG) to understand relationships (e.g., the Service depends on the Bucket).
+4.  **Response**: Returns an `execution_plan`, a sorted list of components to be built in order.
+
+**Phase 2: Artifact Generation Loop**
+5.  **Iteration**: The `Orchestrator` iterates through each component in the plan.
+6.  **Context Loading**: Calls `ArtifactGenerationAgent` with the component spec and outputs from previous steps (upstream context).
+7.  **Code Generation**: The agent selects the appropriate template (Terraform module) and uses an LLM to fill in specific values.
+8.  **Validation**: A syntax checker (like `terraform validate` or `tflint`) runs against the generated code.
+9.  **Result**: If valid, the artifact (filename + content) is returned; otherwise, the agent retries self-correction.
+
+**Phase 3: Human Verification (Gatekeeping)**
+10. **Submission**: The `Orchestrator` bundles all generated artifacts and sends a request to the `HumanVerifierAgent`.
+11. **Persistence**: The verifier stores the request in CloudSQL with a status of `PENDING`.
+12. **Notification**: A message is sent to the engineering team (via Slack/Email) with a link to the review portal.
+13. **Acknowledgement**: Returns a `review_id` to the Orchestrator.
+14. **Polling**: The Orchestrator periodically polls the `HumanVerifierAgent` status endpoint.
+15. **Decision**: The human expert reviews the code and clicks "Approve" or "Reject". The DB is updated.
+
+**Phase 4: Final Publishing**
+16. **Aggregation**: If `APPROVED`, the `Orchestrator` appends the valid artifacts as code blocks to the pattern documentation.
+17. **Publishing**: Calls `SharePointPublisher` to create a new page containing both the design text and the infrastructure code.
+18. **Completion**: The final URL is returned to the user.
 
 ---
 
