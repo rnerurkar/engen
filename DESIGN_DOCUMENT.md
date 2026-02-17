@@ -592,18 +592,64 @@ SHAREPOINT_PROMOTE_AS_NEWS=false
 PUBLISH_TO_SHAREPOINT=true
 ```
 
-### 4.8 Artifact Generation Workflow
+### 4.8 Artifact Generation Workflow (Pattern Synthesis)
 
-This workflow transforms the high-level architecture documentation into concrete, deployable infrastructure code (e.g., Terraform) or Service Catalog product configurations. It ensures that the documented pattern can be readily instantiated.
+This workflow implements a "Pattern Synthesis" approach. Instead of generating infrastructure components in isolation, the system treats the entire architectural pattern as a single unit of generation. This ensures that cross-component dependencies (e.g., a Cloud Run service needing the name of a Cloud SQL instance) are resolved correctly during the generation phase.
 
-#### 4.8.1 Workflow Overview
-The process follows a strict "Specification-First" approach:
-1.  **Specification Extraction**: The plain-text documentation is parsed to identify distinct architectural components and their relationships.
-2.  **Execution Planning**: A dependency graph is built to determine the order of creation.
-3.  **Artifact Generation**: For each component, specific IaC code is generated.
-4.  **Human Verification**: A critical gate where a human expert must review and approve the generated code before it is considered "final" or published.
+#### 4.8.1 System Components
 
-#### 4.8.2 Detailed Sequence Diagram
+| Component | Responsibility |
+|-----------|----------------|
+| **OrchestratorAgent** | The central state machine that drives the workflow. It manages the lifecycle of the request, handles retries for validation failures, and coordinates the handover between generation, validation, review, and publishing. |
+| **ComponentSpecification** | **Analyzer**. It parses the high-level design documentation to extract a structured dependency graph. It identifies every required infrastructure resource and application component, along with their configuration properties and relationships. |
+| **ArtifactGenerator** | **Synthesizer**. It takes the structured specification and the design documentation to generate a holistic "Artifact Bundle". This bundle includes both Infrastructure as Code (Terraform) and Application Boilerplate (Python/Node.js) in a single consistent pass, ensuring ID references and config clusters match. |
+| **ArtifactValidator** | **Quality Gate**. It acts as an automated reviewer. It inspects the generated Artifact Bundle against a strict rubric (Syntax, Security, Completeness). It returns a PASS/FAIL status and structured feedback for self-correction. |
+| **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. |
+| **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub), creating a new branch with a complete, runnable project structure. |
+| **SharePointPublisher** | **Docs Publisher**. Updates the enterprise knowledge base with the design documentation and snippets of the generated code. |
+
+#### 4.8.2 Component Diagram
+
+The following diagram illustrates the structural relationships and information flow between the synthesis components.
+
+```mermaid
+graph TD
+    subgraph "Orchestration Layer"
+        Orch[Orchestrator Agent]
+    end
+
+    subgraph "Pattern Synthesis Core"
+        CompSpec[Component<br/>Specification]
+        ArtGen[Artifact<br/>Generator]
+        ArtVal[Artifact<br/>Validator]
+    end
+
+    subgraph "External Systems"
+        Vertex[Vertex AI<br/>(Gemini 1.5 Pro)]
+        GitHub[GitHub Repo]
+        SP[SharePoint]
+    end
+
+    %% Data Flow
+    Orch -->|Doc Text| CompSpec
+    CompSpec -->|Specification JSON| Orch
+    CompSpec -.->|uses| Vertex
+
+    Orch -->|Spec + Doc| ArtGen
+    ArtGen -->|Artifact Bundle| Orch
+    ArtGen -.->|uses| Vertex
+
+    Orch -->|Artifact Bundle| ArtVal
+    ArtVal -->|Validation Result| Orch
+    ArtVal -.->|uses| Vertex
+
+    Orch -->|Approved Artifacts| GitHub
+    Orch -->|Approved Docs| SP
+```
+
+#### 4.8.3 Sequence Diagram
+
+This sequence diagram details the lifecycle of a request from approved documentation to published artifacts.
 
 ```mermaid
 sequenceDiagram
@@ -611,93 +657,90 @@ sequenceDiagram
     participant Orch as Orchestrator Agent
     participant Spec as Component Spec Agent
     participant Gen as Artifact Gen Agent
-    participant Ver as Human Verifier Agent
-    participant DB as Review DB (CloudSQL)
-    participant Pub as SharePoint Publisher
+    participant Val as Artifact Validator Agent
+    participant Human as Human Verifier
+    participant GitHub as GitHub Publisher
+    participant SP as SharePoint Publisher
 
-    Note over Orch, Pub: Pre-requisite: Documentation Pattern is Approved
-
+    Note over Orch, SP: Phase 1: Specification Extraction
+    
     Orch->>Spec: generate_component_spec(documentation)
     activate Spec
-    Spec->>Spec: Analyze Docs with LLM
-    Spec->>Spec: Extract Components (Resource, Type, Props)
-    Spec->>Spec: Build Dependency Graph
-    Spec-->>Orch: { execution_plan: [Comp A, Comp B] }
+    Spec->>Spec: Analyze Docs (Vertex AI)
+    Spec->>Spec: Extract Resource Graph & Configs
+    Spec-->>Orch: ComponentSpecification (JSON)
     deactivate Spec
 
-    loop For each Component in Execution Plan
-        Orch->>Gen: generate_artifact(spec=Comp A, type="terraform")
+    Note over Orch, SP: Phase 2: Holistic Synthesis Loop
+
+    loop Quality Assurance Loop (Max 3 Retries)
+        Orch->>Gen: generate_artifact(spec, documentation, critique?)
         activate Gen
-        Gen->>Gen: Load Templates / Context
-        Gen->>Gen: Generate IaC Code (LLM)
-        Gen->>Gen: Validate Syntax (tflint/check)
-        
-        alt Validation Fails
-            Gen-->>Orch: Error (Retry logic)
-        else Validation Passes
-            Gen-->>Orch: { artifact: "resource...", filename: "main.tf" }
-        end
+        Note right of Gen: Generates IaC & App Code<br/>as a unified bundle
+        Gen->>Gen: Synthesize Pattern (Vertex AI)
+        Gen-->>Orch: ArtifactBundle (Terraform + Python)
         deactivate Gen
+
+        Orch->>Val: validate_artifact(artifacts, spec)
+        activate Val
+        Val->>Val: Check Syntax (Terraform validate)
+        Val->>Val: Check Security (Rubric Check)
+        Val-->>Orch: ValidationResult (PASS/FAIL + Feedback)
+        deactivate Val
+
+        alt Validation PASSED
+            Orch->>Orch: Break Loop
+        else Validation FAILED
+            Orch->>Orch: Prepare Feedback for Retry
+        end
     end
 
-    Note over Orch, Ver: Phase: Human Verification (Artifacts)
+    Note over Orch, SP: Phase 3: Human Governance
 
-    Orch->>Ver: request_approval(title, stage="ARTIFACT", artifacts[])
-    activate Ver
-    
-    Ver->>DB: INSERT INTO reviews (status="PENDING", data=artifacts)
-    Ver->>Ver: Send Notification (Email/Slack)
-    Ver-->>Orch: { status: "PENDING", review_id: "123" }
-    deactivate Ver
+    Orch->>Human: request_approval(artifacts)
+    activate Human
+    Human-->>Orch: ReviewRequest(ID: 123, Status: PENDING)
+    deactivate Human
 
-    loop Polling for Approval
-        Orch->>Ver: check_status(review_id="123")
-        Ver->>DB: SELECT status FROM reviews
-        DB-->>Ver: "APPROVED" | "REJECTED" | "PENDING"
-        Ver-->>Orch: status
+    loop Polling
+        Orch->>Human: get_status(ID: 123)
+        Human-->>Orch: APPROVED / REJECTED
     end
 
-    alt Status == REJECTED
-        Orch->>Orch: Abort / Request Feedback
-    else Status == APPROVED
-        Note over Orch, Pub: Phase: Final Publishing
+    alt Review REJECTED
+        Orch->>Orch: Terminate Workflow
+    else Review APPROVED
+        Note over Orch, SP: Phase 4: Multi-Channel Publishing
         
-        Orch->>Orch: Append Artifacts to Markdown
-        Orch->>Pub: publish_document(sections + code_blocks)
-        activate Pub
-        Pub->>Pub: Create Page -> Set Content -> Publish
-        Pub-->>Orch: { success: true, url: "..." }
-        deactivate Pub
+        par Publish Code
+            Orch->>GitHub: publish_artifacts(owner, repo, branch)
+            activate GitHub
+            GitHub->>GitHub: Create Branch -> Commit Files -> Push
+            GitHub-->>Orch: Commit URL
+            deactivate GitHub
+        and Publish Docs
+            Orch->>SP: publish_document(doc + code_snippets)
+            activate SP
+            SP->>SP: Create Page -> Upload Content
+            SP-->>Orch: Page URL
+            deactivate SP
+        end
+        
+        Orch->>Orch: Return Final Success Result
     end
 ```
 
-#### 4.8.3 Step-by-Step Flow Description
+**Step-by-Step Explanation:**
 
-**Phase 1: Component Specification**
-1.  **Request**: Once the high-level documentation is approved, the `Orchestrator` sends the full text to the `ComponentSpecificationAgent`.
-2.  **Analysis**: The agent uses an LLM to parse natural language descriptions into a structured list of infrastructure components (e.g., "GCS Bucket", "Cloud Run Service").
-3.  **Graph Build**: It constructs a dependency graph (DAG) to understand relationships (e.g., the Service depends on the Bucket).
-4.  **Response**: Returns an `execution_plan`, a sorted list of components to be built in order.
-
-**Phase 2: Artifact Generation Loop**
-5.  **Iteration**: The `Orchestrator` iterates through each component in the plan.
-6.  **Context Loading**: Calls `ArtifactGenerationAgent` with the component spec and outputs from previous steps (upstream context).
-7.  **Code Generation**: The agent selects the appropriate template (Terraform module) and uses an LLM to fill in specific values.
-8.  **Validation**: A syntax checker (like `terraform validate` or `tflint`) runs against the generated code.
-9.  **Result**: If valid, the artifact (filename + content) is returned; otherwise, the agent retries self-correction.
-
-**Phase 3: Human Verification (Gatekeeping)**
-10. **Submission**: The `Orchestrator` bundles all generated artifacts and sends a request to the `HumanVerifierAgent`.
-11. **Persistence**: The verifier stores the request in CloudSQL with a status of `PENDING`.
-12. **Notification**: A message is sent to the engineering team (via Slack/Email) with a link to the review portal.
-13. **Acknowledgement**: Returns a `review_id` to the Orchestrator.
-14. **Polling**: The Orchestrator periodically polls the `HumanVerifierAgent` status endpoint.
-15. **Decision**: The human expert reviews the code and clicks "Approve" or "Reject". The DB is updated.
-
-**Phase 4: Final Publishing**
-16. **Aggregation**: If `APPROVED`, the `Orchestrator` appends the valid artifacts as code blocks to the pattern documentation.
-17. **Publishing**: Calls `SharePointPublisher` to create a new page containing both the design text and the infrastructure code.
-18. **Completion**: The final URL is returned to the user.
+1.  **Specification Extraction**: The Orchestrator sends the approved natural language documentation to the Component Specification agent. This agent uses an LLM to "compile" the text into a structured JSON representation, listing all logical components and their dependencies.
+2.  **Synthesis Loop Entry**: The workflow enters a self-correcting loop to generate the actual code.
+3.  **Holistic Generation**: The Artifact Generator receives the *entire* specification. It produces all necessary files (e.g., `main.tf`, `variables.tf`, `app.py`, `Dockerfile`) in one operation. This ensures that a database password variable defined in Terraform is correctly referenced in the Kubernetes deployment manifest.
+4.  **Automated Validation**: The generated bundle is immediately sent to the Validator. The Validator checks for technical correctness (does it parse?) and alignment with the spec (did we build what was asked?).
+5.  **Feedback Cycle**: If validation fails, the feedback is fed back into the Generator for the next iteration (e.g., "The variable `project_id` is missing from `variables.tf`").
+6.  **Human Review**: Once the code is technically sound, it is queued for human approval. This is the final "sanity check" to ensure the code meets enterprise standards that automated tools might miss.
+7.  **Parallel Publishing**: Upon approval, the Orchestrator forks the process to publish to two destinations simultaneously:
+    *   **GitHub**: The full source code is pushed to a new branch, ready for a Pull Request.
+    *   **SharePoint**: The documentation is published to the intranet, enriched with snippets of the generated code for reference.
 
 ---
 
