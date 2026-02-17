@@ -619,13 +619,13 @@ graph TD
     end
 
     subgraph "Pattern Synthesis Core"
-        CompSpec[Component<br/>Specification]
-        ArtGen[Artifact<br/>Generator]
-        ArtVal[Artifact<br/>Validator]
+        CompSpec["Component<br/>Specification"]
+        ArtGen["Artifact<br/>Generator"]
+        ArtVal["Artifact<br/>Validator"]
     end
 
     subgraph "External Systems"
-        Vertex[Vertex AI<br/>(Gemini 1.5 Pro)]
+        Vertex["Vertex AI<br/>(Gemini 1.5 Pro)"]
         GitHub[GitHub Repo]
         SP[SharePoint]
     end
