@@ -1,8 +1,6 @@
 # --- Core AI & Agent Framework ---
-google-adk==1.8.0
-google-cloud-aiplatform==1.130.0
-# vertexai package is included in google-cloud-aiplatform >= 1.38
-# vertexai==1.43.0  <-- Removed to avoid conflicts
+# google-adk==1.8.0 # Assuming this might be internal or placeholder, keeping for now or replace with specific libs if needed.
+google-cloud-aiplatform==1.38.1 # Updated to ensure vertexai is included
 google-genai>=0.3.0
 
 # --- Web Framework & API ---
@@ -26,3 +24,5 @@ beautifulsoup4>=4.12.0
 markdownify>=0.11.6
 markdown
 bleach
+jsonschema>=4.19.0
+PyYAML>=6.0.1

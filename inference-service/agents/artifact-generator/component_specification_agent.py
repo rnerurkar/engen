@@ -1,4 +1,4 @@
-from core.component_specification import ComponentSpecification
+from core.pattern_synthesis.component_specification import ComponentSpecification
 from config import Config
 from lib.adk_core import AgentRequest, AgentResponse, TaskStatus
 import logging
@@ -22,19 +22,22 @@ class ComponentSpecificationAgent:
             )
             
         try:
+            # Process documentation to get comprehensive spec with execution order
             specs = self.engine.process_documentation(documentation)
-            if not self.engine.validate_specs(specs):
+            
+            # Validation logic can be added here or inside the engine
+            if "error" in specs:
                 return AgentResponse(
-                    status=TaskStatus.FAILED, 
-                    error="Validation failed", 
+                    status=TaskStatus.FAILED,
+                    error=specs["error"],
                     agent_name="ComponentSpecificationAgent"
                 )
             
             return AgentResponse(
                 status=TaskStatus.COMPLETED,
                 result={
-                    "specifications": specs,
-                    "execution_plan": self.engine.get_sorted_execution_plan(specs)
+                    "specifications": specs, # Contains components, relationships, execution_order
+                    "execution_plan": specs.get("execution_order", [])
                 },
                 agent_name="ComponentSpecificationAgent"
             )

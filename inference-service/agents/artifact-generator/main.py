@@ -18,6 +18,7 @@ from config import Config
 try:
     from component_specification_agent import ComponentSpecificationAgent
     from artifact_generation_agent import ArtifactGenerationAgent
+    from artifact_validation_agent import ArtifactValidationAgent
 except ImportError:
     # Fallback for when running from root 
     # Note: Python packages with dashes are problematic. 
@@ -26,8 +27,10 @@ except ImportError:
     import importlib
     spec_mod = importlib.import_module("inference-service.agents.artifact-generator.component_specification_agent")
     art_mod = importlib.import_module("inference-service.agents.artifact-generator.artifact_generation_agent")
+    val_mod = importlib.import_module("inference-service.agents.artifact-generator.artifact_validation_agent")
     ComponentSpecificationAgent = spec_mod.ComponentSpecificationAgent
     ArtifactGenerationAgent = art_mod.ArtifactGenerationAgent
+    ArtifactValidationAgent = val_mod.ArtifactValidationAgent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -35,9 +38,10 @@ logger = logging.getLogger(__name__)
 
 class UnifiedArtifactAgent(ADKAgent):
     """
-    Unified Artifact Generation Agent handling both:
+    Unified Artifact Generation Agent handling:
     1. Component Specification Extraction (Stage 3)
     2. Artifact Generation (Stage 4)
+    3. Artifact Validation (Stage 5)
     """
     def __init__(self):
         super().__init__(name="UnifiedArtifactAgent", port=Config.ARTIFACT_PORT)
@@ -45,6 +49,7 @@ class UnifiedArtifactAgent(ADKAgent):
         # Initialize sub-agents
         self.spec_agent = ComponentSpecificationAgent()
         self.artifact_agent = ArtifactGenerationAgent()
+        self.validation_agent = ArtifactValidationAgent()
 
     async def handle(self, req: AgentRequest) -> AgentResponse:
         self.logger.info(f"Received request: {req.task}")
@@ -57,6 +62,10 @@ class UnifiedArtifactAgent(ADKAgent):
             elif req.task == "generate_artifact":
                 # Generate artifact from specs
                 return self.artifact_agent.process(req)
+            
+            elif req.task == "validate_artifact":
+                # Validate artifacts against specs
+                return self.validation_agent.process(req)
                 
             else:
                 return AgentResponse(

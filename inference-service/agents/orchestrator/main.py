@@ -19,6 +19,7 @@ if inference_service_root not in sys.path:
 from lib.adk_core import ADKAgent, AgentRequest, AgentResponse, TaskStatus
 from lib.a2a_client import A2AClient, A2AError
 from lib.sharepoint_publisher import SharePointPublisher, SharePointPageConfig
+from lib.github_publisher import GitHubMCPPublisher
 from config import Config
 
 class OrchestratorAgent(ADKAgent):
@@ -35,7 +36,13 @@ class OrchestratorAgent(ADKAgent):
         sp_config = SharePointPageConfig.from_env()
         self.publisher = SharePointPublisher(sp_config) if sp_config.is_valid() else None
         if not self.publisher:
-            self.logger.warning("SharePoint Publisher NOT configured. Publishing will be skipped.")
+            self.logger.warning("SharePoint Publisher NOT configured. Documentation publishing will be skipped.")
+            
+        # GitHub Publisher (Defaults to environment variables)
+        self.gh_owner = os.environ.get("GITHUB_OWNER", "rnerurkar")
+        self.gh_repo = os.environ.get("GITHUB_REPO", "engen")
+        self.gh_branch = os.environ.get("GITHUB_BRANCH", "main")
+        self.code_publisher = GitHubMCPPublisher(owner=self.gh_owner, repo=self.gh_repo, branch=self.gh_branch)
 
     async def handle(self, req: AgentRequest) -> AgentResponse:
         self.logger.info(f"Received request: {req.task}")
@@ -197,27 +204,65 @@ class OrchestratorAgent(ADKAgent):
             )
             
             if spec_resp.get("status") == "completed":
-                result = spec_resp.get("result", {})
-                components = result.get("execution_plan") or result.get("specifications", {}).get("components", [])
+                spec_result = spec_resp.get("result", {})
+                full_spec = spec_result.get("specifications", {}) # Comprehensive Spec
                 
-                # 4b. Generate Artifacts for each component
-                deployment_context = {} 
-                for comp in components:
-                    comp["upstream_context"] = deployment_context
+                # 4b. Generate Artifacts Loop (Generate -> Validate -> Retry)
+                max_retries = 3
+                retry_count = 0
+                validation_passed = False
+                validation_feedback = None
+                
+                while retry_count < max_retries and not validation_passed:
+                    retry_count += 1
+                    self.logger.info(f"--- Artifact Generation Attempt {retry_count}/{max_retries} ---")
+                    
+                    # Generate full set of artifacts
+                    gen_payload = {
+                        "specification": full_spec,
+                        "documentation": full_doc
+                    }
+                    if validation_feedback:
+                        gen_payload["critique"] = validation_feedback
+                        
                     art_resp = await self.client.call_agent(
                         Config.ARTIFACT_URL,
                         "generate_artifact",
-                        {"specification": comp, "artifact_type": "terraform"}
+                        gen_payload
                     )
+                    
                     if art_resp.get("status") == "completed":
-                        art_data = art_resp.get("result", {}).get("artifact", {})
-                        if art_data:
-                            artifacts.append(art_data)
-                            # Mock output context update
-                            deployment_context.update({f"{comp['name']}_id": "mock-id"})
+                        artifacts_result = art_resp.get("result", {}).get("artifacts", {})
+                        
+                        # Validate the generated artifacts
+                        val_resp = await self.client.call_agent(
+                            Config.ARTIFACT_URL,
+                            "validate_artifact",
+                            {
+                                "artifacts": artifacts_result,
+                                "component_spec": full_spec
+                            }
+                        )
+                        
+                        if val_resp.get("status") == "completed":
+                            val_result = val_resp.get("result", {}).get("validation_result", {})
+                            if val_result.get("status") == "PASS":
+                                validation_passed = True
+                                artifacts = artifacts_result # Keep the valid artifacts
+                                self.logger.info("Artifacts passed validation.")
+                            else:
+                                validation_feedback = val_result.get("feedback")
+                                issues = val_result.get("issues", [])
+                                self.logger.warning(f"Artifact validation failed. Issues: {len(issues)}. Retrying...")
+                        else:
+                             self.logger.error("Validation agent failed execution.")
                     else:
-                        self.logger.error(f"Artifact gen failed for {comp['name']}")
+                        self.logger.error("Artifact generation step failed.")
+                
+                if not validation_passed:
+                    self.logger.warning("Artifact generation exceeded max retries without passing validation.")
             else:
+                 self.logger.error("Failed component spec generation.")
                  self.logger.error("Failed component spec generation.")
 
         except Exception as e:
@@ -239,33 +284,61 @@ class OrchestratorAgent(ADKAgent):
              return {"status": "rejected_by_human_artifacts", "reason": "Human verification failed at Artifact stage."}
 
         # 6. PUBLISH
-        if self.publisher and human_artifacts_approved:
-            self.logger.info("--- Step 6: PUBLISHING to SharePoint ---")
+        if human_artifacts_approved:
+            self.logger.info("--- Step 6: PUBLISHING ---")
             
-            # Format artifacts for appending to the page
-            artifact_section = "\n## Generated Infrastructure\n"
-            for art in artifacts:
-                artifact_section += f"### {art.get('filename', 'Unknown')}\n```hcl\n{art.get('content')}\n```\n"
-            
-            # Add to sections
-            generated_sections["Infrastructure"] = artifact_section
+            # 6a. Publish Documentation to SharePoint (Optional)
+            sharepoint_url = "skipped"
+            if self.publisher:
+                self.logger.info("Publishing Documentation to SharePoint...")
+                 # Format artifacts for appending to the page (just as a reference)
+                artifact_section = "\n## Generated Infrastructure\n"
+                
+                # Handle IaC Templates
+                iac = artifacts.get("iac_templates", {})
+                for iac_type, files in iac.items():
+                    artifact_section += f"### {iac_type.upper()} Templates\n"
+                    for filename, content in files.items():
+                        artifact_section += f"#### {filename}\n```hcl\n{content}\n```\n"
 
-            pub_result = await self.publisher.publish_document(
-                title=title,
-                sections=generated_sections,
-                description=f"AI Generated pattern based on {donor_context.get('title')}",
-                donor_pattern=donor_context.get('id'),
-                diagram_description="Processed by Gemini 1.5 Pro Multimodal"
+                # Handle Boilerplate
+                boilerplate = artifacts.get("boilerplate_code", {})
+                if boilerplate:
+                    artifact_section += "\n## Reference Implementation (Boilerplate)\n"
+                    for comp_id, details in boilerplate.items():
+                        artifact_section += f"### Component: {comp_id}\n"
+                        files = details.get("files", {})
+                        for fname, fcontent in files.items():
+                            lang = "python" if fname.endswith(".py") else "bash"
+                            artifact_section += f"#### {fname}\n```{lang}\n{fcontent}\n```\n"
+                
+                # Add to sections
+                generated_sections["Infrastructure"] = artifact_section
+
+                pub_result = await self.publisher.publish_document(
+                    title=title,
+                    sections=generated_sections,
+                    description=f"AI Generated pattern based on {donor_context.get('title')}",
+                    donor_pattern=donor_context.get('id'),
+                    diagram_description="Processed by Gemini 1.5 Pro Multimodal"
+                )
+                if pub_result.success:
+                    sharepoint_url = pub_result.page_url
+            
+            # 6b. Publish Code to GitHub
+            self.logger.info("Publishing Code to GitHub...")
+            gh_result = await self.code_publisher.publish_artifacts(
+                artifacts=artifacts,
+                message=f"feat: generated artifacts for pattern '{title}'"
             )
             
-            if pub_result.success:
-                return {
-                    "status": "published",
-                    "url": pub_result.page_url,
-                    "final_score": critique_feedback.get("score")
-                }
-            else:
-                raise RuntimeError(f"Publishing failed: {pub_result.error}")
+            return {
+                "status": "published",
+                "docs_url": sharepoint_url,
+                "code_repo": f"{self.gh_owner}/{self.gh_repo}",
+                "commit_info": gh_result,
+                "final_score": critique_feedback.get("score")
+            }
         else:
             return {
                 "status": "dry_run_completed",

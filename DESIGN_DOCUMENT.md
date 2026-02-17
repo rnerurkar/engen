@@ -178,7 +178,8 @@ The system consists of the following agents, orchestrating a complex workflow:
 *   **Retrieval Agent**: "Memory", finds relevant prior art (RAG).
 *   **Generator Agent**: "Writer", drafts content using LLMs and donor context.
 *   **Reviewer Agent**: "Critic", evaluates quality using rubrics.
-*   **Artifact Generation Agent**: "Engineer", translates text specs into IaC code.
+*   **Artifact Generation Agent**: "Engineer", synthesizes both IaC and application reference code.
+*   **Artifact Validation Agent**: "QA Engineer", validates generated code for syntax, security, and completeness.
 *   **Human Verifier Agent**: "Gatekeeper", manages the approval lifecycle.
 
 ### 4.3 High-Level Sequence Diagram
@@ -192,8 +193,10 @@ sequenceDiagram
     participant Gen as Generator Agent
     participant Rev as Reviewer Agent
     participant Artifact as Artifact Gen Agent
+    participant Validator as Artifact Val Agent
     participant Verifier as Human Verifier
     participant SP as SharePoint Publisher
+    participant GH as GitHub Publisher
 
     Client->>Orch: POST /process {image, title}
     
@@ -203,38 +206,42 @@ sequenceDiagram
     Orch->>Ret: find_donor(description)
     Ret-->>Orch: donor_context
 
-    Note over Orch,Rev: Step 2: Generation Loop (Max 3 times)
-    loop Generation cycle (max 3)
-        Orch->>Gen: generate_pattern(desc, donor, critique)
+    Note over Orch,Rev: Step 2: Content Generation Loop (Max 3)
+    loop Content refinement
+        Orch->>Gen: generate_pattern(desc, donor)
         Gen-->>Orch: draft_sections
         Orch->>Rev: review_pattern(draft)
-        Rev-->>Orch: {score, approved, critique}
-        alt Pattern approved
-            Orch->>Orch: Approve and exit loop
-        else Not approved
-            Orch->>Orch: Continue loop with critique
-        end
+        Rev-->>Orch: {approved, critique}
     end
 
     Note over Orch,Verifier: Step 3: Human Check (Pattern)
     Orch->>Verifier: request_approval(sections)
     Verifier-->>Orch: {status: APPROVED}
 
-    Note over Orch,Artifact: Step 4: Infrastructure Code
+    Note over Orch,Validator: Step 4: Pattern Synthesis (Holistic)
     Orch->>Artifact: generate_component_spec(doc)
-    Artifact-->>Orch: components[]
-    loop For each component
-        Orch->>Artifact: generate_artifact(comp)
-        Artifact-->>Orch: terraform_json
+    Artifact-->>Orch: full_spec + execution_plan
+    
+    loop Artifact Validation (Max 3)
+        Orch->>Artifact: generate_artifact(spec, doc, critique?)
+        Artifact-->>Orch: artifacts (IaC + Boilerplate)
+        Orch->>Validator: validate_artifacts(artifacts, spec)
+        Validator-->>Orch: {status, issues, feedback}
+        alt Approved
+             Orch->>Orch: Exit loop
+        else Issues Found
+             Orch->>Orch: Retry with feedback
+        end
     end
 
     Note over Orch,Verifier: Step 5: Human Check (Artifacts)
     Orch->>Verifier: request_approval(artifacts)
     Verifier-->>Orch: {status: APPROVED}
 
-    Note over Orch,SP: Step 6: Publish
-    Orch->>SP: publish_page(content + artifacts)
-    SP-->>Orch: page_url
+    Note over Orch,GH: Step 6: Multi-Channel Publish
+    Orch->>SP: publish_page(docs)
+    Orch->>GH: publish_code(artifacts)
+    GH-->>Orch: commit_url
 
     Orch-->>Client: Return result
 ```
@@ -255,17 +262,22 @@ sequenceDiagram
 7.  **Notification**: The agent persists the request in CloudSQL and triggers a Pub/Sub notification to the engineering team.
 8.  **Wait State**: The workflow pauses (or polls) until a human reviewer approves the text via the Review Portal.
 
-#### Phase 4: Infrastructure Synthesis
-9.  **Specification**: Once the text is approved, the `ArtifactGenerationAgent` analyzes it to extract a list of required infrastructure components.
-10. **Dependency Sorting**: The components are sorted topologically (e.g., Network -> Compute) to ensure valid deployment order.
-11. **Code Generation**: For each component, the agent consults "Authoritative Interfaces" (GCS-stored variable schemas) and uses Gemini to generate compliant Terraform/CloudFormation code.
+#### Phase 4: Pattern Synthesis (Holistic Generation)
+9.  **Comprehensive Specification**: Once the text is approved, the `ArtifactGenerationAgent` performs a holistic analysis to extract a graph of all components, their explicit dependencies, and integration attributes (e.g., "API requires DB Endpoint").
+10. **Plan & Order**: An execution plan is derived to ensure logical dependency ordering.
+11. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window. This ensures that application code variables (e.g., `DB_HOST`) match the infrastructure outputs exactly.
+12. **Automated Validation Loop**:
+    *   **Validate**: The `ArtifactValidationAgent` checks the generated code against a strict rubric (Syntax, Completeness, Security, Wiring).
+    *   **Feedback**: If issues are found (e.g., invalid HCL syntax, missing variable), the critique is fed back to the generator.
+    *   **Retry**: The generator attempts to fix the specific issues. This loop repeats up to 3 times to ensure high-quality output.
 
 #### Phase 5: Governance (Point 2)
-12. **Artifact Verification**: The generated code bundles are sent to the `HumanVerifierAgent` for a second round of approval, specifically checking for security and standards compliance.
+13. **Artifact Verification**: The validated code bundle (IaC + Source Code) is sent to the `HumanVerifierAgent`. A human expert reviews the file structure and logic before any commitment is made.
 
-#### Phase 6: Publication
-13. **Assembly**: The Orchestrator combines the approved text and the approved code snippets.
-14. **Publishing**: The `SharePointPublisher` module pushes the content to a new SharePoint Page, formatting the code blocks and embedding the original diagram. The final URL is returned to the user.
+#### Phase 6: Multi-Channel Publication
+14. **Documentation**: The `SharePointPublisher` pushes the approved architectural documentation to the knowledge base.
+15. **Code & Artifacts**: The `GitHubMCPPublisher` pushes the approved IaC and Boilerplate code to a dedicated GitHub repository, creating a new commit with the pattern implementation.
+16. **Result**: The client receives URLs for both the documentation (SharePoint) and the repository (GitHub).
 
 
 ### 4.5 Response Assembly
@@ -286,11 +298,25 @@ The Orchestrator implements robust error handling for each agent interaction:
 -   **Vision Agent Fails**: Orchestrator catches `A2AError`, retries 3x, returns error if exhausted.
 -   **Retrieval Agent Fails**: Retries; if failures persist, proceeds with empty donor context (graceful degradation).
 -   **Writer Agent Fails**: Logs error, attempts to continue with next section, flags partial document.
--   **Reviewer Agent Fails**: Logs error, accepts draft without review (bypasses check).
--   **SharePoint Publishing Fails**: Logs error, returns document with `sharepoint.published=false` (does not block response).
+-   **ReMulti-Channel Publishing
 
----
+The system now supports publishing to multiple destinations to separate documentation from implementation code.
 
+#### 4.7.1 SharePoint (Documentation)
+When `publish=true` is set, the generated markdown (Problem, Solution, Architecture) is converted to a SharePoint modern page. This serves as the "Knowledge Base" entry.
+
+#### 4.7.2 GitHub (Implementation)
+The validated Artifacts are structured into a repository-ready format:
+*   `infrastructure/` contains the Terraform/CloudFormation templates.
+*   `src/` contains the generated boilerplate application code.
+
+The `GitHubMCPPublisher` uses the GitHub API (or MCP Tool) to commit these files directly to the target repository (defaulting to a `feat/` branch or `main` based on config).
+
+#### 4.7.3 SharePoint Publishing - Detailed Sequence
+
+This section provides an in-depth look at how the Orchestrator converts markdown documentation to a SharePoint modern page using MS Graph API.
+
+#####
 ### 4.7 SharePoint Publishing - Detailed Sequence
 
 This section provides an in-depth look at how the Orchestrator converts markdown documentation to a SharePoint modern page using MS Graph API.

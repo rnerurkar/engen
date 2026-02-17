@@ -1,4 +1,4 @@
-from core.artifact_generator import ArtifactGenerator
+from core.pattern_synthesis.artifact_generator import ArtifactGenerator
 from config import Config
 from lib.adk_core import AgentRequest, AgentResponse, TaskStatus
 import logging
@@ -13,28 +13,32 @@ class ArtifactGenerationAgent:
         self.engine = ArtifactGenerator(project_id=Config.PROJECT_ID)
 
     def process(self, req: AgentRequest) -> AgentResponse:
+        # Expecting the full component specification and pattern documentation
         spec = req.payload.get("specification")
-        artifact_type = req.payload.get("artifact_type", "terraform")
+        documentation = req.payload.get("documentation")
+        critique = req.payload.get("critique")
         
-        if not spec:
+        if not spec or not documentation:
             return AgentResponse(
                 status=TaskStatus.FAILED, 
-                error="Missing 'specification' in payload", 
+                error="Missing 'specification' or 'documentation' in payload", 
                 agent_name="ArtifactGenerationAgent"
             )
             
         try:
-            artifact = self.engine.generate_artifact(spec, artifact_type)
-            if not self.engine.validate_artifact(artifact):
+            # Generate artifacts for the full pattern
+            artifacts = self.engine.generate_full_pattern_artifacts(spec, documentation, critique)
+            
+            if "error" in artifacts:
                 return AgentResponse(
-                    status=TaskStatus.FAILED, 
-                    error="Validation failed", 
+                    status=TaskStatus.FAILED,
+                    error=artifacts["error"],
                     agent_name="ArtifactGenerationAgent"
                 )
             
             return AgentResponse(
                 status=TaskStatus.COMPLETED,
-                result={"artifact": artifact},
+                result={"artifacts": artifacts},
                 agent_name="ArtifactGenerationAgent"
             )
         except Exception as e:
