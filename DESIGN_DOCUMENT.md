@@ -535,6 +535,92 @@ sequenceDiagram
 19. **Poll Status**: The Client (`Streamlit App`) queries the `CloudSQLManager` using the provided IDs.
 20. **Return Status**: The database returns the current status (e.g., Docs=COMPLETED, Code=IN_PROGRESS) and any available URLs.
 
+## 4.9 Client-Side Design: Streamlit App
+
+The Streamlit application serves as the interactive frontend for the EnGen system, implementing a stateful "Wizard" interface that guides the user through the multi-stage artifact generation process. Unlike a simple request-response interface, the app uses **`st.session_state`** as a client-side state machine to handle the Human-in-the-Loop (HITL) requirements for both documentation and code verification.
+
+### 4.9.1 State Management Architecture
+
+To support the asynchronous and multi-step nature of the workflow, the application preserves context (generated artifacts, review IDs, status) across re-runs.
+
+**Key State Variables:**
+- `step`: Tracks the current workflow phase (`INPUT` -> `DOC_REVIEW` -> `CODE_GEN` -> `CODE_REVIEW` -> `PUBLISH`).
+- `doc_content`: Stores the generated markdown documentation for display.
+- `doc_review_id`: The ID returned by the Orchestrator after document approval, used to track SharePoint publishing.
+- `code_content`: Stores the generated file structure and code snippets.
+- `code_review_id`: The ID returned after code approval, used to track GitHub publishing.
+
+### 4.9.2 Workflow Integration Phases
+
+The application interacts with specific Orchestrator endpoints that correspond to the workflow lifecycle:
+
+**1. Phase 1: Input & Document Generation**
+   - **User Action**: Enters a prompt (e.g., "Create a secure storage pattern").
+   - **API Call**: `POST /phase1/generate_docs`
+   - **System**: Orchestrator invokes Retriever, Visualizer, and Generator agents.
+   - **Result**: Returns Markdown content. App transitions to `DOC_REVIEW`.
+
+**2. Phase 2: Document Human Review**
+   - **User Action**: Reviews rendered Markdown in the UI. Clicks "Approve".
+   - **API Call**: `POST /phase1/approve_docs`
+   - **System**: Orchestrator triggers async SharePoint publishing and logs `transaction_id`.
+   - **Result**: Returns `doc_review_id`. App transitions to `CODE_GEN`.
+
+**3. Phase 3: Code Generation & Validation**
+   - **System Action**: Automatically triggers code generation.
+   - **API Call**: `POST /phase2/generate_code`
+   - **System**: Orchestrator calls Component Generator -> Artifact Generator -> Validator (fetching Golden Samples).
+   - **Result**: Returns file bundle layout. App transitions to `CODE_REVIEW`.
+
+**4. Phase 4: Code Human Review**
+   - **User Action**: Reviews file structure. Clicks "Approve & Publish".
+   - **API Call**: `POST /phase2/approve_code`
+   - **System**: Orchestrator triggers async GitHub publishing.
+   - **Result**: Returns `code_review_id`. App transitions to `PUBLISH`.
+
+**5. Phase 5: Async Status Polling**
+   - **System Action**: UI enters a polling loop.
+   - **API Call**: `GET /status?p_id={doc_id}&c_id={code_id}`
+   - **Display**: Shows real-time progress bars for "Documentation Publishing (SharePoint)" and "Code Publishing (GitHub)".
+   - **Termination**: Loop ends when both statuses are `COMPLETED` or `FAILED`.
+
+### 4.9.3 Integration Diagram
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Streamlit
+    participant Orch as Orchestrator API
+    participant DB as CloudSQL
+
+    User->>Streamlit: 1. Enter Prompt
+    Streamlit->>Orch: POST /phase1/generate_docs
+    Orch-->>Streamlit: Return Markdown
+    Streamlit-->>User: Display Docs for Review
+
+    User->>Streamlit: 2. Approve Docs
+    Streamlit->>Orch: POST /phase1/approve_docs
+    Orch->>DB: Create DOC_TASK (In Progress)
+    Orch-->>Streamlit: Return doc_review_id
+    
+    Streamlit->>Orch: 3. POST /phase2/generate_code
+    Orch-->>Streamlit: Return Code Bundle
+    Streamlit-->>User: Display Code Structure for Review
+
+    User->>Streamlit: 4. Approve Code
+    Streamlit->>Orch: POST /phase2/approve_code
+    Orch->>DB: Create CODE_TASK (In Progress)
+    Orch-->>Streamlit: Return code_review_id
+
+    loop Every 2 Seconds
+        Streamlit->>Orch: GET /status
+        Orch->>DB: Check Task Status
+        DB-->>Orch: {doc: COMPLETED, code: IN_PROGRESS}
+        Orch-->>Streamlit: Status Update
+        Streamlit-->>User: Update Progress Bars
+    end
+```
+
 ---
 
 ## 5. Conclusion
