@@ -30,4 +30,5 @@ class Config:
     
     # GCS Configuration
     GCS_CONFIG_BUCKET = os.getenv("GCS_CONFIG_BUCKET", "engen-config")
+    GCS_IAC_TEMPLATES_BUCKET = os.getenv("GCS_IAC_TEMPLATES_BUCKET", "engen-iac-templates")
     COMPONENT_MAPPING_FILE = os.getenv("COMPONENT_MAPPING_FILE", "component_mapping.json")

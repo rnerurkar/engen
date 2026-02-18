@@ -388,7 +388,7 @@ This workflow implements a "Pattern Synthesis" approach. Instead of generating i
 | **CloudSQLManager** | **State Store**. It acts as the single source of truth for the status of both human reviews and async publishing tasks. It allows the frontend to poll for completion without blocking the agent. |
 | **ComponentSpecification** | **Analyzer**. It parses the high-level design documentation to extract a structured dependency graph. It identifies every required infrastructure resource and application component, along with their configuration properties and relationships. |
 | **ArtifactGenerator** | **Synthesizer**. It takes the structured specification and the design documentation to generate a holistic "Artifact Bundle". This bundle includes both Infrastructure as Code (Terraform) and Application Boilerplate (Python/Node.js) in a single consistent pass, ensuring ID references and config clusters match. |
-| **ArtifactValidator** | **Quality Gate**. It acts as an automated reviewer. It inspects the generated Artifact Bundle against a strict rubric (Syntax, Security, Completeness). It returns a PASS/FAIL status and structured feedback for self-correction. |
+| **ArtifactValidator** | **Quality Gate**. It acts as an automated reviewer. It inspects the generated Artifact Bundle against a strict rubric (Syntax, Security, Completeness). Crucially, it fetches **"Golden Sample" IaC templates** from a GCS bucket to benchmark the generated code against organizational best practices. |
 | **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. |
 | **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub) as a background task. |
 | **SharePointPublisher** | **Docs Publisher**. Updates the enterprise knowledge base with the design documentation as a background task. |
@@ -419,6 +419,10 @@ graph TD
         PubCode[GitHub<br/>Publisher]
     end
 
+    subgraph "External Resources"
+        GCS[GCS Bucket<br/>Golden Samples]
+    end
+
     %% Data Flow
     UI -->|Start| Orch
     UI -.->|Poll Status| DB
@@ -429,6 +433,8 @@ graph TD
 
     PubDocs -->|Update State| DB
     PubCode -->|Update State| DB
+    
+    GCS -->|Fetch Templates| ArtVal
 
     Orch -->|Doc Text| CompSpec
     CompSpec -->|Specification JSON| Orch
@@ -452,6 +458,7 @@ sequenceDiagram
     participant Spec as Component Spec Agent
     participant Gen as Artifact Gen Agent
     participant Val as Artifact Validator Agent
+    participant GCS as GCS Bucket
     participant Human as Human Verifier
     participant DB as CloudSQL
     participant Async as Background Tasks
@@ -478,6 +485,8 @@ sequenceDiagram
         Orch->>Gen: generate_artifact(spec, pattern_text)
         Gen-->>Orch: ArtifactBundle
         Orch->>Val: validate_artifact(artifacts)
+        Val->>GCS: fetch_templates(tf, cf)
+        GCS-->>Val: golden_samples (text)
         Val-->>Orch: ValidationResult
     end
 
@@ -515,15 +524,16 @@ sequenceDiagram
 8.  **Generate Artifact Bundle**: The Orchestrator sends the spec and pattern text to the `ArtifactGenerationAgent`.
 9.  **Return Artifacts**: The generator returns a complete bundle containing Terraform files and Python application code.
 10. **Validate Artifacts**: The Orchestrator sends the bundle to the `ArtifactValidationAgent` for automated quality checks.
-11. **Return Validation Result**: The validator returns a PASS/FAIL status. If FAIL, the loop (Steps 8-11) repeats with feedback.
-12. **Request Artifact Approval**: Once validated, the Orchestrator sends the code bundle to the `HumanVerifierAgent` for final sign-off.
-13. **Artifact Approved**: The human expert approves the code. The Verifier returns `APPROVED` status and a unique review ID (`AID-2`).
-14. **Trigger Async Publish (Code)**: The Orchestrator immediately spawns a background task to publish the code, passing `AID-2`.
-15. **Code Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `AID-2` to `IN_PROGRESS`.
-16. **Code Status: COMPLETED**: After successfully pushing to GitHub, the worker updates the status to `COMPLETED` and saves the Commit URL.
-17. **Return Immediate Response**: *Concurrently* with step 14-16, the Orchestrator returns a response to the Client with `status: processing` and both IDs (`PID-1`, `AID-2`).
-18. **Poll Status**: The Client (`Streamlit App`) queries the `CloudSQLManager` using the provided IDs.
-19. **Return Status**: The database returns the current status (e.g., Docs=COMPLETED, Code=IN_PROGRESS) and any available URLs.
+11. **Fetch Golden Samples**: The Validator fetches approved IaC templates (Terraform/CloudFormation) from the GCS bucket to use as a quality benchmark.
+12. **Return Validation Result**: The validator returns a PASS/FAIL status. If FAIL, the loop (Steps 8-12) repeats with feedback.
+13. **Request Artifact Approval**: Once validated, the Orchestrator sends the code bundle to the `HumanVerifierAgent` for final sign-off.
+14. **Artifact Approved**: The human expert approves the code. The Verifier returns `APPROVED` status and a unique review ID (`AID-2`).
+15. **Trigger Async Publish (Code)**: The Orchestrator immediately spawns a background task to publish the code, passing `AID-2`.
+16. **Code Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `AID-2` to `IN_PROGRESS`.
+17. **Code Status: COMPLETED**: After successfully pushing to GitHub, the worker updates the status to `COMPLETED` and saves the Commit URL.
+18. **Return Immediate Response**: *Concurrently* with step 15-17, the Orchestrator returns a response to the Client with `status: processing` and both IDs (`PID-1`, `AID-2`).
+19. **Poll Status**: The Client (`Streamlit App`) queries the `CloudSQLManager` using the provided IDs.
+20. **Return Status**: The database returns the current status (e.g., Docs=COMPLETED, Code=IN_PROGRESS) and any available URLs.
 
 ---
 
