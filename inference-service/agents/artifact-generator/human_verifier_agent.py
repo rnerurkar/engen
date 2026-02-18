@@ -1,80 +1,20 @@
 from lib.adk_core import ADKAgent, AgentRequest, AgentResponse, TaskStatus
+from lib.cloudsql_client import CloudSQLManager, logger as sql_logger
 from config import Config
+from sqlalchemy import text  # Add this import
 import logging
 import uuid
 import json
 import time
 from typing import Dict, Any, Optional
-import sqlalchemy
-from sqlalchemy import create_engine, text
+# sqlalchemy imports removed as CloudSQLManager handles it
 from google.cloud import pubsub_v1
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-class CloudSQLManager:
-    """
-    Manages interactions with a CloudSQL (PostgreSQL) instance for persistent review tracking.
-    Schema expected:
-    CREATE TABLE reviews (
-        review_id VARCHAR(36) PRIMARY KEY,
-        title TEXT,
-        stage VARCHAR(50), -- 'PATTERN' or 'ARTIFACT'
-        status VARCHAR(50), -- 'PENDING', 'APPROVED', 'REJECTED'
-        artifacts_json JSONB,
-        documentation TEXT,
-        feedback TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """
-    def __init__(self, connection_name: str, db_user: str, db_pass: str, db_name: str):
-        # Construct the connection string for Cloud SQL Proxy or direct IP
-        # For production (Cloud Run/App Engine), use the unix socket path
-        # For local (with proxy), use 127.0.0.1
-        db_config = {
-            "pool_size": 5,
-            "max_overflow": 2,
-            "pool_timeout": 30,  # 30 seconds
-            "pool_recycle": 1800,  # 30 minutes
-        }
-        
-        # Adjust based on environment execution context
-        # user:pass@127.0.0.1:5432/dbname
-        self.db_uri = f"postgresql+pg8000://{db_user}:{db_pass}@127.0.0.1:5432/{db_name}"
-        try:
-            self.engine = create_engine(self.db_uri, **db_config)
-            logger.info("CloudSQL Engine initialized successfully.")
-        except Exception as e:
-            logger.error(f"Failed to initialize CloudSQL Engine: {e}")
-            self.engine = None
-
-    def create_review_record(self, review_id: str, title: str, stage: str, artifacts: Dict, doc: str):
-        if not self.engine:
-            logger.warning("DB Engine not available. Skipping persistent record creation.")
-            return
-
-        stmt = text("""
-            INSERT INTO reviews (review_id, title, stage, status, artifacts_json, documentation)
-            VALUES (:rid, :title, :stage, 'PENDING', :artifacts, :doc)
-        """)
-        
-        with self.engine.connect() as conn:
-            conn.execute(stmt, {
-                "rid": review_id,
-                "title": title,
-                "stage": stage,
-                "artifacts": json.dumps(artifacts),
-                "doc": doc
-            })
-            conn.commit()
-
-    def update_review_status(self, review_id: str, status: str, feedback: str):
-         if not self.engine: return
-         stmt = text("UPDATE reviews SET status=:status, feedback=:feedback, updated_at=NOW() WHERE review_id=:rid")
-         with self.engine.connect() as conn:
-             conn.execute(stmt, {"status": status, "feedback": feedback, "rid": review_id})
-             conn.commit()
+# CloudSQLManager moved to lib/cloudsql_client.py
+# Using shared implementation.
 
 class NotificationService:
     """
@@ -148,8 +88,8 @@ class HumanVerifierAgent:
         # For this synchronous demo, we emulate an immediate check or wait loop.
         
         return {
-            "id": request_id,
-            "status": "PENDING",
+            "review_id": request_id, 
+            "status": "PENDING", 
             "review_url": review_url,
             "message": "Review request created. Waiting for human action."
         }

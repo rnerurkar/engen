@@ -186,7 +186,7 @@ The system consists of the following agents, orchestrating a complex workflow:
 
 ```mermaid
 sequenceDiagram
-    participant Client
+    participant Client as Streamlit App
     participant Orch as Orchestrator Agent
     participant Vision as Vision Agent
     participant Ret as Retrieval Agent
@@ -195,8 +195,8 @@ sequenceDiagram
     participant Artifact as Artifact Gen Agent
     participant Validator as Artifact Val Agent
     participant Verifier as Human Verifier
-    participant SP as SharePoint Publisher
-    participant GH as GitHub Publisher
+    participant DB as CloudSQL
+    participant Async as Async Workers
 
     Client->>Orch: POST /process {image, title}
     
@@ -216,11 +216,16 @@ sequenceDiagram
 
     Note over Orch,Verifier: Step 3: Human Check (Pattern)
     Orch->>Verifier: request_approval(sections)
-    Verifier-->>Orch: {status: APPROVED}
+    Verifier-->>Orch: {status: APPROVED, review_id: "PID-1"}
+    
+    par Async Publishing (Docs)
+        Orch->>Async: publish_docs_async(review_id="PID-1")
+        Async->>DB: Update Status (IN_PROGRESS)
+    and Continue Workflow
+        Orch->>Artifact: generate_component_spec(doc)
+    end
 
     Note over Orch,Validator: Step 4: Pattern Synthesis (Holistic)
-    Orch->>Artifact: generate_component_spec(doc)
-    Artifact-->>Orch: full_spec + execution_plan
     
     loop Artifact Validation (Max 3)
         Orch->>Artifact: generate_artifact(spec, doc, critique?)
@@ -236,14 +241,22 @@ sequenceDiagram
 
     Note over Orch,Verifier: Step 5: Human Check (Artifacts)
     Orch->>Verifier: request_approval(artifacts)
-    Verifier-->>Orch: {status: APPROVED}
+    Verifier-->>Orch: {status: APPROVED, review_id: "AID-2"}
 
-    Note over Orch,GH: Step 6: Multi-Channel Publish
-    Orch->>SP: publish_page(docs)
-    Orch->>GH: publish_code(artifacts)
-    GH-->>Orch: commit_url
+    Note over Orch,DB: Step 6: Non-Blocking Completion
+    
+    par Async Publishing (Code)
+        Orch->>Async: publish_code_async(review_id="AID-2")
+        Async->>DB: Update Status (IN_PROGRESS)
+    and Return Immediate Response
+        Orch-->>Client: {status: "processing", pattern_id: "PID-1", artifact_id: "AID-2"}
+    end
 
-    Orch-->>Client: Return result
+    Note over Client,DB: Step 7: Client Polling
+    loop Poll Until Complete
+        Client->>DB: Check Status (PID-1, AID-2)
+        DB-->>Client: {doc_url: "...", code_url: "..."}
+    end
 ```
 
 ### 4.4 End-to-End Flow Description
@@ -257,340 +270,76 @@ sequenceDiagram
 4.  **Review**: The `Reviewer Agent` analyzes the draft against quality guidelines. It returns a score and specific critique.
 5.  **Refinement**: If the score is below threshold, the Orchestrator feeds the critique back into the `Generator Agent` for a revised draft. This repeats for up to 3 iterations.
 
-#### Phase 3: Governance (Point 1)
+#### Phase 3: Governance (Point 1) & Async Doc Publishing
 6.  **Pattern Verification**: The Orchestrator sends the final text draft to the `HumanVerifierAgent`.
-7.  **Notification**: The agent persists the request in CloudSQL and triggers a Pub/Sub notification to the engineering team.
-8.  **Wait State**: The workflow pauses (or polls) until a human reviewer approves the text via the Review Portal.
+7.  **Approval**: Once approved, the Orchestrator receives a `review_id`.
+8.  **Async Publishing**: It immediately spawns a background task to publish the documentation to SharePoint, using the `review_id` to track progress in CloudSQL. The workflow *does not wait* for this to finish but proceeds to artifact generation.
 
 #### Phase 4: Pattern Synthesis (Holistic Generation)
-9.  **Comprehensive Specification**: Once the text is approved, the `ArtifactGenerationAgent` performs a holistic analysis to extract a graph of all components, their explicit dependencies, and integration attributes (e.g., "API requires DB Endpoint").
+9.  **Comprehensive Specification**: The `ArtifactGenerationAgent` performs a holistic analysis to extract a graph of all components.
 10. **Plan & Order**: An execution plan is derived to ensure logical dependency ordering.
-11. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window. This ensures that application code variables (e.g., `DB_HOST`) match the infrastructure outputs exactly.
+11. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window.
 12. **Automated Validation Loop**:
-    *   **Validate**: The `ArtifactValidationAgent` checks the generated code against a strict rubric (Syntax, Completeness, Security, Wiring).
-    *   **Feedback**: If issues are found (e.g., invalid HCL syntax, missing variable), the critique is fed back to the generator.
-    *   **Retry**: The generator attempts to fix the specific issues. This loop repeats up to 3 times to ensure high-quality output.
+    *   **Validate**: The `ArtifactValidationAgent` checks the generated code against a strict rubric.
+    *   **Feedback**: If issues are found, the critique is fed back to the generator.
+    *   **Retry**: The generator attempts to fix the specific issues.
 
-#### Phase 5: Governance (Point 2)
-13. **Artifact Verification**: The validated code bundle (IaC + Source Code) is sent to the `HumanVerifierAgent`. A human expert reviews the file structure and logic before any commitment is made.
+#### Phase 5: Governance (Point 2) & Async Code Publishing
+13. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review.
+14. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub.
+15. **Immediate Return**: The Orchestrator returns a `processing` status to the client, along with the review IDs needed to track the background tasks.
 
-#### Phase 6: Multi-Channel Publication
-14. **Documentation**: The `SharePointPublisher` pushes the approved architectural documentation to the knowledge base.
-15. **Code & Artifacts**: The `GitHubMCPPublisher` pushes the approved IaC and Boilerplate code to a dedicated GitHub repository, creating a new commit with the pattern implementation.
-16. **Result**: The client receives URLs for both the documentation (SharePoint) and the repository (GitHub).
+#### Phase 6: Client Polling
+16. **Status Check**: The client application (e.g., Streamlit) polls the CloudSQL database using the returned IDs.
+17. **Completion**: Once the background tasks update the DB status to `COMPLETED`, the client displays the final URLs for the SharePoint page and GitHub commit.
 
 
 ### 4.5 Response Assembly
 
-Upon completion of the generation and optional publication, the Orchestrator constructs the final response:
+Upon initiating the pattern generation and async publishing tasks, the Orchestrator constructs an immediate response to the client. This response facilitates non-blocking UI updates.
 
--   `document`: Dictionary of section names to markdown content.
--   `donor_pattern`: ID of the pattern used as reference.
--   `diagram_description`: Technical description from Vision Agent.
--   `sharepoint`: Publishing result (if `publish=true`), containing the Page URL and ID.
+**Response Payload:**
+-   `status`: `"workflow_completed_processing_async"`
+-   `pattern_review_id`: UUID for tracking the documentation publishing status.
+-   `artifact_review_id`: UUID for tracking the code publishing status.
+-   `message`: Informational message about background processing.
 
-It then logs completion metrics (total sections, average quality score, total revisions) and returns the JSON payload to the client.
+The final URLs (SharePoint page, GitHub commit) are **not** returned here but must be retrieved via polling the CloudSQL `reviews` table.
 
 ### 4.6 Error Handling Strategy
 
-The Orchestrator implements robust error handling for each agent interaction:
+The Orchestrator implements robust error handling for both synchronous agent interactions and asynchronous background tasks:
 
--   **Vision Agent Fails**: Orchestrator catches `A2AError`, retries 3x, returns error if exhausted.
--   **Retrieval Agent Fails**: Retries; if failures persist, proceeds with empty donor context (graceful degradation).
--   **Writer Agent Fails**: Logs error, attempts to continue with next section, flags partial document.
--   **ReMulti-Channel Publishing
+-   **Vision/Retrieval/Generator Fails**: Orchestrator catches `A2AError`, retries 3x, and returns a structured error response if exhausted.
+-   **Validation Loop**: If artifact validation fails 3 times, the workflow halts and returns the validation errors for manual intervention.
+-   **Async Publishing Fails**: 
+    -   If SharePoint or GitHub API calls fail, the background worker catches the exception.
+    -   It updates the CloudSQL status to `FAILED`.
+    -   The client polling mechanism sees the failure and can display an error message or retry button to the user.
+### 4.7 Multi-Channel Publishing
 
-The system now supports publishing to multiple destinations to separate documentation from implementation code.
+The system separates the publishing of documentation and implementation code into distinct, asynchronous workflows. This ensures that documentation is available immediately upon approval, while code generation (which takes longer) proceeds in parallel.
 
-#### 4.7.1 SharePoint (Documentation)
-When `publish=true` is set, the generated markdown (Problem, Solution, Architecture) is converted to a SharePoint modern page. This serves as the "Knowledge Base" entry.
+#### 4.7.1 SharePoint (Documentation Knowledge Base)
+Upon approval of the design pattern text, the `SharePointPublisher` converts the markdown content into a modern SharePoint page. This serves as the authoritative interface documentation.
 
-#### 4.7.2 GitHub (Implementation)
-The validated Artifacts are structured into a repository-ready format:
-*   `infrastructure/` contains the Terraform/CloudFormation templates.
-*   `src/` contains the generated boilerplate application code.
+#### 4.7.2 GitHub (Implementation Repository)
+Upon approval of the generated artifacts, the `GitHubMCPPublisher` commits the files to the target repository.
+*   `infrastructure/`: Contains Terraform templates.
+*   `src/`: Contains application boilerplate.
+*   The publisher creates a new branch (e.g., `feat/pattern-name`) for pull request review.
 
-The `GitHubMCPPublisher` uses the GitHub API (or MCP Tool) to commit these files directly to the target repository (defaulting to a `feat/` branch or `main` based on config).
+#### 4.7.3 SharePoint Publishing Detail
 
-#### 4.7.3 SharePoint Publishing - Detailed Sequence
+The SharePoint publishing process involves a complex conversion from Markdown to SharePoint's JSON-based Page Canvas model. It uses MS Graph API (v1.0 and beta) to create pages, add web parts, and publish them.
 
-This section provides an in-depth look at how the Orchestrator converts markdown documentation to a SharePoint modern page using MS Graph API.
-
-#####
-### 4.7 SharePoint Publishing - Detailed Sequence
-
-This section provides an in-depth look at how the Orchestrator converts markdown documentation to a SharePoint modern page using MS Graph API.
-
-#### 4.7.1 Overview
-
-When `publish=true` is set in the Orchestrator request, the generated markdown document goes through a conversion pipeline:
-
-```
-Markdown → HTML → SharePoint Web Parts → Page Canvas → Published Page
-```
-
-#### 4.7.2 Detailed Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Orch as Orchestrator
-    participant Conv as MarkdownToSharePoint Converter
-    participant Pub as SharePointPublisher
-    participant MSAL as MSAL Library
-    participant AAD as Azure Active Directory
-    participant Graph as MS Graph API
-    participant SP as SharePoint Site
-
-    Note over Orch,SP: PHASE 1: Configuration & Authentication
-
-    Orch->>Pub: publish_document(title, sections)
-    activate Pub
-    
-    Pub->>Pub: Validate config (site_id, tenant_id, client_id, client_secret)
-    
-    alt Configuration Invalid
-        Pub-->>Orch: PublishResult(success=false, error="Config incomplete")
-    end
-    
-    Pub->>MSAL: acquire_token_for_client()
-    activate MSAL
-    
-    MSAL->>AAD: POST /oauth2/v2.0/token grant_type=client_credentials scope=graph.microsoft.com/.default
-    activate AAD
-    
-    AAD->>AAD: Validate client_id + client_secret
-    AAD-->>MSAL: {"access_token": "eyJ...", "expires_in": 3600}
-    deactivate AAD
-    
-    MSAL-->>Pub: access_token
-    deactivate MSAL
-    
-    Pub->>Pub: Cache token with expiry time
-
-    Note over Orch,SP: PHASE 2: Folder Preparation (Optional)
-
-    opt Target folder configured
-        Pub->>Graph: GET /sites/{siteId}/drive/root:/SitePages/{folder}
-        activate Graph
-        
-        alt Folder exists
-            Graph-->>Pub: 200 OK
-        else Folder not found
-            Graph-->>Pub: 404 Not Found
-            deactivate Graph
-            
-            Pub->>Graph: POST /sites/{siteId}/drive/root:/SitePages:/children {"name": "{folder}", "folder": {}}
-            activate Graph
-            Graph->>SP: Create folder in SitePages
-            SP-->>Graph: Folder created
-            Graph-->>Pub: 201 Created
-            deactivate Graph
-        end
-    end
-
-    Note over Orch,SP: PHASE 3: Page Creation
-
-    Pub->>Pub: Generate safe filename "My Doc: Test!" → "my-doc-test-20251211143052.aspx"
-    
-    Note right of Graph: Some page APIs require /beta
-    Pub->>Graph: POST /sites/{siteId}/pages {"name": "{filename}", "title": "{title}", "pageLayout": "article"}
-    activate Graph
-    
-    Graph->>SP: Create draft page
-    SP-->>Graph: Page created (draft)
-    Graph-->>Pub: {"id": "abc123", "name": "...", "webUrl": "..."}
-    deactivate Graph
-    
-    Note right of Pub: Store page_id for next steps
-
-    Note over Orch,SP: PHASE 4: Markdown to SharePoint Conversion
-
-    Pub->>Conv: convert_document(sections, title)
-    activate Conv
-    
-    loop For each section in document
-        Note over Conv: Section: "Problem" → "## Problem\n\nThe system..."
-        
-      Conv->>Conv: markdown_to_html(markdown_text)
-      Note right of Conv: Convert via Python-Markdown<br/>extensions: fenced_code, tables, sane_lists, codehilite, toc
-      Note right of Conv: Sanitize with Bleach allowlist<br/>(tags/attrs/protocols) to ensure safe HTML
-        
-        Conv->>Conv: create_text_web_part(html) {"id": "wp-1-abc", "instanceId": "wp-1-abc", "dataVersion": "1.0", "properties": {"inlineHtml": "..."}}
-        
-        Conv->>Conv: create_section([webpart]) {"columns": [{"factor": 12, "webparts": [...]}}]}
-    end
-    
-    Conv-->>Pub: {"canvasLayout": {"horizontalSections": [...]}}
-    deactivate Conv
-
-    Note over Orch,SP: PHASE 5: Set Page Content
-
-    Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId} {"canvasLayout": {"horizontalSections": [...]}}
-    activate Graph
-    
-    Graph->>SP: Update page canvas
-    SP-->>Graph: Content updated
-    Graph-->>Pub: 200 OK
-    deactivate Graph
-
-    Note over Orch,SP: PHASE 6: Publish Page
-
-    Note right of Graph: May be under /beta depending on tenant
-    Pub->>Graph: POST /sites/{siteId}/pages/{pageId}/publish
-    activate Graph
-    
-    Graph->>SP: Change page state: Draft → Published
-    SP-->>Graph: Published
-    Graph-->>Pub: 200 OK
-    deactivate Graph
-    
-    Note right of Pub: Page now visible to all users with read access
-
-    Pub->>Graph: GET /sites/{siteId}/pages/{pageId}
-    activate Graph
-    Graph-->>Pub: {"webUrl": "https://company.sharepoint.com/..."}
-    deactivate Graph
-
-    Note over Orch,SP: PHASE 7: News Promotion (Optional)
-
-    opt promote_as_news = true
-        Pub->>Graph: PATCH /sites/{siteId}/pages/{pageId} {"promotionKind": "newsPost"}
-        activate Graph
-        
-        Graph->>SP: Promote to news feed
-        SP-->>Graph: Promoted
-        Graph-->>Pub: 200 OK
-        deactivate Graph
-        
-        Note right of Pub: Page now appears in SharePoint News feed
-    end
-
-    Note over Orch,SP: PHASE 8: Return Result
-
-    Pub->>Pub: Calculate publish_time_ms
-    Note over Pub,Graph: Handle throttling: 429 with Retry-After
-    
-    Pub-->>Orch: PublishResult(<br/>  success=true,<br/>  page_id="abc123",<br/>  page_url="https://...",<br/>  publish_time_ms=2340<br/>)
-    deactivate Pub
-```
-
-#### 4.7.3 Markdown Conversion Libraries
-
-The converter uses proven libraries instead of custom regex:
-
-- Python-Markdown: Standards-compliant Markdown to HTML conversion
-  - Extensions: `fenced_code`, `tables`, `sane_lists`, `codehilite`, `toc`
-- Bleach: HTML sanitization with an allowlist of tags, attributes, and protocols
-
-Example configuration used by `MarkdownToSharePointConverter`:
-
-```python
-import markdown as md
-import bleach
-
-html = md.markdown(
-    markdown_text,
-    extensions=["fenced_code", "tables", "sane_lists", "codehilite", "toc"],
-)
-
-allowed_tags = [
-    "p", "pre", "code", "h1", "h2", "h3", "h4", "h5", "h6",
-    "strong", "em", "ul", "ol", "li", "a", "blockquote", "hr",
-    "table", "thead", "tbody", "tr", "th", "td"
-]
-allowed_attrs = {"a": ["href", "title", "target"], "code": ["class"]}
-
-safe_html = bleach.clean(html, tags=allowed_tags, attributes=allowed_attrs,
-                        protocols=["http", "https", "mailto"], strip=True)
-```
-
-Notes:
-- Code blocks render with `codehilite` classes for optional styling
-- If libraries are unavailable, converter degrades to a minimal, safe fallback
-
-#### 4.7.4 SharePoint Page Canvas Structure
-
-SharePoint modern pages use a specific JSON structure. Here's how the converted document maps to it:
-
-```json
-{
-  "canvasLayout": {
-    "horizontalSections": [
-      {
-        "columns": [
-          {
-            "factor": 12,        // Full width (12-column grid)
-            "webparts": [
-              {
-                "id": "wp-1-abc123",
-                "instanceId": "wp-1-abc123",
-                "dataVersion": "1.0",
-                "properties": {
-                  "inlineHtml": "<h2>Problem</h2><p>The system has...</p>"
-                }
-              }
-            ]
-          }
-        ],
-        "emphasis": "none"      // Background style
-      },
-      {
-        "columns": [
-          {
-            "factor": 12,
-            "webparts": [
-              {
-                "id": "wp-2-def456",
-                "instanceId": "wp-2-def456",
-                "dataVersion": "1.0",
-                "properties": {
-                  "inlineHtml": "<h2>Solution</h2><p>We propose...</p>"
-                }
-              }
-            ]
-          }
-        ],
-        "emphasis": "none"
-      }
-    ]
-  }
-}
-```
-
-#### 4.7.5 MS Graph API Endpoints Used
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/oauth2/v2.0/token` | POST | Get OAuth access token from Azure AD |
-| `/sites/{siteId}/drive/root:/SitePages/{folder}` | GET | Check if target folder exists |
-| `/sites/{siteId}/drive/root:/SitePages:/children` | POST | Create folder if it doesn't exist |
-| `/sites/{siteId}/pages` | POST | Create new draft page |
-| `/sites/{siteId}/pages/{pageId}` | PATCH | Set page content (canvas layout) |
-| `/sites/{siteId}/pages/{pageId}/publish` | POST | Publish page (make visible) |
-| `/sites/{siteId}/pages/{pageId}` | GET | Retrieve page details (webUrl) |
-| `/sites/{siteId}/pages/{pageId}` | PATCH | Promote to news (`promotionKind: newsPost`) |
-
-#### 4.7.6 Required Azure AD App Permissions
-
-To use SharePoint publishing, register an Azure AD application with these permissions:
-
-| Permission | Type | Purpose |
-|------------|------|---------|
-| `Sites.ReadWrite.All` | Application | Create and modify pages |
-| `Sites.Manage.All` | Application | Publish pages and manage site settings |
-
-**Environment Variables Required:**
-```env
-SHAREPOINT_SITE_ID=<your-site-id>          # Found at /_api/site/id
-AZURE_TENANT_ID=<tenant-guid>              # Azure AD tenant ID
-AZURE_CLIENT_ID=<app-client-id>            # Azure AD app registration
-AZURE_CLIENT_SECRET=<client-secret>        # App secret (keep secure!)
-SHAREPOINT_TARGET_FOLDER=Generated Documentation
-SHAREPOINT_PAGE_TEMPLATE=Article
-SHAREPOINT_PROMOTE_AS_NEWS=false
-PUBLISH_TO_SHAREPOINT=true
-```
+**Key Steps:**
+1.  **Authentication**: Uses MSAL with Client Credentials flow to get a Graph API token.
+2.  **Page Creation**: Creates a draft page in the `SitePages` library.
+3.  **Conversion**: Parses markdown into HTML (using `python-markdown`), sanitizes it (using `bleach`), and wraps it in SharePoint text web parts.
+4.  **Canvas Layout**: Constructs the JSON layout structure (`horizontalSections`, `columns`, `webparts`).
+5.  **Publishing**: PATCHes the page content and POSTs to the `/publish` endpoint.
+6.  **Status Update**: Updates CloudSQL with the final page URL.
 
 ### 4.8 Artifact Generation Workflow (Pattern Synthesis)
 
@@ -600,22 +349,28 @@ This workflow implements a "Pattern Synthesis" approach. Instead of generating i
 
 | Component | Responsibility |
 |-----------|----------------|
-| **OrchestratorAgent** | The central state machine that drives the workflow. It manages the lifecycle of the request, handles retries for validation failures, and coordinates the handover between generation, validation, review, and publishing. |
+| **OrchestratorAgent** | The central state machine that drives the workflow. It manages the lifecycle of the request, handles retries for validation failures, and coordinates the **async handover** to publishers. |
+| **CloudSQLManager** | **State Store**. It acts as the single source of truth for the status of both human reviews and async publishing tasks. It allows the frontend to poll for completion without blocking the agent. |
 | **ComponentSpecification** | **Analyzer**. It parses the high-level design documentation to extract a structured dependency graph. It identifies every required infrastructure resource and application component, along with their configuration properties and relationships. |
 | **ArtifactGenerator** | **Synthesizer**. It takes the structured specification and the design documentation to generate a holistic "Artifact Bundle". This bundle includes both Infrastructure as Code (Terraform) and Application Boilerplate (Python/Node.js) in a single consistent pass, ensuring ID references and config clusters match. |
 | **ArtifactValidator** | **Quality Gate**. It acts as an automated reviewer. It inspects the generated Artifact Bundle against a strict rubric (Syntax, Security, Completeness). It returns a PASS/FAIL status and structured feedback for self-correction. |
 | **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. |
-| **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub), creating a new branch with a complete, runnable project structure. |
-| **SharePointPublisher** | **Docs Publisher**. Updates the enterprise knowledge base with the design documentation and snippets of the generated code. |
+| **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub) as a background task. |
+| **SharePointPublisher** | **Docs Publisher**. Updates the enterprise knowledge base with the design documentation as a background task. |
 
 #### 4.8.2 Component Diagram
 
-The following diagram illustrates the structural relationships and information flow between the synthesis components.
+The following diagram illustrates the structural relationships and information flow between the synthesis components, highlighting the async publishing path.
 
 ```mermaid
 graph TD
+    subgraph "Client Layer"
+        UI[Streamlit App]
+    end
+
     subgraph "Orchestration Layer"
         Orch[Orchestrator Agent]
+        DB[(CloudSQL<br/>State Store)]
     end
 
     subgraph "Pattern Synthesis Core"
@@ -624,123 +379,104 @@ graph TD
         ArtVal["Artifact<br/>Validator"]
     end
 
-    subgraph "External Systems"
-        Vertex["Vertex AI<br/>(Gemini 1.5 Pro)"]
-        GitHub[GitHub Repo]
-        SP[SharePoint]
+    subgraph "Async Workers"
+        PubDocs[SharePoint<br/>Publisher]
+        PubCode[GitHub<br/>Publisher]
     end
 
     %% Data Flow
+    UI -->|Start| Orch
+    UI -.->|Poll Status| DB
+
+    Orch -->|Update State| DB
+    Orch -->|Trigger Async| PubDocs
+    Orch -->|Trigger Async| PubCode
+
+    PubDocs -->|Update State| DB
+    PubCode -->|Update State| DB
+
     Orch -->|Doc Text| CompSpec
     CompSpec -->|Specification JSON| Orch
-    CompSpec -.->|uses| Vertex
 
     Orch -->|Spec + Doc| ArtGen
     ArtGen -->|Artifact Bundle| Orch
-    ArtGen -.->|uses| Vertex
 
     Orch -->|Artifact Bundle| ArtVal
     ArtVal -->|Validation Result| Orch
-    ArtVal -.->|uses| Vertex
-
-    Orch -->|Approved Artifacts| GitHub
-    Orch -->|Approved Docs| SP
 ```
 
 #### 4.8.3 Sequence Diagram
 
-This sequence diagram details the lifecycle of a request from approved documentation to published artifacts.
+This sequence diagram details the lifecycle of a request from approved documentation to published artifacts, emphasizing the non-blocking nature of the operations.
 
 ```mermaid
 sequenceDiagram
     autonumber
+    participant Client as Streamlit App
     participant Orch as Orchestrator Agent
     participant Spec as Component Spec Agent
     participant Gen as Artifact Gen Agent
     participant Val as Artifact Validator Agent
     participant Human as Human Verifier
-    participant GitHub as GitHub Publisher
-    participant SP as SharePoint Publisher
+    participant DB as CloudSQL
+    participant Async as Background Tasks
 
-    Note over Orch, SP: Phase 1: Specification Extraction
+    Note over Orch, Async: Phase 1: Pattern Approval & Async Doc Publishing
     
-    Orch->>Spec: generate_component_spec(documentation)
-    activate Spec
-    Spec->>Spec: Analyze Docs (Vertex AI)
-    Spec->>Spec: Extract Resource Graph & Configs
-    Spec-->>Orch: ComponentSpecification (JSON)
-    deactivate Spec
+    Orch->>Human: request_approval(pattern_text)
+    Human-->>Orch: APPROVED (ID: PID-1)
+    
+    par Fire & Forget
+        Orch->>Async: publish_docs(PID-1)
+        Async->>DB: UPDATE status='IN_PROGRESS'
+        Note right of Async: Uploads to SharePoint...
+        Async->>DB: UPDATE status='COMPLETED' url='...'
+    and Continue Execution
+        Orch->>Spec: generate_component_spec(pattern_text)
+    end
+    
+    Note over Orch, Async: Phase 2: Holistic Synthesis Loop
 
-    Note over Orch, SP: Phase 2: Holistic Synthesis Loop
+    Spec-->>Orch: ComponentSpecification (JSON)
 
     loop Quality Assurance Loop (Max 3 Retries)
-        Orch->>Gen: generate_artifact(spec, documentation, critique?)
-        activate Gen
-        Note right of Gen: Generates IaC & App Code<br/>as a unified bundle
-        Gen->>Gen: Synthesize Pattern (Vertex AI)
-        Gen-->>Orch: ArtifactBundle (Terraform + Python)
-        deactivate Gen
-
-        Orch->>Val: validate_artifact(artifacts, spec)
-        activate Val
-        Val->>Val: Check Syntax (Terraform validate)
-        Val->>Val: Check Security (Rubric Check)
-        Val-->>Orch: ValidationResult (PASS/FAIL + Feedback)
-        deactivate Val
-
-        alt Validation PASSED
-            Orch->>Orch: Break Loop
-        else Validation FAILED
-            Orch->>Orch: Prepare Feedback for Retry
-        end
+        Orch->>Gen: generate_artifact(spec, pattern_text)
+        Gen-->>Orch: ArtifactBundle
+        Orch->>Val: validate_artifact(artifacts)
+        Val-->>Orch: ValidationResult
     end
 
-    Note over Orch, SP: Phase 3: Human Governance
+    Note over Orch, Async: Phase 3: Artifact Approval & Async Code Publishing
 
     Orch->>Human: request_approval(artifacts)
-    activate Human
-    Human-->>Orch: ReviewRequest(ID: 123, Status: PENDING)
-    deactivate Human
+    Human-->>Orch: APPROVED (ID: AID-2)
 
-    loop Polling
-        Orch->>Human: get_status(ID: 123)
-        Human-->>Orch: APPROVED / REJECTED
+    par Fire & Forget
+        Orch->>Async: publish_code(AID-2)
+        Async->>DB: UPDATE status='IN_PROGRESS'
+        Note right of Async: Pushes to GitHub...
+        Async->>DB: UPDATE status='COMPLETED' url='...'
+    and Return Immediate Result
+        Orch-->>Client: {status: "processing", p_id: "PID-1", a_id: "AID-2"}
     end
 
-    alt Review REJECTED
-        Orch->>Orch: Terminate Workflow
-    else Review APPROVED
-        Note over Orch, SP: Phase 4: Multi-Channel Publishing
-        
-        par Publish Code
-            Orch->>GitHub: publish_artifacts(owner, repo, branch)
-            activate GitHub
-            GitHub->>GitHub: Create Branch -> Commit Files -> Push
-            GitHub-->>Orch: Commit URL
-            deactivate GitHub
-        and Publish Docs
-            Orch->>SP: publish_document(doc + code_snippets)
-            activate SP
-            SP->>SP: Create Page -> Upload Content
-            SP-->>Orch: Page URL
-            deactivate SP
-        end
-        
-        Orch->>Orch: Return Final Success Result
+    Note over Client, DB: Phase 4: Client-Side Polling
+    
+    loop Poll until both COMPLETED
+        Client->>DB: SELECT status, url FROM reviews WHERE id IN (PID-1, AID-2)
+        DB-->>Client: {doc_status: "COMPLETED", code_status: "IN_PROGRESS"}
     end
 ```
 
 **Step-by-Step Explanation:**
 
-1.  **Specification Extraction**: The Orchestrator sends the approved natural language documentation to the Component Specification agent. This agent uses an LLM to "compile" the text into a structured JSON representation, listing all logical components and their dependencies.
-2.  **Synthesis Loop Entry**: The workflow enters a self-correcting loop to generate the actual code.
-3.  **Holistic Generation**: The Artifact Generator receives the *entire* specification. It produces all necessary files (e.g., `main.tf`, `variables.tf`, `app.py`, `Dockerfile`) in one operation. This ensures that a database password variable defined in Terraform is correctly referenced in the Kubernetes deployment manifest.
-4.  **Automated Validation**: The generated bundle is immediately sent to the Validator. The Validator checks for technical correctness (does it parse?) and alignment with the spec (did we build what was asked?).
-5.  **Feedback Cycle**: If validation fails, the feedback is fed back into the Generator for the next iteration (e.g., "The variable `project_id` is missing from `variables.tf`").
-6.  **Human Review**: Once the code is technically sound, it is queued for human approval. This is the final "sanity check" to ensure the code meets enterprise standards that automated tools might miss.
-7.  **Parallel Publishing**: Upon approval, the Orchestrator forks the process to publish to two destinations simultaneously:
-    *   **GitHub**: The full source code is pushed to a new branch, ready for a Pull Request.
-    *   **SharePoint**: The documentation is published to the intranet, enriched with snippets of the generated code for reference.
+1.  **Pattern Approval**: The workflow begins after the human expert approves the generated design pattern text.
+2.  **Async Fork 1 (Docs)**: The Orchestrator immediately triggers a background task to publish the documentation to SharePoint. It *does not wait* for this to finish but proceeds directly to the next step.
+3.  **Synthesis Loop**: The system enters the generation/validation loop to create the Terraform and Python code artifacts. This CPU-intensive process happens in parallel with the documentation publishing.
+4.  **Artifact Approval**: Once valid artifacts are generated, they are sent for a second human review.
+5.  **Async Fork 2 (Code)**: Upon approval, the Orchestrator triggers a second background task to push the code to GitHub.
+6.  **Immediate Return**: To keep the UI responsive, the Orchestrator returns the review IDs (`PID-1`, `AID-2`) to the client immediately.
+7.  **Client Polling**: The Streamlit user interface periodically queries the CloudSQL database using these IDs. Once the background workers update the status to `COMPLETED`, the UI displays the final URLs.
 
 ---
 

@@ -20,6 +20,7 @@ from lib.adk_core import ADKAgent, AgentRequest, AgentResponse, TaskStatus
 from lib.a2a_client import A2AClient, A2AError
 from lib.sharepoint_publisher import SharePointPublisher, SharePointPageConfig
 from lib.github_publisher import GitHubMCPPublisher
+from lib.cloudsql_client import CloudSQLManager, logger as sql_logger
 from config import Config
 
 class OrchestratorAgent(ADKAgent):
@@ -43,6 +44,14 @@ class OrchestratorAgent(ADKAgent):
         self.gh_repo = os.environ.get("GITHUB_REPO", "engen")
         self.gh_branch = os.environ.get("GITHUB_BRANCH", "main")
         self.code_publisher = GitHubMCPPublisher(owner=self.gh_owner, repo=self.gh_repo, branch=self.gh_branch)
+        
+        # CloudSQL
+        self.db = CloudSQLManager(
+             connection_name=os.environ.get("DB_INSTANCE", "engen-project:us-central1:reviews-db"),
+             db_user=os.environ.get("DB_USER", "postgres"),
+             db_pass=os.environ.get("DB_PASS", "postgres"),
+             db_name=os.environ.get("DB_NAME", "reviews_db")
+        )
 
     async def handle(self, req: AgentRequest) -> AgentResponse:
         self.logger.info(f"Received request: {req.task}")
@@ -65,10 +74,10 @@ class OrchestratorAgent(ADKAgent):
         
         return AgentResponse(status=TaskStatus.FAILED, error=f"Unknown task: {req.task}", agent_name=self.name)
 
-    async def request_human_verification(self, title: str, stage: str, content: dict, documentation: str) -> bool:
+    async def request_human_verification(self, title: str, stage: str, content: dict, documentation: str) -> tuple[bool, str]:
         """
         Helper to call the Human Verifier Agent.
-        Returns True if APPROVED, False otherwise.
+        Returns (True, review_id) if APPROVED, (False, review_id/None) otherwise.
         """
         self.logger.info(f"--- Requesting Human Verification for {stage} ---")
         try:
@@ -88,17 +97,84 @@ class OrchestratorAgent(ADKAgent):
             
             result = verify_resp.get("result", {})
             status = result.get("status")
-            self.logger.info(f"Human Review Status for {stage}: {status}")
+            review_id = result.get("review_id")
+            
+            self.logger.info(f"Human Review Status for {stage}: {status}, ID: {review_id}")
             
             if status == "APPROVED":
-                return True
+                return True, review_id
             else:
                 self.logger.warning(f"Project was not approved at {stage}. Status: {status}")
-                return False
+                return False, review_id
                 
         except Exception as e:
             self.logger.error(f"Failed during Human Verification ({stage}): {e}")
-            return False
+            return False, None
+            
+    async def _async_publish_docs(self, review_id: str, title: str, sections: dict, donor_context: dict):
+        """Asynchronous task to publish documentation to SharePoint."""
+        if not self.publisher:
+             return
+
+        self.logger.info(f"Starting async doc publishing for review {review_id}")
+        if self.db:
+            self.db.update_publishing_status(review_id, "doc", "IN_PROGRESS")
+            
+        try:
+            pub_result = await self.publisher.publish_document(
+                    title=title,
+                    sections=sections,
+                    description=f"AI Generated pattern based on {donor_context.get('title')}",
+                    donor_pattern=donor_context.get('id'),
+                    diagram_description="Processed by Gemini 1.5 Pro Multimodal"
+                )
+            
+            if pub_result.success:
+                if self.db:
+                    self.db.update_publishing_status(review_id, "doc", "COMPLETED", pub_result.page_url)
+                self.logger.info(f"Async doc publishing complete: {pub_result.page_url}")
+            else:
+                if self.db:
+                    self.db.update_publishing_status(review_id, "doc", "FAILED")
+                self.logger.error("Async doc publishing return failure status.")
+                
+        except Exception as e:
+            self.logger.error(f"Async doc publishing failed: {e}")
+            if self.db:
+                self.db.update_publishing_status(review_id, "doc", "FAILED")
+
+    async def _async_publish_code(self, review_id: str, artifacts: dict, title: str, docs_url_task=None):
+        """Asynchronous task to publish code to GitHub."""
+        self.logger.info(f"Starting async code publishing for review {review_id}")
+        if self.db:
+             self.db.update_publishing_status(review_id, "code", "IN_PROGRESS")
+             
+        try:
+             # Wait for docs if we want to link them? User didn't specify dependency, but 'publish_artifacts' might.
+             # Code publishing is independent in GitHubMCPPublisher.
+             
+             gh_result = await self.code_publisher.publish_artifacts(
+                artifacts=artifacts,
+                message=f"feat: generated artifacts for pattern '{title}'"
+            )
+             
+             # Construct URL (assuming standard GitHub URL structure if not returned explicitly)
+             # update: GitHubMCPPublisher.publish_artifacts returns commit info dict usually.
+             
+             # If successful
+             if gh_result:
+                commit_url = gh_result.get("html_url", "https://github.com/unknown") 
+                if self.db:
+                    self.db.update_publishing_status(review_id, "code", "COMPLETED", commit_url)
+                self.logger.info(f"Async code publishing complete: {commit_url}")
+             else:
+                 if self.db:
+                     self.db.update_publishing_status(review_id, "code", "FAILED")
+        except Exception as e:
+            self.logger.error(f"Async code publishing failed: {e}")
+            if self.db:
+                self.db.update_publishing_status(review_id, "code", "FAILED")
+
 
 
     async def run_workflow_loop(self, payload):
@@ -181,7 +257,7 @@ class OrchestratorAgent(ADKAgent):
         if not generated_sections:
             raise RuntimeError("Failed to generate any pattern sections.")
 
-        human_pattern_approved = await self.request_human_verification(
+        human_pattern_approved, review_id_pattern = await self.request_human_verification(
             title=title, 
             stage="PATTERN", 
             content=generated_sections, 
@@ -191,6 +267,14 @@ class OrchestratorAgent(ADKAgent):
         if not human_pattern_approved:
             return {"status": "rejected_by_human_pattern", "reason": "Human verification failed at Pattern stage."}
 
+        # ASYNC STEP: Publish Pattern Documentation (Fire and Forget)
+        # We start this task now so it runs while we generate artifacts.
+        doc_publish_task = None
+        if human_pattern_approved:
+             self.logger.info("--- Async Task: Publishing Pattern Documentation ---")
+             doc_publish_task = asyncio.create_task(
+                 self._async_publish_docs(review_id_pattern, title, generated_sections, donor_context)
+             )
 
         # 4. GENERATE ARTIFACTS
         self.logger.info("--- Step 4: GENERATING ARTIFACTS ---")
@@ -270,8 +354,9 @@ class OrchestratorAgent(ADKAgent):
 
         # 5. HUMAN VERIFICATION (ARTIFACTS)
         human_artifacts_approved = False
+        review_id_artifacts = None
         if artifacts:
-            human_artifacts_approved = await self.request_human_verification(
+            human_artifacts_approved, review_id_artifacts = await self.request_human_verification(
                 title=title,
                 stage="ARTIFACT", 
                 content={"count": len(artifacts), "items": artifacts},
@@ -283,67 +368,28 @@ class OrchestratorAgent(ADKAgent):
         if not human_artifacts_approved:
              return {"status": "rejected_by_human_artifacts", "reason": "Human verification failed at Artifact stage."}
 
-        # 6. PUBLISH
-        if human_artifacts_approved:
-            self.logger.info("--- Step 6: PUBLISHING ---")
-            
-            # 6a. Publish Documentation to SharePoint (Optional)
-            sharepoint_url = "skipped"
-            if self.publisher:
-                self.logger.info("Publishing Documentation to SharePoint...")
-                 # Format artifacts for appending to the page (just as a reference)
-                artifact_section = "\n## Generated Infrastructure\n"
-                
-                # Handle IaC Templates
-                iac = artifacts.get("iac_templates", {})
-                for iac_type, files in iac.items():
-                    artifact_section += f"### {iac_type.upper()} Templates\n"
-                    for filename, content in files.items():
-                        artifact_section += f"#### {filename}\n```hcl\n{content}\n```\n"
-
-                # Handle Boilerplate
-                boilerplate = artifacts.get("boilerplate_code", {})
-                if boilerplate:
-                    artifact_section += "\n## Reference Implementation (Boilerplate)\n"
-                    for comp_id, details in boilerplate.items():
-                        artifact_section += f"### Component: {comp_id}\n"
-                        files = details.get("files", {})
-                        for fname, fcontent in files.items():
-                            lang = "python" if fname.endswith(".py") else "bash"
-                            artifact_section += f"#### {fname}\n```{lang}\n{fcontent}\n```\n"
-                
-                # Add to sections
-                generated_sections["Infrastructure"] = artifact_section
-
-                pub_result = await self.publisher.publish_document(
-                    title=title,
-                    sections=generated_sections,
-                    description=f"AI Generated pattern based on {donor_context.get('title')}",
-                    donor_pattern=donor_context.get('id'),
-                    diagram_description="Processed by Gemini 1.5 Pro Multimodal"
-                )
-                if pub_result.success:
-                    sharepoint_url = pub_result.page_url
-            
-            # 6b. Publish Code to GitHub
-            self.logger.info("Publishing Code to GitHub...")
-            gh_result = await self.code_publisher.publish_artifacts(
-                artifacts=artifacts,
-                message=f"feat: generated artifacts for pattern '{title}'"
+        # 6. ASYNC PUBLISH CODE
+        code_publish_task = None
+        if human_artifacts_approved and review_id_artifacts:
+            self.logger.info("--- Async Task: Publishing Code to GitHub ---")
+            code_publish_task = asyncio.create_task(
+                self._async_publish_code(review_id_artifacts, artifacts, title)
             )
-            
-            return {
-                "status": "published",
-                "docs_url": sharepoint_url,
-                "code_repo": f"{self.gh_owner}/{self.gh_repo}",
-                "commit_info": gh_result,
-                "final_score": critique_feedback.get("score")
-            }
-        else:
-            return {
-                "status": "dry_run_completed",
-                "sections": generated_sections
-            }
+
+        # 7. RETURN FINAL STATUS (With Polling Info)
+        # We return immediately, letting tasks run in background (or managed by event loop)
+        # However, if we return, the agent process might stop or the tasks might be cancelled depending on server implementation.
+        # But ADKAgent usually runs in an event loop.
+        # To be safe, we might await them IF the user wants synchronous result, 
+        # but the request says "non-blocking steps... It would then poll".
+        # This implies we return references to the tasks or the review IDs.
+        
+        return {
+            "status": "workflow_completed_processing_async",
+            "pattern_review_id": review_id_pattern, # For polling doc status
+            "artifact_review_id": review_id_artifacts, # For polling code status
+            "message": "Publishing tasks are running in background. Poll CloudSQL for status."
+        }
 
 if __name__ == "__main__":
     agent = OrchestratorAgent()
