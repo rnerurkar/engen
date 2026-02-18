@@ -25,45 +25,80 @@ EnGen is an intelligent system that automates the creation of high-quality archi
 
 ## 2. High-Level Component Diagram
 
+This diagram represents the concrete implementation of the EnGen system, detailing the specific agents involved in the workflow.
+
 ```mermaid
 graph TB
-    subgraph EnGen["EnGen System"]
-        subgraph Ingestion["INGESTION PLANE (Managed Pipeline)"]
-            SP[SharePoint Client<br/>- OAuth Authentication<br/>- Page Extraction<br/>- Image Download]
-            Pipeline[Vertex Search Pipeline<br/>- Consolidation Engine]
-            Streams[Merged Processing<br/>- Metadata Mapping Stream A<br/>- Diagram Analysis Stream B<br/>- Content Extraction Stream C]
-            
-            SP --> Pipeline
-            Pipeline --> Streams
+    subgraph ClientLayer["Client Layer"]
+        UI[Streamlit App]
+    end
+
+    subgraph Serving["SERVING PLANE (Agent Swarm)"]
+        Orch[Orchestrator Agent<br/>- Workflow Coordinator]
+        
+        subgraph Generation["Content Generation"]
+            Ret[Retrieval Agent<br/>- Vector Search]
+            Gen[Generator Agent<br/>- Vision & Text]
+            Rev[Reviewer Agent<br/>- Quality Control]
         end
         
-        subgraph Serving["SERVING PLANE (Agent Swarm)"]
-            Orch[Orchestrator Agent<br/>- Workflow Control]
-            Vision[Vision Agent]
-            Retrieval[Retrieval Agent]
-            Writer[Writer Agent]
-            Reviewer[Reviewer Agent]
-            
-            Orch --> Vision
-            Orch --> Retrieval
-            Orch --> Writer
-            Orch --> Reviewer
+        subgraph Synthesis["Pattern Synthesis"]
+            CompSpec[Component<br/>Specification Agent]
+            ArtGen[Artifact<br/>Generation Agent]
+            ArtVal[Artifact<br/>Validation Agent]
         end
         
-        subgraph GCP["Google Cloud Platform"]
-            VertexAI[Vertex AI<br/>- Discovery Engine Search<br/>- Gemini 1.5 Flash Vision]
-            GCS[Cloud Storage<br/>- Pattern Images]
+        subgraph Governance["Governance"]
+            Human[Human Verifier Agent<br/>- Approval Gate]
         end
-        
-        Streams --> VertexAI
-        Streams --> GCS
-        Serving --> VertexAI
+
+        Orch --> Ret
+        Orch --> Gen
+        Orch --> Rev
+        Orch --> Human
+        Orch --> CompSpec
+        Orch --> ArtGen
+        Orch --> ArtVal
+    end
+
+    subgraph Async["Async Workers"]
+        PubDocs[SharePoint<br/>Publisher]
+        PubCode[GitHub<br/>Publisher]
     end
     
-    style Ingestion fill:#e1f5ff
-    style Serving fill:#fff4e1
-    style GCP fill:#e8f5e9
+    subgraph State["State Management"]
+        DB[(CloudSQL<br/>Job Status)]
+    end
+
+    subgraph Ingestion["INGESTION PLANE (Managed Pipeline)"]
+        SP[SharePoint Client]
+        Pipeline[Vertex Search Pipeline]
+        VertexAI[Vertex AI<br/>Discovery Engine]
+        
+        SP --> Pipeline
+        Pipeline --> VertexAI
+    end
+    
+    UI --> Orch
+    UI -.->|Poll| DB
+    Orch -->|Fire & Forget| PubDocs
+    Orch -->|Fire & Forget| PubCode
+    PubDocs --> DB
+    PubCode --> DB
 ```
+
+### 2.1 Agent Responsibilities
+
+| Agent Name | Role | Primary Responsibility |
+|------------|------|------------------------|
+| **OrchestratorAgent** | Controller | Manages the end-to-end workflow, handles state, coordinates retries, and triggers async publishing. |
+| **GeneratorAgent** | Creator | Multimodal agent that uses Gemini Vision to analyze diagrams and Gemini Pro to draft documentation. |
+| **RetrievalAgent** | Librarian | Performs hybrid search (semantic + keyword) in Vertex AI to find relevant "donor" patterns. |
+| **ReviewerAgent** | Critic | Evaluates generated text against diverse quality rubrics and provides specific feedback for refinement. |
+| **ComponentSpecificationAgent** | Architect | Analyzes approved documentation to extract a structured dependency graph of all required components. |
+| **ArtifactGenerationAgent** | Engineer | Synthesizes the Infrastructure-as-Code (Terraform) and Application Boilerplate in a unified context. |
+| **ArtifactValidationAgent** | QA | Validates generated code for syntax errors, security best practices, and completeness. |
+| **HumanVerifierAgent** | Gatekeeper | Interfaces with the human expert to collect approvals at critical checkpoints (Docs & Code). |
 
 ---
 
@@ -470,13 +505,25 @@ sequenceDiagram
 
 **Step-by-Step Explanation:**
 
-1.  **Pattern Approval**: The workflow begins after the human expert approves the generated design pattern text.
-2.  **Async Fork 1 (Docs)**: The Orchestrator immediately triggers a background task to publish the documentation to SharePoint. It *does not wait* for this to finish but proceeds directly to the next step.
-3.  **Synthesis Loop**: The system enters the generation/validation loop to create the Terraform and Python code artifacts. This CPU-intensive process happens in parallel with the documentation publishing.
-4.  **Artifact Approval**: Once valid artifacts are generated, they are sent for a second human review.
-5.  **Async Fork 2 (Code)**: Upon approval, the Orchestrator triggers a second background task to push the code to GitHub.
-6.  **Immediate Return**: To keep the UI responsive, the Orchestrator returns the review IDs (`PID-1`, `AID-2`) to the client immediately.
-7.  **Client Polling**: The Streamlit user interface periodically queries the CloudSQL database using these IDs. Once the background workers update the status to `COMPLETED`, the UI displays the final URLs.
+1.  **Request Pattern Approval**: The `OrchestratorAgent` sends the generated markdown documentation to the `HumanVerifierAgent` for review.
+2.  **Pattern Approved**: The human expert approves the content. The Verifier returns `APPROVED` status and a unique review ID (`PID-1`).
+3.  **Trigger Async Publish (Docs)**: The Orchestrator immediately spawns a background task (`asyncio.create_task`) to publish the docs, passing `PID-1`.
+4.  **Docs Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `PID-1` to `IN_PROGRESS`.
+5.  **Docs Status: COMPLETED**: After successfully uploading to SharePoint, the worker updates the status to `COMPLETED` and saves the Page URL.
+6.  **Generate Component Spec**: *Concurrently* with step 3-5, the Orchestrator calls the `ComponentSpecificationAgent` to analyze the pattern text.
+7.  **Return Specification**: The agent returns a structured JSON dependency graph of all infrastructure and application components.
+8.  **Generate Artifact Bundle**: The Orchestrator sends the spec and pattern text to the `ArtifactGenerationAgent`.
+9.  **Return Artifacts**: The generator returns a complete bundle containing Terraform files and Python application code.
+10. **Validate Artifacts**: The Orchestrator sends the bundle to the `ArtifactValidationAgent` for automated quality checks.
+11. **Return Validation Result**: The validator returns a PASS/FAIL status. If FAIL, the loop (Steps 8-11) repeats with feedback.
+12. **Request Artifact Approval**: Once validated, the Orchestrator sends the code bundle to the `HumanVerifierAgent` for final sign-off.
+13. **Artifact Approved**: The human expert approves the code. The Verifier returns `APPROVED` status and a unique review ID (`AID-2`).
+14. **Trigger Async Publish (Code)**: The Orchestrator immediately spawns a background task to publish the code, passing `AID-2`.
+15. **Code Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `AID-2` to `IN_PROGRESS`.
+16. **Code Status: COMPLETED**: After successfully pushing to GitHub, the worker updates the status to `COMPLETED` and saves the Commit URL.
+17. **Return Immediate Response**: *Concurrently* with step 14-16, the Orchestrator returns a response to the Client with `status: processing` and both IDs (`PID-1`, `AID-2`).
+18. **Poll Status**: The Client (`Streamlit App`) queries the `CloudSQLManager` using the provided IDs.
+19. **Return Status**: The database returns the current status (e.g., Docs=COMPLETED, Code=IN_PROGRESS) and any available URLs.
 
 ---
 
