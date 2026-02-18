@@ -643,15 +643,18 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 
 ### Production Readiness
 
-| Component | Status | Readiness |
-|-----------|--------|-----------|
-| Ingestion Service | ✅ Complete | 90% |
-| Serving Service | ✅ Complete | 85% |
-| GCP Integration | ✅ Complete | 95% |
-| SharePoint Integration | ✅ Complete | 90% |
-| Error Handling | ✅ Complete | 90% |
-| Monitoring | ⚠️ Partial | 60% |
-| Testing | ⚠️ Partial | 70% |
+| Component | Status | Readiness | Notes |
+|-----------|--------|-----------|-------|
+| **Ingestion Service** | ✅ Complete | 90% | Robust 2PC transaction support; handles parallel streams. |
+| **Inference Service** | ✅ Complete | 90% | Replaces deprecated Serving Service; includes granular Orchestrator API. |
+| **Streamlit App** | ✅ Complete | 85% | Implements stateful HITL workflow and async status polling. |
+| **Pattern Synthesis** | ✅ Complete | 85% | Generates IaC/Code; validates against GCS golden samples. |
+| **GCP Integration** | ✅ Complete | 95% | Vertex AI, CloudSQL, and GCS fully integrated. |
+| **SharePoint Integration**| ✅ Complete | 90% | Supports both ingestion and automated publishing. |
+| **GitHub Integration** | ✅ Complete | 90% | automated code publishing with repo creation. |
+| **Error Handling** | ✅ Complete | 90% | Retry logic and component-level error boundaries. |
+| **Monitoring** | ⚠️ Partial | 60% | Basic logging; needs OpenTelemetry/Dashboards. |
+| **Testing** | ⚠️ Partial | 70% | Unit tests exist; end-to-end integration tests needed. |
 
 ### Next Steps
 
