@@ -198,12 +198,68 @@ sequenceDiagram
 
 This pipeline indexes the "hard" interface definitions of the organization's infrastructure. It ensures the inference agents know *exactly* which Terraform variables or CloudFormation parameters are available, preventing the hallucination of non-existent configuration options.
 
-#### Workflow Description
-1.  **Repo Crawling**: Connects to the GitHub Infrastructure Repository (`GITHUB_INFRA_REPO`) using `PyGithub`.
-2.  **Schema Parsing**:
-    *   **Terraform**: Identifies `variables.tf` files and uses `python-hcl2` to parse variable names, types, and descriptions.
-    *   **CloudFormation**: Identifies `template.yaml` files and uses `PyYAML` to parse the `Parameters` section.
-3.  **Indexing**: Creates structured `Document` objects in a dedicated Vertex AI Search Data Store (`component-catalog-ds`). Each document represents a module (e.g., "rds-postgres") with its valid inputs as searchable metadata.
+#### End-to-End Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Orch as Orchestrator/Cron
+    participant Pipe as ComponentCatalogPipeline
+    participant GH as GitHub API
+    participant VS as Vertex AI Search
+
+    Note over Orch,VS: Initialization Phase
+    Orch->>Pipe: run()
+    Pipe->>GH: get_repo(GITHUB_INFRA_REPO)
+    GH-->>Pipe: Repository Object
+
+    Note over Pipe,GH: 1. Terraform Module Processing
+    Pipe->>GH: get_contents("modules/")
+    GH-->>Pipe: List of directories
+    
+    loop For each module directory
+        Pipe->>GH: get_contents("modules/{name}/variables.tf")
+        GH-->>Pipe: File Content (Base64)
+        Pipe->>Pipe: _parse_terraform_variables(hcl2)
+        Pipe->>Pipe: Create Document(id="tf-{name}")
+    end
+
+    Note over Pipe,GH: 2. Service Catalog Processing
+    Pipe->>GH: get_contents("service-catalog/")
+    GH-->>Pipe: List of template files
+    
+    loop For each template file
+        Pipe->>GH: get_contents("service-catalog/{name}.yaml")
+        GH-->>Pipe: File Content (Base64)
+        Pipe->>Pipe: _parse_cfn_parameters(yaml)
+        Pipe->>Pipe: Create Document(id="sc-{name}")
+    end
+
+    Note over Pipe,VS: 3. Indexing Phase
+    Pipe->>VS: import_documents(documents)
+    VS-->>Pipe: Operation LRO
+    Pipe->>VS: await operation.result()
+    VS-->>Pipe: Success (Import Completed)
+```
+
+#### Detailed Workflow Description
+
+The following steps correspond to the sequence diagram above:
+
+1.  **Process Terraform Modules (`_process_terraform_modules`)**:
+    *   **Scanning**: The pipeline queries the GitHub API for the contents of the `modules/` directory.
+    *   **Retrieval**: It verifies the existence of a `variables.tf` file within each module folder to confirm it is a valid Terraform module.
+    *   **Parsing**: The file content is fetched and parsed using `python-hcl2`. This extracts specific variable attributes including `type`, `description`, and `default`.
+    *   **Schema Creation**: A JSON schema is constructed representing the module's interface, which is then wrapped in a Vertex AI `Document` object with the ID format `tf-{module_name}`.
+
+2.  **Process Service Catalog (`_process_cloudformation_templates`)**:
+    *   **Scanning**: The pipeline scans the `service-catalog/` directory for CloudFormation templates (`.yaml` or `.json`).
+    *   **Parsing**: Valid template files are parsed using `PyYAML` to extract the `Parameters` section, which defines the allowable inputs for the product.
+    *   **Schema Creation**: Similar to Terraform, a JSON schema is created and wrapped in a `Document` object with the ID format `sc-{product_name}`.
+
+3.  **Index Documents (`_index_documents`)**:
+    *   **Batch Import**: All created documents (Terraform and CloudFormation schemas) are collected into a list.
+    *   **Ingestion**: The pipeline calls the Vertex AI Search `import_documents` API. This uses the `INCREMENTAL` reconciliation mode, ensuring that existing documents are updated and new ones are added without wiping the entire data store.
+    *   **Validation**: The pipeline awaits the Long-Running Operation (LRO) to ensure successful ingestion before terminating.
 
 ---
 
