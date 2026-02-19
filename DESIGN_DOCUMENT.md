@@ -70,13 +70,17 @@ graph TB
         DB[(CloudSQL<br/>Job Status)]
     end
 
-    subgraph Ingestion["INGESTION PLANE (Managed Pipeline)"]
+    subgraph Ingestion["INGESTION PLANE (Managed Pipelines)"]
         SP[SharePoint Client]
-        Pipeline[Vertex Search Pipeline]
+        Repo[GitHub Repo]
+        SPPipe[SharePoint<br/>Pipeline]
+        CompPipe[Component<br/>Catalog Pipeline]
         VertexAI[Vertex AI<br/>Discovery Engine]
         
-        SP --> Pipeline
-        Pipeline --> VertexAI
+        SP --> SPPipe
+        Repo --> CompPipe
+        SPPipe --> VertexAI
+        CompPipe --> VertexAI
     end
     
     UI --> Orch
@@ -95,22 +99,23 @@ graph TB
 | **GeneratorAgent** | Creator | Multimodal agent that uses Gemini Vision to analyze diagrams and Gemini Pro to draft documentation. |
 | **RetrievalAgent** | Librarian | Performs hybrid search (semantic + keyword) in Vertex AI to find relevant "donor" patterns. |
 | **ReviewerAgent** | Critic | Evaluates generated text against diverse quality rubrics and provides specific feedback for refinement. |
-| **ComponentSpecificationAgent** | Architect | Analyzes approved documentation to extract a structured dependency graph of all required components. |
-| **ArtifactGenerationAgent** | Engineer | Synthesizes the Infrastructure-as-Code (Terraform) and Application Boilerplate in a unified context. |
+| **ComponentSpecificationAgent** | Architect | Queries the Vertex AI Search Component Catalog to extract a structured dependency graph using valid schema attributes. |
+| **ArtifactGenerationAgent** | Engineer | Synthesizes IaC and Boilerplate using "Golden Sample" templates fetched from GCS. |
 | **ArtifactValidationAgent** | QA | Validates generated code for syntax errors, security best practices, and completeness. |
 | **HumanVerifierAgent** | Gatekeeper | Interfaces with the human expert to collect approvals at critical checkpoints (Docs & Code). |
 
 ---
 
-## 3. Ingestion Plane
+## 3. Ingestion Plane (Managed Pipelines)
 
-The Ingestion Plane handles the end-to-end processing of SharePoint patterns into Vertex AI Search. It has been modernized to use a single managed pipeline that consolidates metadata, diagrams, and text content into a unified indexing process.
+The Ingestion Plane handles the end-to-end processing of both unstructured content (SharePoint patterns) and structured infrastructure definitions (Terraform/CloudFormation) into Vertex AI Search. It uses managed pipelines to consolidate metadata, diagrams, text, and code schemas into a unified knowledge graph.
 
 ### 3.1 Design Principles
 
 1.  **Consolidation**: Eliminates complex distributed transactions by processing each pattern linearly in a single pipeline.
 2.  **Multimodal Extraction**: Uses Gemini 1.5 Flash to "read" architectural diagrams and convert them into searchable text descriptions.
-3.  **Content Enrichment**: Injects AI-generated diagram descriptions directly into the HTML content to improve RAG retrieval accuracy.
+3.  **Interface-Aware Schema Indexing**: Crawls source code repositories to index the exact input variables/parameters of valid infrastructure modules, creating a "Component Catalog."
+4.  **Content Enrichment**: Injects AI-generated diagram descriptions directly into the HTML content to improve RAG retrieval accuracy.
 4.  **Managed Indexing**: Leverages Google Cloud Discovery Engine's "Unstructured Data with Metadata" model for simplified state management.
 5.  **Media Offloading**: Stores images reliably in GCS while updating HTML references to point to the permanent storage.
 
@@ -189,6 +194,17 @@ sequenceDiagram
 *   **Partial Failures**: If an image fails to download or analyze, the pipeline logs a warning and proceeds with the rest of the pattern (Best-effort delivery).
 *   **Pipeline Resilience**: Unhandled exceptions in one pattern are caught in the main loop, allowing subsequent patterns to process successfully.
 
+### 3.4 Component Catalog Pipeline
+
+This pipeline indexes the "hard" interface definitions of the organization's infrastructure. It ensures the inference agents know *exactly* which Terraform variables or CloudFormation parameters are available, preventing the hallucination of non-existent configuration options.
+
+#### Workflow Description
+1.  **Repo Crawling**: Connects to the GitHub Infrastructure Repository (`GITHUB_INFRA_REPO`) using `PyGithub`.
+2.  **Schema Parsing**:
+    *   **Terraform**: Identifies `variables.tf` files and uses `python-hcl2` to parse variable names, types, and descriptions.
+    *   **CloudFormation**: Identifies `template.yaml` files and uses `PyYAML` to parse the `Parameters` section.
+3.  **Indexing**: Creates structured `Document` objects in a dedicated Vertex AI Search Data Store (`component-catalog-ds`). Each document represents a module (e.g., "rds-postgres") with its valid inputs as searchable metadata.
+
 ---
 
 ## 4. Serving Plane
@@ -201,8 +217,9 @@ The Serving Plane uses a multi-agent system to analyze architecture diagrams, re
 2.  **Agent-to-Agent Communication (A2A)**: Standardized HTTP-based protocol with retry and timeout.
 3.  **Reflection Loop**: Iterative refinement (Generate -> Review -> Generate) until quality threshold met.
 4.  **Human-in-the-Loop**: Critical governance steps where human approval is required before proceeding (Pattern Approval, Artifact Approval).
-5.  **Artifact Generation**: Automated creation of deployable code (Terraform/CloudFormation) based on authoritative interfaces.
-6.  **Observability**: Centralized logging and status tracking via `ADKAgent` framework.
+5.  **Artifact Generation**: Automated creation of deployable code based on authoritative interfaces ("Golden Samples").
+6.  **Interface-Aware RAG**: Grounds LLM generation in indexed component schemas (Vertex AI Search) to prevent hallucinated attributes.
+7.  **Observability**: Centralized logging and status tracking via `ADKAgent` framework.
 
 ### 4.2 Agent Swarm Architecture
 
@@ -311,10 +328,11 @@ sequenceDiagram
 8.  **Async Publishing**: It immediately spawns a background task to publish the documentation to SharePoint, using the `review_id` to track progress in CloudSQL. The workflow *does not wait* for this to finish but proceeds to artifact generation.
 
 #### Phase 4: Pattern Synthesis (Holistic Generation)
-9.  **Comprehensive Specification**: The `ArtifactGenerationAgent` performs a holistic analysis to extract a graph of all components.
-10. **Plan & Order**: An execution plan is derived to ensure logical dependency ordering.
-11. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window.
-12. **Automated Validation Loop**:
+9.  **Interface Retrieval**: The `ComponentSpecificationAgent` queries the Vertex AI Search Component Catalog to identify valid component attributes (e.g., specific Terraform variables for `vpc` or `rds`).
+10. **Comprehensive Specification**: It generates a structured dependency graph grounded in these real-world schemas.
+11. **Golden Sample Injection**: The `ArtifactGenerationAgent` retrieves enterprise-approved "Golden Sample" IaC templates from GCS to use as few-shot examples.
+12. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window.
+13. **Automated Validation Loop**:
     *   **Validate**: The `ArtifactValidationAgent` checks the generated code against a strict rubric.
     *   **Feedback**: If issues are found, the critique is fed back to the generator.
     *   **Retry**: The generator attempts to fix the specific issues.
@@ -386,9 +404,9 @@ This workflow implements a "Pattern Synthesis" approach. Instead of generating i
 |-----------|----------------|
 | **OrchestratorAgent** | The central state machine that drives the workflow. It manages the lifecycle of the request, handles retries for validation failures, and coordinates the **async handover** to publishers. |
 | **CloudSQLManager** | **State Store**. It acts as the single source of truth for the status of both human reviews and async publishing tasks. It allows the frontend to poll for completion without blocking the agent. |
-| **ComponentSpecification** | **Analyzer**. It parses the high-level design documentation to extract a structured dependency graph. It identifies every required infrastructure resource and application component, along with their configuration properties and relationships. |
-| **ArtifactGenerator** | **Synthesizer**. It takes the structured specification and the design documentation to generate a holistic "Artifact Bundle". This bundle includes both Infrastructure as Code (Terraform) and Application Boilerplate (Python/Node.js) in a single consistent pass, ensuring ID references and config clusters match. |
-| **ArtifactValidator** | **Quality Gate**. It acts as an automated reviewer. It inspects the generated Artifact Bundle against a strict rubric (Syntax, Security, Completeness). Crucially, it fetches **"Golden Sample" IaC templates** from a GCS bucket to benchmark the generated code against organizational best practices. |
+| **ComponentSpecification** | **Analyzer**. It parses the high-level design documentation and queries the **Vertex AI Search Component Catalog** to extract a structured dependency graph grounded in real infrastructure schemas. |
+| **ArtifactGenerator** | **Synthesizer**. It fetches **"Golden Sample" IaC templates** from a GCS bucket to benchmark the generated code against organizational best practices. It then generates a holistic "Artifact Bundle" (IaC + Boilerplate) in a single consistent pass. |
+| **ArtifactValidator** | **Quality Gate**. It acts as an automated reviewer. It inspects the generated Artifact Bundle against a strict rubric (Syntax, Security, Completeness). |
 | **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. |
 | **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub) as a background task. |
 | **SharePointPublisher** | **Docs Publisher**. Updates the enterprise knowledge base with the design documentation as a background task. |
@@ -456,9 +474,10 @@ sequenceDiagram
     participant Client as Streamlit App
     participant Orch as Orchestrator Agent
     participant Spec as Component Spec Agent
+    participant VertexAI as Component Catalog
     participant Gen as Artifact Gen Agent
-    participant Val as Artifact Validator Agent
     participant GCS as GCS Bucket
+    participant Val as Artifact Validator Agent
     participant Human as Human Verifier
     participant DB as CloudSQL
     participant Async as Background Tasks
@@ -479,14 +498,16 @@ sequenceDiagram
     
     Note over Orch, Async: Phase 2: Holistic Synthesis Loop
 
+    Spec->>VertexAI: query_schemas(keywords)
+    VertexAI-->>Spec: valid_schemas (JSON)
     Spec-->>Orch: ComponentSpecification (JSON)
 
     loop Quality Assurance Loop (Max 3 Retries)
         Orch->>Gen: generate_artifact(spec, pattern_text)
+        Gen->>GCS: fetch_golden_samples(types)
+        GCS-->>Gen: approved_templates
         Gen-->>Orch: ArtifactBundle
         Orch->>Val: validate_artifact(artifacts)
-        Val->>GCS: fetch_templates(tf, cf)
-        GCS-->>Val: golden_samples (text)
         Val-->>Orch: ValidationResult
     end
 
@@ -519,13 +540,13 @@ sequenceDiagram
 3.  **Trigger Async Publish (Docs)**: The Orchestrator immediately spawns a background task (`asyncio.create_task`) to publish the docs, passing `PID-1`.
 4.  **Docs Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `PID-1` to `IN_PROGRESS`.
 5.  **Docs Status: COMPLETED**: After successfully uploading to SharePoint, the worker updates the status to `COMPLETED` and saves the Page URL.
-6.  **Generate Component Spec**: *Concurrently* with step 3-5, the Orchestrator calls the `ComponentSpecificationAgent` to analyze the pattern text.
-7.  **Return Specification**: The agent returns a structured JSON dependency graph of all infrastructure and application components.
-8.  **Generate Artifact Bundle**: The Orchestrator sends the spec and pattern text to the `ArtifactGenerationAgent`.
-9.  **Return Artifacts**: The generator returns a complete bundle containing Terraform files and Python application code.
-10. **Validate Artifacts**: The Orchestrator sends the bundle to the `ArtifactValidationAgent` for automated quality checks.
-11. **Fetch Golden Samples**: The Validator fetches approved IaC templates (Terraform/CloudFormation) from the GCS bucket to use as a quality benchmark.
-12. **Return Validation Result**: The validator returns a PASS/FAIL status. If FAIL, the loop (Steps 8-12) repeats with feedback.
+6.  **Generate Component Spec**: *Concurrently* with step 3-5, the Orchestrator calls the `ComponentSpecificationAgent`. It queries the **Vertex AI Component Catalog** to identify valid attributes for required resources.
+7.  **Return Specification**: The agent returns a structured JSON dependency graph grounded in real infrastructure schemas.
+8.  **Generate Artifact Bundle**: The Orchestrator calls the `ArtifactGenerationAgent` with the specification.
+9.  **Fetch Golden Samples**: The Generator fetches **approved IaC templates** (Golden Samples) from the GCS bucket to use as few-shot examples for the identified components.
+10. **Return Artifacts**: The generator produces a complete bundle containing Terraform and application code, strictly following the Golden Sample patterns.
+11. **Validate Artifacts**: The Orchestrator sends the bundle to the `ArtifactValidationAgent` for automated quality checks.
+12. **Return Validation Result**: The validator returns a PASS/FAIL status. If FAIL, the loop repeats with feedback.
 13. **Request Artifact Approval**: Once validated, the Orchestrator sends the code bundle to the `HumanVerifierAgent` for final sign-off.
 14. **Artifact Approved**: The human expert approves the code. The Verifier returns `APPROVED` status and a unique review ID (`AID-2`).
 15. **Trigger Async Publish (Code)**: The Orchestrator immediately spawns a background task to publish the code, passing `AID-2`.

@@ -5,7 +5,9 @@ import base64
 import hcl2
 import yaml
 from typing import List, Dict, Any, Optional
-from github import Github, Repository, ContentFile
+from github import Github
+from github.Repository import Repository
+from github.ContentFile import ContentFile
 from google.cloud import discoveryengine_v1 as discoveryengine
 from google.api_core.client_options import ClientOptions
 
@@ -69,7 +71,7 @@ class ComponentCatalogPipeline:
         except Exception as e:
             logger.error(f"Pipeline failed: {e}", exc_info=True)
 
-    def _process_terraform_modules(self, repo: Repository.Repository) -> List[discoveryengine.Document]:
+    def _process_terraform_modules(self, repo: Repository) -> List[discoveryengine.Document]:
         """Scans 'modules/' directory for variables.tf and creates schemas."""
         docs = []
         try:
@@ -98,7 +100,7 @@ class ComponentCatalogPipeline:
             logger.warning(f"Error processing Terraform modules: {e}")
         return docs
 
-    def _parse_terraform_variables(self, content_file: ContentFile.ContentFile) -> Optional[Dict[str, Any]]:
+    def _parse_terraform_variables(self, content_file: ContentFile) -> Optional[Dict[str, Any]]:
         """Parses variables.tf content using python-hcl2."""
         try:
             content_str = base64.b64decode(content_file.content).decode("utf-8")
@@ -127,7 +129,7 @@ class ComponentCatalogPipeline:
             logger.error(f"Failed to parse HCL for {content_file.path}: {e}")
             return None
 
-    def _process_cloudformation_templates(self, repo: Repository.Repository) -> List[discoveryengine.Document]:
+    def _process_cloudformation_templates(self, repo: Repository) -> List[discoveryengine.Document]:
         """Scans 'service-catalog/' directory for templates and creates schemas."""
         docs = []
         try:
@@ -155,7 +157,7 @@ class ComponentCatalogPipeline:
             logger.warning(f"Error processing Service Catalog templates: {e}")
         return docs
 
-    def _parse_cfn_parameters(self, content_file: ContentFile.ContentFile) -> Optional[Dict[str, Any]]:
+    def _parse_cfn_parameters(self, content_file: ContentFile) -> Optional[Dict[str, Any]]:
         """Parses CloudFormation Parameters section."""
         try:
             content_str = base64.b64decode(content_file.content).decode("utf-8")
