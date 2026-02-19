@@ -50,12 +50,36 @@ class ComponentSpecification:
             logger.error(f"Failed to initialize GCS Client: {e}")
             self.storage_client = None
 
+    def _fetch_component_interfaces(self) -> str:
+        """
+        Retrieves interface definitions (Terraform variables or Service Catalog parameters) 
+        from GCS to guide the LLM on valid attributes.
+        """
+        if not self.storage_client:
+            return ""
+            
+        interfaces = []
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            # Assumption: Interfaces are stored in a 'interfaces/' prefix or similar
+            # For this implementation, we'll look for a 'component_catalog.json' which is a summary
+            blob = bucket.blob("component_catalog.json")
+            if blob.exists():
+                return f"Available Component Interfaces:\n{blob.download_as_text()}"
+        except Exception as e:
+            logger.warning(f"Failed to fetch component interfaces: {e}")
+            
+        return ""
+
     def process_documentation(self, documentation: str) -> Dict[str, Any]:
         """
         Process technical documentation to extract a holistic component specification.
         """
         logger.info("Processing documentation for holistic component extraction")
         
+        # 1. Fetch Component Interfaces to ground the attributes
+        component_catalog = self._fetch_component_interfaces()
+
         if not self.model:
             logger.warning("Vertex AI model not initialized. Returning empty specs.")
             return {"components": [], "relationships": [], "execution_order": []}
@@ -63,34 +87,82 @@ class ComponentSpecification:
         prompt = f"""
         Analyze the following technical documentation and extract a comprehensive component specification.
         
-        The output must be a valid JSON object with the following structure:
+        **Component Catalog / Interface Definitions**:
+        Use these definitions to determine the correct 'type' and valid 'attributes' for each component.
+        {component_catalog}
+
+        **Guidance**:
+        - **Network**: Define VPCs, Subnets, Security Groups.
+        - **Compute**: Define EC2 Instances, Lambda Functions, ECS Clusters.
+        - **Storage**: Define S3 Buckets, EBS Volumes.
+        - **Database**: Define RDS Instances, DynamoDB Tables.
+        
+        The output must be a valid JSON object following this EXACT structure:
         {{
-            "pattern_name": "Name of the pattern",
+            "pattern_name": "Three-Tier Web Application",
             "components": [
                 {{
-                    "id": "unique_component_id",
-                    "name": "Component Name",
-                    "type": "Resource Type (e.g., AWS::RDS::DBInstance, Apigee::Proxy, GCP::Storage::Bucket)",
+                    "id": "vpc-01",
+                    "name": "Production VPC",
+                    "type": "AWS::EC2::VPC",
                     "attributes": {{
-                        "key": "value" // Attributes for IaC/Service Catalog (e.g., instance_type, engine_version)
+                        "cidr_block": "10.0.0.0/16",
+                        "enable_dns_hostnames": true
+                    }},
+                    "dependencies": []
+                }},
+                {{
+                    "id": "app-cluster",
+                    "name": "App ECS Cluster",
+                    "type": "AWS::ECS::Cluster",
+                    "attributes": {{
+                        "capacity_providers": ["FARGATE"]
                     }},
                     "dependencies": [
                         {{
-                            "target_component_id": "id_of_upstream_component",
-                            "type": "upstream", // or downstream
+                            "target_component_id": "vpc-01",
+                            "type": "upstream",
                             "integration_attributes": [
-                                // Attributes needed from the upstream component (e.g., connection_string, arn)
-                                {{ "name": "db_endpoint", "source_attribute": "endpoint" }}
+                                {{ "name": "vpc_id", "source_attribute": "vpc_id" }},
+                                {{ "name": "subnets", "source_attribute": "private_subnets" }}
                             ]
                         }}
                     ]
+                }},
+                {{
+                    "id": "app-db",
+                    "name": "Primary Database",
+                    "type": "AWS::RDS::DBInstance",
+                    "attributes": {{
+                        "engine": "postgres",
+                        "instance_class": "db.t3.micro",
+                        "allocated_storage": 20
+                    }},
+                    "dependencies": [
+                         {{
+                            "target_component_id": "vpc-01",
+                            "type": "upstream",
+                            "integration_attributes": [
+                                {{ "name": "vpc_security_group_ids", "source_attribute": "default_security_group_id" }}
+                            ]
+                        }}
+                    ]
+                }},
+                {{
+                    "id": "assets-bucket",
+                    "name": "Static Assets",
+                    "type": "AWS::S3::Bucket",
+                    "attributes": {{
+                        "versioning": true
+                    }},
+                    "dependencies": []
                 }}
             ]
         }}
 
         Ensure that:
         1. All components mentioned in the text are included.
-        2. Attributes are inferred from the text or set to reasonable defaults if not specified.
+        2. Attributes are inferred from the text or set to reasonable defaults based on the Catalog.
         3. Relationships are correctly identified with integration needs.
         
         Documentation:

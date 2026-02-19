@@ -14,34 +14,76 @@ You are a Principal Systems Architect.
 Task: Analyze the following technical documentation and extract a comprehensive component specification.
 
 The output must be a valid JSON object with the following structure:
-{{
-    "pattern_name": "Name of the pattern",
+{
+    "pattern_name": "Three-Tier Web Application",
     "components": [
-        {{
-            "id": "unique_component_id",
-            "name": "Component Name",
-            "type": "Resource Type (e.g., AWS::RDS::DBInstance, Apigee::Proxy, GCP::Storage::Bucket)",
-            "attributes": {{
-                "key": "value" // Attributes for IaC/Service Catalog (e.g., instance_type, engine_version)
-            }},
+        {
+            "id": "vpc-01",
+            "name": "Production VPC",
+            "type": "AWS::EC2::VPC",
+            "attributes": {
+                "cidr_block": "10.0.0.0/16",
+                "enable_dns_hostnames": true
+            },
+            "dependencies": []
+        },
+        {
+            "id": "app-cluster",
+            "name": "App ECS Cluster",
+            "type": "AWS::ECS::Cluster",
+            "attributes": {
+                "capacity_providers": ["FARGATE"]
+            },
             "dependencies": [
-                {{
-                    "target_component_id": "id_of_upstream_component",
-                    "type": "upstream", // or downstream
+                {
+                    "target_component_id": "vpc-01",
+                    "type": "upstream",
                     "integration_attributes": [
-                        // Attributes needed from the upstream component (e.g., connection_string, arn)
-                        {{ "name": "db_endpoint", "source_attribute": "endpoint" }}
+                        { "name": "vpc_id", "source_attribute": "vpc_id" },
+                        { "name": "subnets", "source_attribute": "private_subnets" }
                     ]
-                }}
+                }
             ]
-        }}
+        },
+        {
+            "id": "app-db",
+            "name": "Primary Database",
+            "type": "AWS::RDS::DBInstance",
+            "attributes": {
+                "engine": "postgres",
+                "instance_class": "db.t3.micro",
+                "allocated_storage": 20
+            },
+            "dependencies": [
+                    {
+                    "target_component_id": "vpc-01",
+                    "type": "upstream",
+                    "integration_attributes": [
+                        { "name": "vpc_security_group_ids", "source_attribute": "default_security_group_id" }
+                    ]
+                }
+            ]
+        },
+        {
+            "id": "assets-bucket",
+            "name": "Static Assets",
+            "type": "AWS::S3::Bucket",
+            "attributes": {
+                "versioning": true
+            },
+            "dependencies": []
+        }
     ]
-}}
+}
 
 Ensure that:
 1. All components mentioned in the text are included.
 2. Attributes are inferred from the text or set to reasonable defaults if not specified.
 3. Relationships are correctly identified with integration needs.
+
+**Component Catalog**:
+The following components are available in the Service Catalog. Use these definitions to determine the correct 'type' and valid 'attributes'.
+{component_catalog}
 
 Documentation:
 {documentation}
