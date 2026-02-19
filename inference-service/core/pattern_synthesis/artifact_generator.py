@@ -41,16 +41,89 @@ class ArtifactGenerator:
             logger.error(f"Failed to initialize GCS Client: {e}")
             self.storage_client = None
 
+    def _fetch_golden_samples(self, component_spec: Dict[str, Any]) -> str:
+        """
+        Retrieves 'Golden Sample' IaC snippets from GCS for the components identified in the spec.
+        This provides the LLM with concrete examples of enterprise-approved modules.
+        
+        Logic:
+        1. Parse unique component types from the spec.
+        2. Check for existence of sample files in GCS under `terraform/` or `cloudformation/`.
+        3. Returns a concatenated string of samples to inject into the prompt.
+        """
+        if not self.storage_client:
+            return ""
+
+        # Using a config bucket for templates
+        bucket_name = getattr(Config, "GCS_IAC_TEMPLATES_BUCKET", "engen-iac-templates")
+        samples_context = []
+        unique_types = set()
+
+        # Extract types safely
+        if "components" in component_spec and isinstance(component_spec["components"], list):
+            for c in component_spec["components"]:
+                if "type" in c:
+                    unique_types.add(c["type"])
+        
+        if not unique_types:
+            return ""
+
+        try:
+            bucket = self.storage_client.bucket(bucket_name)
+            logger.info(f"Fetching Golden Samples for types: {unique_types}")
+            
+            for c_type in unique_types:
+                # Normalize type from "AWS::RDS::DBInstance" to "aws-rds-dbinstance"
+                safe_name = c_type.lower().replace("::", "-").replace("_", "-")
+                
+                # Check for Terraform Sample (preferred)
+                tf_blob_path = f"terraform/{safe_name}.tf"
+                tf_blob = bucket.blob(tf_blob_path)
+                if tf_blob.exists():
+                    content = tf_blob.download_as_text()
+                    samples_context.append(f"--- GOLDEN SAMPLE: {c_type} (Terraform) ---\n{content}\n")
+                
+                # Check for CloudFormation Sample
+                cf_blob_path = f"cloudformation/{safe_name}.yaml"
+                cf_blob = bucket.blob(cf_blob_path)
+                if cf_blob.exists():
+                    content = cf_blob.download_as_text()
+                    samples_context.append(f"--- GOLDEN SAMPLE: {c_type} (CloudFormation) ---\n{content}\n")
+
+        except Exception as e:
+            # Non-blocking error - we can proceed without samples
+            logger.warning(f"Failed to fetch golden samples from {bucket_name}: {e}")
+        
+        return "\n".join(samples_context)
+
     def generate_full_pattern_artifacts(self, component_spec: Dict[str, Any], pattern_documentation: str, critique: str = None) -> Dict[str, Any]:
         """
         Generates the complete set of artifacts for the given pattern.
         """
         logger.info("Generating full pattern artifacts based on comprehensive spec")
 
+        # 1. Fetch Golden Samples from GCS (Terraform & CloudFormation)
+        golden_samples = self._fetch_golden_samples(component_spec)
+        
+        # 2. Determine Pattern Preference (Default to Terraform, can be inferred or Configured)
+        # In a real scenario, this might come from the HTTP Request or Project Config.
+        iac_preference = component_spec.get("iac_preference", "terraform")
+
         prompt = f"""
         **Context**:
         You have a comprehensive component specification (JSON) and pattern documentation text.
-        Your goal is to generate the complete Infrastructure as Code (IaC) and necessary boilerplate code for a reference implementation of this pattern.
+        Your goal is to generate the complete Infrastructure as Code (IaC) and necessary boilerplate code for a reference implementation.
+
+        **Decision Logic: IaC Framework Selection**:
+        - **Primary Framework**: The preferred IaC framework is **{iac_preference.upper()}**.
+        - **Service Catalog vs Raw**: 
+            - If a component in the spec has `attributes.service_catalog_product_id`, generate a **Service Catalog Provisioning Resource** (e.g., `AWS::ServiceCatalog::CloudFormationProvisionedProduct` in CFN or `aws_servicecatalog_provisioned_product` in Terraform).
+            - Otherwise, generate standard resources (e.g., `aws_s3_bucket`) or module usage.
+        
+        **Enterprise Golden Samples**:
+        Use the following approved templates as the strict basis for your generation. 
+        Adopt the variable naming conventions, tagging standards, and resource configurations shown here.
+        {golden_samples}
         """
 
         if critique:
