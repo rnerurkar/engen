@@ -5,6 +5,8 @@ from typing import Dict, Any, List, Optional
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import storage
+from google.cloud import discoveryengine_v1 as discoveryengine
+from google.api_core.client_options import ClientOptions
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -22,7 +24,7 @@ class ComponentSpecification:
         self.project_id = project_id
         self.location = location
         self._init_vertex_ai()
-        self._init_gcs()
+        self._init_search_client()
 
     def _init_vertex_ai(self):
         try:
@@ -42,34 +44,80 @@ class ComponentSpecification:
             logger.error(f"Failed to initialize Vertex AI: {e}")
             self.model = None
 
-    def _init_gcs(self):
+    def _init_search_client(self):
+        """Initialize Vertex AI Search (Discovery Engine) client."""
         try:
-            self.storage_client = storage.Client(project=self.project_id)
-            self.bucket_name = getattr(Config, "GCS_CONFIG_BUCKET", "engen-config")
+            # Vertex AI Search uses 'global' location for data stores usually
+            # But client endpoint needs to match
+            client_options = (
+                ClientOptions(api_endpoint=f"{self.location}-discoveryengine.googleapis.com")
+                if self.location != "global" and self.location != "us-central1" # default endpoint is global
+                else None
+            )
+            self.search_client = discoveryengine.SearchServiceClient(client_options=client_options)
+            
+            self.data_store_id = getattr(Config, "VERTEX_SEARCH_CATALOG_STORE_ID", "component-catalog-ds")
+            # Serving config is typically in 'global' for search
+            self.search_serving_config = self.search_client.serving_config_path(
+                project=self.project_id,
+                location="global", 
+                data_store=self.data_store_id,
+                serving_config="default_config",
+            )
         except Exception as e:
-            logger.error(f"Failed to initialize GCS Client: {e}")
-            self.storage_client = None
+            logger.error(f"Failed to initialize Vertex AI Search Client: {e}")
+            self.search_client = None
 
-    def _fetch_component_interfaces(self) -> str:
+    def _retrieve_component_schemas(self, query: str) -> str:
         """
-        Retrieves interface definitions (Terraform variables or Service Catalog parameters) 
-        from GCS to guide the LLM on valid attributes.
+        Searches the Vertex AI Search Data Store for component schemas (Terraform modules/SC Products)
+        relevant to the architectural pattern.
         """
-        if not self.storage_client:
+        if not self.search_client:
+            logger.warning("Search client not initialized. Skipping schema retrieval.")
             return ""
-            
-        interfaces = []
+
         try:
-            bucket = self.storage_client.bucket(self.bucket_name)
-            # Assumption: Interfaces are stored in a 'interfaces/' prefix or similar
-            # For this implementation, we'll look for a 'component_catalog.json' which is a summary
-            blob = bucket.blob("component_catalog.json")
-            if blob.exists():
-                return f"Available Component Interfaces:\n{blob.download_as_text()}"
-        except Exception as e:
-            logger.warning(f"Failed to fetch component interfaces: {e}")
+            request = discoveryengine.SearchRequest(
+                serving_config=self.search_serving_config,
+                query=query,
+                page_size=5,
+                content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
+                    snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
+                        return_snippet=True
+                    ),
+                    summary_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec(
+                        summary_result_count=5,
+                        include_citations=True
+                    ),
+                ),
+            )
+
+            response = self.search_client.search(request=request)
             
-        return ""
+            schemas = []
+            for result in response.results:
+                try:
+                    # Try to get structured data first
+                    data = result.document.struct_data
+                    if not data:
+                        # Fallback for derived data
+                        data = result.document.derived_struct_data
+                    
+                    # Convert to string representation
+                    schemas.append(json.dumps(dict(data), default=str)) 
+                except Exception as inner_e:
+                    logger.warning(f"Error parsing search result: {inner_e}")
+                    continue
+
+            if schemas:
+                return "Available Component Interfaces (Retrieved from Catalog):\n" + "\n---\n".join(schemas)
+            else:
+                return "No specific component schemas found in catalog."
+
+        except Exception as e:
+            logger.error(f"Vertex AI Search failed: {e}")
+            return ""
 
     def process_documentation(self, documentation: str) -> Dict[str, Any]:
         """
@@ -77,9 +125,20 @@ class ComponentSpecification:
         """
         logger.info("Processing documentation for holistic component extraction")
         
-        # 1. Fetch Component Interfaces to ground the attributes
-        component_catalog = self._fetch_component_interfaces()
+        # 1. Expand keywords for search
+        keyword_prompt = f"Analyze the following documentation and list 5-10 keywords representing the infrastructure resources needed (e.g. 'postgres', 'vpc', 'fargate'). Return only the keywords separated by spaces.\n\nDoc: {documentation[:2000]}"
+        search_query = "infrastructure components"
+        
+        if self.model:
+            try:
+                kw_response = self.model.generate_content(keyword_prompt)
+                search_query = kw_response.text.strip()
+            except Exception:
+                pass
 
+        # 2. Retrieve relevant schemas using Vertex AI Search
+        component_catalog = self._retrieve_component_schemas(search_query)
+        
         if not self.model:
             logger.warning("Vertex AI model not initialized. Returning empty specs.")
             return {"components": [], "relationships": [], "execution_order": []}
@@ -88,7 +147,8 @@ class ComponentSpecification:
         Analyze the following technical documentation and extract a comprehensive component specification.
         
         **Component Catalog / Interface Definitions**:
-        Use these definitions to determine the correct 'type' and valid 'attributes' for each component.
+        Use these definitions to determine the correct 'type' and valid 'attributes'.
+        If a component in the docs matches one of these schemas, utilize the exact attribute names defined here.
         {component_catalog}
 
         **Guidance**:

@@ -26,3 +26,6 @@ markdown
 bleach
 jsonschema>=4.19.0
 PyYAML>=6.0.1
+python-hcl2>=4.3.0
+PyGithub>=2.1.1
+
