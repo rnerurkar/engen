@@ -17,8 +17,14 @@ prompt = f"""
         Analyze the following technical documentation and extract a comprehensive component specification.
         
         **Component Catalog / Interface Definitions**:
-        Use these definitions to determine the correct 'type' and valid 'attributes'.
-        If a component in the docs matches one of these schemas, utilize the exact attribute names defined here.
+        Use these definitions to determine the correct 'type', `product_id`, and valid 'attributes'.
+        
+        **CRITICAL - SERVICE CATALOG HANDLING**:
+        If a component matches a `service_catalog_product` in the catalog below:
+        1. Set its `type` to `service_catalog_product`.
+        2. COPY the `service_catalog_product_id` and `provisioning_artifact_id` into the `attributes` object.
+        3. Use the parameter names defined in the catalog as the keys in `attributes`.
+        
         {component_catalog}
 
         **Guidance**:
@@ -29,30 +35,39 @@ prompt = f"""
         
         The output must be a valid JSON object following this EXACT structure:
         {{
+            "pattern_name": "Three-Tier Web Application",
             "components": [
                 {{
-                    "id": "unique-id",
-                    "name": "Human Readable Name",
-                    "type": "TerraformResourceType (e.g., aws_s3_bucket) or ServiceCatalogProduct",
-                    "description": "...",
+                    "id": "vpc-01",
+                    "name": "Production VPC",
+                    "type": "AWS::EC2::VPC",
                     "attributes": {{
-                        "key": "value" // Use exact keys from the Component Catalog where possible
+                        "cidr_block": "10.0.0.0/16",
+                        "enable_dns_hostnames": true
                     }},
-                    "upstream_dependencies": ["id-1", "id-2"]
-                }}
-            ],
-            "relationships": [
+                    "dependencies": []
+                }},
                 {{
-                    "source": "id-1",
-                    "target": "id-2",
-                    "type": "uses|connects_to|depends_on",
-                    "integration_attributes": [
-                        {{ "name": "db_endpoint", "source_attribute": "endpoint" }}
+                    "id": "app-cluster",
+                    "name": "App ECS Cluster",
+                    "type": "AWS::ECS::Cluster",
+                    "attributes": {{
+                        "capacity_providers": ["FARGATE"]
+                    }},
+                    "dependencies": [
+                        {{
+                            "target_component_id": "vpc-01",
+                            "type": "upstream",
+                            "integration_attributes": [
+                                {{ "name": "vpc_id", "source_attribute": "vpc_id" }},
+                                {{ "name": "subnets", "source_attribute": "private_subnets" }}
+                            ]
+                        }}
                     ]
-                }}
-            ],
-            "execution_order": ["id-2", "id-1"] // Topological sort
-        }}
+                }},
+                {{
+                    "id": "app-db",
+                    "name": "Primary Database",
 
         Documentation:
         {documentation}
@@ -69,86 +84,101 @@ This prompt takes the structured component specification from the previous step 
 
 ```python
 prompt = f"""
-**Context**:
-You have a comprehensive component specification (JSON) and pattern documentation text.
-Your goal is to generate the complete Infrastructure as Code (IaC) and necessary boilerplate code for a reference implementation.
+        **Context**:
+        You have a comprehensive component specification (JSON) and pattern documentation text.
+        Your goal is to generate the complete Infrastructure as Code (IaC) and necessary boilerplate code for a reference implementation.
 
-**Decision Logic: IaC Framework Selection**:
-- **Primary Framework**: The preferred IaC framework is **{iac_preference.upper()}**.
-- **Service Catalog vs Raw**: 
-    - If a component in the spec has `attributes.service_catalog_product_id`, generate a **Service Catalog Provisioning Resource** (e.g., `AWS::ServiceCatalog::CloudFormationProvisionedProduct` in CFN or `aws_servicecatalog_provisioned_product` in Terraform).
-    - Otherwise, generate standard resources (e.g., `aws_s3_bucket`) or module usage.
+        **Decision Logic: IaC Framework Selection**:
+        - **Primary Framework**: The preferred IaC framework is **{iac_preference.upper()}**.
+        - **Service Catalog vs Raw**: 
+            - **Trigger**: If a component specification contains `attributes.service_catalog_product_name` or `attributes.service_catalog_product_id`.
+            - **Action**: Generate a **Service Catalog Provisioning Resource** (`AWS::ServiceCatalog::CloudFormationProvisionedProduct` for CloudFormation).
+            - **Constraint 1 (Versioning)**: You MUST include `ProvisioningArtifactName` (default to "v1.0" or "Latest" if using name) or `ProvisioningArtifactId` (if available in spec).
+            - **Constraint 2 (Parameters)**: Parameters must be passed via the `ProvisioningParameters` property as a list of Key/Value pairs, NOT as a standard property map.
+            
+            *Example of required CFN structure*:
+            ```yaml
+            Type: AWS::ServiceCatalog::CloudFormationProvisionedProduct
+            Properties:
+              ProductName: "INSERT_PRODUCT_NAME"
+              ProvisioningArtifactName: "v1.0"
+              ProvisioningParameters:
+                - Key: "ParamNameFromInterface"
+                  Value: "ParamValue"
+            ```
+            
+            - Otherwise (if no Service Catalog attributes exist), generate standard resources (e.g., `AWS::S3::Bucket`).
+        
+        **Enterprise Golden Samples**:
+        Use the following approved templates as the strict basis for your generation. 
+        Adopt the variable naming conventions, tagging standards, and resource configurations shown here.
+        {golden_samples}
+        """
 
-**Enterprise Golden Samples**:
-Use the following approved templates as the strict basis for your generation. 
-Adopt the variable naming conventions, tagging standards, and resource configurations shown here.
-{golden_samples}
-"""
+        if critique:
+             prompt += f"""
+        **CRITICAL FEEDBACK FROM PREVIOUS ATTEMPT**:
+        The previous attempt to generate artifacts failed validation with the following issues. 
+        YOU MUST ADDRESS THESE SPECIFIC POINTS IN THIS ITERATION:
+        "{critique}"
+        """
 
-if critique:
-    prompt += f"""
-**CRITICAL FEEDBACK FROM PREVIOUS ATTEMPT**:
-The previous attempt to generate artifacts failed validation with the following issues. 
-YOU MUST ADDRESS THESE SPECIFIC POINTS IN THIS ITERATION:
-"{critique}"
-"""
+        prompt += f"""
+        **Input Specification**:
+        {json.dumps(component_spec, indent=2)}
 
-prompt += f"""
-**Input Specification**:
-{json.dumps(component_spec, indent=2)}
+        **Input Documentation**:
+        {pattern_documentation}
 
-**Input Documentation**:
-{pattern_documentation}
-
-**Instructions**:
-Generate a JSON object containing the following structure:
-{{
-    "iac_templates": {{
-        "terraform": {{
-            "main.tf": "...",
-            "variables.tf": "...",
-            "outputs.tf": "..."
-        }},
-        "cloudformation": {{ // If requested or applicable
-            "template.yaml": "..."
-        }}
-    }},
-    "boilerplate_code": {{
-        // Provide code snippets for each component as needed.
-        "component_id_or_name": {{
-            "files": {{
-                "filename.py": "content..." 
+        **Instructions**:
+        Generate a JSON object containing the following structure:
+        {{
+            "iac_templates": {{
+                "terraform": {{
+                    "main.tf": "...",
+                    "variables.tf": "...",
+                    "outputs.tf": "..."
+                }},
+                "cloudformation": {{ // If requested or applicable
+                    "template.yaml": "..."
+                }}
             }},
-            "instructions": "steps to run..."
+            "boilerplate_code": {{
+                // Provide code snippets for each component as needed.
+                "component_id_or_name": {{
+                    "files": {{
+                        "filename.py": "content..." 
+                    }},
+                    "instructions": "steps to run..."
+                }}
+            }}
         }}
-    }}
-}}
 
-**Specific Component Handling**:
-1. **API Components**:
-    - If a component is an API (e.g., Apigee Proxy), include the configuration for the proxy deploy.
-    - Include authentication policies (e.g., OAuth2, API Key) in the boilerplate.
+        **Specific Component Handling**:
+        1. **API Components**:
+           - If a component is an API (e.g., Apigee Proxy), include the configuration for the proxy deploy.
+           - Include authentication policies (e.g., OAuth2, API Key) in the boilerplate.
+        
+        2. **Database Components**:
+           - Generate IaC resource definitions (e.g., `aws_db_instance`).
+           - Provide output variables for connection strings/endpoints.
+           - In the boilerplate for UPSTREAM components (e.g., Compute), show how to retrieve these outputs and connect (e.g., using environment variables).
+           - Provide a simple "Hello World" query snippet in the boilerplate.
 
-2. **Database Components**:
-    - Generate IaC resource definitions (e.g., `aws_db_instance`).
-    - Provide output variables for connection strings/endpoints.
-    - In the boilerplate for UPSTREAM components (e.g., Compute), show how to retrieve these outputs and connect (e.g., using environment variables).
-    - Provide a simple "Hello World" query snippet in the boilerplate.
+        3. **Storage Components**:
+           - Generate IaC for bucket/volume creation.
+           - Ensure IAM policies allow UPSTREAM compute components to access it.
+           - Boilerplate in the compute component should demonstrate a simple upload/download operation.
 
-3. **Storage Components**:
-    - Generate IaC for bucket/volume creation.
-    - Ensure IAM policies allow UPSTREAM compute components to access it.
-    - Boilerplate in the compute component should demonstrate a simple upload/download operation.
+        4. **File Transfer Components**:
+           - Generate IaC for the transfer mechanism (e.g., AWS Transfer Family, generic SFTP server).
+           - Configure source and destination infrastructure access.
+           - Boilerplate should show a sample transfer script.
 
-4. **File Transfer Components**:
-    - Generate IaC for the transfer mechanism (e.g., AWS Transfer Family, generic SFTP server).
-    - Configure source and destination infrastructure access.
-    - Boilerplate should show a sample transfer script.
-
-**General Guidelines**:
-- Use Terraform modules where appropriate.
-- Ensure all resources are tagged.
-- Output valid JSON only.
-"""
+        **General Guidelines**:
+        - Use Terraform modules where appropriate.
+        - Ensure all resources are tagged.
+        - Output valid JSON only.
+        """
 ```
 
