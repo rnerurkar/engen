@@ -147,8 +147,14 @@ class ComponentSpecification:
         Analyze the following technical documentation and extract a comprehensive component specification.
         
         **Component Catalog / Interface Definitions**:
-        Use these definitions to determine the correct 'type' and valid 'attributes'.
-        If a component in the docs matches one of these schemas, utilize the exact attribute names defined here.
+        Use these definitions to determine the correct 'type', `product_id`, and valid 'attributes'.
+        
+        **CRITICAL - SERVICE CATALOG HANDLING**:
+        If a component matches a `service_catalog_product` in the catalog below:
+        1. Set its `type` to `service_catalog_product`.
+        2. COPY the `service_catalog_product_id` and `provisioning_artifact_id` into the `attributes` object.
+        3. Use the parameter names defined in the catalog as the keys in `attributes`.
+        
         {component_catalog}
 
         **Guidance**:

@@ -117,8 +117,23 @@ class ArtifactGenerator:
         **Decision Logic: IaC Framework Selection**:
         - **Primary Framework**: The preferred IaC framework is **{iac_preference.upper()}**.
         - **Service Catalog vs Raw**: 
-            - If a component in the spec has `attributes.service_catalog_product_id`, generate a **Service Catalog Provisioning Resource** (e.g., `AWS::ServiceCatalog::CloudFormationProvisionedProduct` in CFN or `aws_servicecatalog_provisioned_product` in Terraform).
-            - Otherwise, generate standard resources (e.g., `aws_s3_bucket`) or module usage.
+            - **Trigger**: If a component specification contains `attributes.service_catalog_product_name` or `attributes.service_catalog_product_id`.
+            - **Action**: Generate a **Service Catalog Provisioning Resource** (`AWS::ServiceCatalog::CloudFormationProvisionedProduct` for CloudFormation).
+            - **Constraint 1 (Versioning)**: You MUST include `ProvisioningArtifactName` (default to "v1.0" or "Latest" if using name) or `ProvisioningArtifactId` (if available in spec).
+            - **Constraint 2 (Parameters)**: Parameters must be passed via the `ProvisioningParameters` property as a list of Key/Value pairs, NOT as a standard property map.
+            
+            *Example of required CFN structure*:
+            ```yaml
+            Type: AWS::ServiceCatalog::CloudFormationProvisionedProduct
+            Properties:
+              ProductName: "INSERT_PRODUCT_NAME"
+              ProvisioningArtifactName: "v1.0"
+              ProvisioningParameters:
+                - Key: "ParamNameFromInterface"
+                  Value: "ParamValue"
+            ```
+            
+            - Otherwise (if no Service Catalog attributes exist), generate standard resources (e.g., `AWS::S3::Bucket`).
         
         **Enterprise Golden Samples**:
         Use the following approved templates as the strict basis for your generation. 

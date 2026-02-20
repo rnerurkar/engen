@@ -4,6 +4,7 @@ import logging
 import base64
 import hcl2
 import yaml
+import boto3
 from typing import List, Dict, Any, Optional
 from github import Github
 from github.Repository import Repository
@@ -42,6 +43,13 @@ class ComponentCatalogPipeline:
             else None
         )
         self.client = discoveryengine.DocumentServiceClient(client_options=client_options)
+        
+        # AWS Service Catalog Client
+        try:
+            self.sc_client = boto3.client('servicecatalog')
+        except Exception as e:
+            logger.warning(f"Failed to initialize AWS Service Catalog client: {e}")
+            self.sc_client = None
 
 
     def run(self):
@@ -57,10 +65,12 @@ class ComponentCatalogPipeline:
             documents.extend(tf_docs)
             logger.info(f"Extracted {len(tf_docs)} Terraform module schemas.")
 
-            # 2. Process Service Catalog/CloudFormation Products
-            cfn_docs = self._process_cloudformation_templates(repo)
-            documents.extend(cfn_docs)
-            logger.info(f"Extracted {len(cfn_docs)} CloudFormation product schemas.")
+            # 2. Process Service Catalog/CloudFormation Products (via AWS API)
+            sc_docs = self._process_aws_service_catalog()
+            documents.extend(sc_docs)
+            logger.info(f"Extracted {len(sc_docs)} AWS Service Catalog product schemas.")
+            
+            # (Note: Original CFN git scanning removed in favor of direct SC query)
 
             # 3. Index to Vertex AI Search
             if documents:
@@ -98,6 +108,85 @@ class ComponentCatalogPipeline:
                         docs.append(doc)
         except Exception as e:
             logger.warning(f"Error processing Terraform modules: {e}")
+        return docs
+
+    def _process_aws_service_catalog(self) -> List[discoveryengine.Document]:
+        """Fetch products from AWS Service Catalog API."""
+        docs = []
+        if not self.sc_client:
+            logger.info("Skipping Service Catalog sync (no boto3 client).")
+            return docs
+            
+        try:
+            logger.info("Scanning AWS Service Catalog...")
+            paginator = self.sc_client.get_paginator('search_products')
+            for page in paginator.paginate():
+                for product_view in page.get('ProductViewSummaries', []):
+                    product_id = product_view['ProductId']
+                    product_name = product_view['Name']
+                    
+                    # Get Versions (Finding the Latest)
+                    try:
+                        versions = self.sc_client.list_provisioning_artifacts(ProductId=product_id)
+                        artifacts = sorted(
+                            versions.get('ProvisioningArtifactDetails', []),
+                            key=lambda x: x['CreatedTime'],
+                            reverse=True
+                        )
+                        
+                        if not artifacts:
+                            continue
+                            
+                        # Latest Artifact
+                        latest = artifacts[0]
+                        artifact_id = latest['Id']
+                        artifact_name = latest['Name']
+                        
+                        # Get Parameters
+                        params_resp = self.sc_client.describe_provisioning_parameters(
+                            ProductId=product_id,
+                            ProvisioningArtifactId=artifact_id
+                        )
+                        
+                        parameters = {}
+                        for p in params_resp.get('ProvisioningArtifactParameters', []):
+                            parameters[p['ParameterKey']] = {
+                                "type": p.get('ParameterType', 'String'),
+                                "description": p.get('Description', ''),
+                                "default": p.get('ParameterDefaultValue', "<<REQUIRED>>"),
+                                "constraints": p.get('ParameterConstraints', {}),
+                                "is_no_echo": p.get('IsNoEcho', False)
+                            }
+                        
+                        # Create Schema Definition
+                        schema = {
+                            "type": "service_catalog_product",
+                            "attributes": {
+                                "service_catalog_product_id": product_id,
+                                "service_catalog_product_name": product_name,
+                                "provisioning_artifact_id": artifact_id,
+                                "provisioning_artifact_name": artifact_name,
+                                "parameters": parameters
+                            }
+                        }
+                        
+                        doc = self._create_vertex_document(
+                            id=f"sc-{product_id}",
+                            title=f"Service Catalog Product: {product_name} ({artifact_name})",
+                            category="Service Catalog Product",
+                            content=json.dumps(schema, indent=2),
+                            uri=f"arn:aws:servicecatalog:::product/{product_id}"
+                        )
+                        docs.append(doc)
+                        logger.info(f"Indexed SC Product: {product_name}")
+                        
+                    except Exception as inner_e:
+                        logger.warning(f"Failed to process product {product_name}: {inner_e}")
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"Error querying AWS Service Catalog: {e}")
+            
         return docs
 
     def _parse_terraform_variables(self, content_file: ContentFile) -> Optional[Dict[str, Any]]:
