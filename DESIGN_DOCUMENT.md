@@ -112,7 +112,7 @@ The Ingestion Plane handles the end-to-end processing of both unstructured conte
 
 ### 3.1 Design Principles
 
-1.  **Consolidation**: Eliminates complex distributed transactions by processing each pattern linearly in a single pipeline.
+1.  **Linear Processing**: Processes each pattern end-to-end in a single managed pipeline to ensure simplicity and reliability.
 2.  **Multimodal Extraction**: Uses Gemini 1.5 Flash to "read" architectural diagrams and convert them into searchable text descriptions.
 3.  **Interface-Aware Schema Indexing**: Crawls source code repositories to index the exact input variables/parameters of valid infrastructure modules, creating a "Component Catalog."
 4.  **Content Enrichment**: Injects AI-generated diagram descriptions directly into the HTML content to improve RAG retrieval accuracy.
@@ -163,103 +163,71 @@ sequenceDiagram
     end
 ```
 
-### 3.3 End-to-End Flow Description
+### 3.3 End-to-End Flow Description: Vertex Search Pipeline
 
-#### Initialization
-1.  **Configuration Loading**: The pipeline initializes with GCP Project ID, Location, Data Store ID, and GCS Bucket from environment variables.
-2.  **Client Setup**: Authenticates `SharePointClient` (MSAL), `StorageClient` (GCS), and `DocumentServiceClient` (Discovery Engine).
-3.  **Model Loading**: Initializes Vertex AI `GenerativeModel` ("gemini-1.5-flash") for efficient image analysis.
+This pipeline is responsible for unstructured data ingestion. It transforms human-readable SharePoint pages (which contain critical visual architecture diagrams) into machine-searchable text content for the RAG system.
 
-#### Batch Execution (`run_ingestion`)
-4.  **Fetch Patterns**: Calls `sp_client.fetch_pattern_list()` to get the catalog of patterns (ID, Title, Status, etc.).
-5.  **Iterative Processing**: Loops through each pattern and calls `process_single_pattern` with error handling to ensure one failure doesn't stop the batch.
+#### Initialization & Configuration
+1.  **Environment Setup**: Loads credentials for SharePoint (MSAL), Google Cloud Storage (Service Account), and Vertex AI (ADC).
+2.  **Model Loading**: Initializes the `gemini-1.5-flash` model, chosen for its cost-effective multimodal capabilities and low latency.
+3.  **Client Initialization**: establishes connections to:
+    *   **SharePoint**: For fetching lists and page content.
+    *   **GCS**: For long-term image storage.
+    *   **Discovery Engine**: For updating the search index.
 
-#### Single Pattern Processing (`process_single_pattern`)
-6.  **Fetch HTML**: Retrieves the full HTML content of the SharePoint page. If empty, skips processing.
-7.  **Image Processing & Description Generation**:
-    *   **Extraction**: Parses HTML with BeautifulSoup to find the first 2 images (typically Component and Sequence diagrams).
-    *   **Download**: Fetches image bytes from SharePoint private URLs.
-    *   **Analysis (Gemini)**: Sends image bytes to Gemini 1.5 Flash with a prompt to "Analyze this technical architecture diagram...".
-    *   **Upload (GCS)**: Uploads the image to `gs://{bucket}/patterns/{id}/images/` and generates a public/accessible URL.
-    *   **rewrite**: Updates the in-memory HTML: replaces the old SharePoint link with the new GCS URL and sets the `alt` text to the AI-generated description.
-8.  **Content Enrichment**:
-    *   Injects a new HTML section `<div class="ai-generated-context">` at the top of the document.
-    *   Adds the generated diagram descriptions here. This ensures that when Vertex Search indexes the HTML, the "visual" knowledge is now "textual" and searchable.
-9.  **Indexing (Discovery Engine)**:
-    *   **Metadata Mapping**: Maps SharePoint fields (Title, Owner, Maturity) to the Vertex Search schema (`struct_data`).
-    *   **Document Creation**: Creates a `Document` object containing the enriched HTML (`content`) and the metadata (`struct_data`).
-    *   **Write**: Calls `doc_client.write_document()` to upsert the record into the Data Store.
+#### Execution Workflow (`run_ingestion`)
+The pipeline operates in a batch mode, processing the entire pattern catalog sequentially.
 
-#### Error Handling
-*   **Partial Failures**: If an image fails to download or analyze, the pipeline logs a warning and proceeds with the rest of the pattern (Best-effort delivery).
-*   **Pipeline Resilience**: Unhandled exceptions in one pattern are caught in the main loop, allowing subsequent patterns to process successfully.
+1.  **List Retrieval**: calls `sp_client.fetch_pattern_list()` to retrieve metadata for all architecture patterns (ID, Title, Approval Status).
+2.  **Sequential Processing**: Iterates through each pattern. Errors in one pattern are logged (soft failure) to allow others to proceed.
+
+#### Pattern Processing Logic (`process_single_pattern`)
+For each pattern, the pipeline performs a linear sequence of transformations:
+
+1.  **HTML Extraction**: Fetches the raw HTML body of the SharePoint page.
+2.  **Multimodal Transformation (Visual -> Text)**:
+    *   **Parsing**: Uses `BeautifulSoup` to identify image tags.
+    *   **Filtering**: Targets specifically the *first two images*, which canonically represent the Component Diagram and Sequence Diagram.
+    *   **Download**: Retrieves the authenticated image binaries from SharePoint.
+    *   **Analysis**: Sends the image bytes to **Gemini 1.5 Flash** with a prompt: *"Analyze this technical architecture diagram. Provide a detailed textual description..."*
+    *   **Offloading**: Uploads the images to a public-read GCS bucket to replace ephemeral SharePoint links.
+    *   **Rewriting**: Updates the HTML `<img>` tags with the new `gs://` (https based) URLs and embeds the generated description into the `alt` text.
+3.  **Content Enrichment**:
+    *   Creates a new HTML division: `<div class="ai-generated-context">`.
+    *   Injects the full text of the Gemini-generated diagram descriptions into this div at the top of the document.
+    *   **Why?**: This ensures that when Vertex Search creates embeddings for the document, the "visual" knowledge is fully represented in the vector space, allowing users to search for "systems that use load balancers" even if that text only existed in the image.
+4.  **Indexing (Vertex AI Search)**:
+    *   **Metadata Mapping**: Maps SharePoint list fields (Title, Owner, Maturity, Status) to the pre-defined `struct_data` schema.
+    *   **Upsert**: Calls `doc_client.write_document` with the enriched HTML as `content` and the metadata dictionary. This replaces any existing version of the document.
 
 ### 3.4 Component Catalog Pipeline
 
-This pipeline indexes the "hard" interface definitions of the organization's infrastructure. It ensures the inference agents know *exactly* which Terraform variables or CloudFormation parameters are available, preventing the hallucination of non-existent configuration options.
+This pipeline is responsible for **structured data ingestion**. It constructs the "ground truth" for the infrastructure agents by indexing the strict interface definitions of available cloud resources. This prevents the "hallucination" of non-existent Terraform variables or CloudFormation parameters.
 
-#### End-to-End Sequence Diagram
+#### Data Sources
+1.  **GitHub Repository**: Source for raw Terraform modules (`.tf`).
+2.  **AWS Service Catalog**: Source for governed, pre-approved CloudFormation products.
 
-```mermaid
-sequenceDiagram
-    participant Orch as Orchestrator/Cron
-    participant Pipe as ComponentCatalogPipeline
-    participant GH as GitHub API
-    participant VS as Vertex AI Search
+#### Execution Workflow
 
-    Note over Orch,VS: Initialization Phase
-    Orch->>Pipe: run()
-    Pipe->>GH: get_repo(GITHUB_INFRA_REPO)
-    GH-->>Pipe: Repository Object
+1.  **Terraform Module Ingestion**:
+    *   **Repository Scanning**: Connects to the configured infrastructure repository using PyGithub.
+    *   **Module Discovery**: Crawls the `modules/` directory, looking for `variables.tf` files which define the public interface of a module.
+    *   **HCL Parsing**: Uses `python-hcl2` to parse the HashiCorp Configuration Language files.
+    *   **Schema Extraction**: Extracts variable names, types, default values, and descriptions.
+    *   **Indexing**: Creates a Vertex Search Document with `id="tf-{module_name}"` and category `Terraform Module`.
 
-    Note over Pipe,GH: 1. Terraform Module Processing
-    Pipe->>GH: get_contents("modules/")
-    GH-->>Pipe: List of directories
-    
-    loop For each module directory
-        Pipe->>GH: get_contents("modules/{name}/variables.tf")
-        GH-->>Pipe: File Content (Base64)
-        Pipe->>Pipe: _parse_terraform_variables(hcl2)
-        Pipe->>Pipe: Create Document(id="tf-{name}")
-    end
+2.  **Service Catalog Ingestion (AWS Integration)**:
+    *   **API Query**: Uses `boto3` to enumerate all products in the AWS Service Catalog.
+    *   **Artifact Resolution**: For each product, identifies the **Latest Provisioning Artifact** (Version) to ensure new deployments use modern standards.
+    *   **Parameter Extraction**: Calls `describe_provisioning_parameters` to retrieve the exact keys and constraints (AllowedValues, MinLength, etc.) required to provision the product.
+    *   **Schema Construction**: Builds a JSON schema explicitly labeled as `type: "service_catalog_product"` and containing the specific `ProvisioningArtifactId`.
+    *   **Indexing**: Creates a Vertex Search Document with `id="sc-{product_id}"` and category `Service Catalog Product`.
 
-    Note over Pipe,GH: 2. Service Catalog Processing
-    Pipe->>GH: get_contents("service-catalog/")
-    GH-->>Pipe: List of template files
-    
-    loop For each template file
-        Pipe->>GH: get_contents("service-catalog/{name}.yaml")
-        GH-->>Pipe: File Content (Base64)
-        Pipe->>Pipe: _parse_cfn_parameters(yaml)
-        Pipe->>Pipe: Create Document(id="sc-{name}")
-    end
-
-    Note over Pipe,VS: 3. Indexing Phase
-    Pipe->>VS: import_documents(documents)
-    VS-->>Pipe: Operation LRO
-    Pipe->>VS: await operation.result()
-    VS-->>Pipe: Success (Import Completed)
-```
-
-#### Detailed Workflow Description
-
-The following steps correspond to the sequence diagram above:
-
-1.  **Process Terraform Modules (`_process_terraform_modules`)**:
-    *   **Scanning**: The pipeline queries the GitHub API for the contents of the `modules/` directory.
-    *   **Retrieval**: It verifies the existence of a `variables.tf` file within each module folder to confirm it is a valid Terraform module.
-    *   **Parsing**: The file content is fetched and parsed using `python-hcl2`. This extracts specific variable attributes including `type`, `description`, and `default`.
-    *   **Schema Creation**: A JSON schema is constructed representing the module's interface, which is then wrapped in a Vertex AI `Document` object with the ID format `tf-{module_name}`.
-
-2.  **Process Service Catalog (`_process_cloudformation_templates`)**:
-    *   **Scanning**: The pipeline scans the `service-catalog/` directory for CloudFormation templates (`.yaml` or `.json`).
-    *   **Parsing**: Valid template files are parsed using `PyYAML` to extract the `Parameters` section, which defines the allowable inputs for the product.
-    *   **Schema Creation**: Similar to Terraform, a JSON schema is created and wrapped in a `Document` object with the ID format `sc-{product_name}`.
-
-3.  **Index Documents (`_index_documents`)**:
-    *   **Batch Import**: All created documents (Terraform and CloudFormation schemas) are collected into a list.
-    *   **Ingestion**: The pipeline calls the Vertex AI Search `import_documents` API. This uses the `INCREMENTAL` reconciliation mode, ensuring that existing documents are updated and new ones are added without wiping the entire data store.
-    *   **Validation**: The pipeline awaits the Long-Running Operation (LRO) to ensure successful ingestion before terminating.
+3.  **Unified Indexing**:
+    *   All extracted schemas (Terraform and Service Catalog) are normalized into a common JSON structure.
+    *   They are uploaded to a dedicated "Component Catalog" data store in Vertex AI Search, separate from the unstructured document store.
+    *   This allows the inference agents to perform precise fielded searches (e.g., *"Find me the interface for the RDS module"*) during the synthesis phase.
 
 ---
 
@@ -704,15 +672,15 @@ sequenceDiagram
 
 EnGen represents a production-ready implementation of a knowledge-augmented documentation system that combines:
 
-1. **Robust Data Ingestion**: Two-phase commit ensures atomic operations across three parallel streams
+1. **Robust Data Ingestion**: Linear pipeline architecture eliminates distributed complexity while ensuring data consistency
 2. **Intelligent Retrieval**: Semantic search and vector similarity find the most relevant patterns
 3. **Multi-Agent Serving**: Specialized agents collaborate to produce high-quality documentation
 4. **Quality Assurance**: Reflection loop ensures output meets production standards
 
 ### Key Achievements
 
-- **Atomicity**: Zero partial ingestions due to two-phase commit with rollback
-- **Performance**: Parallel stream processing reduces ingestion time by 60%
+- **Reliability**: Linear processing pipelines ensure consistent state without complex transaction management
+- **Efficiency**: Managed pipelines leveraging Vertex AI Discovery Engine reduce operational overhead
 - **Quality**: Reflection loop with automated review achieves 90+ quality scores
 - **Resilience**: Retry logic and health checks ensure 99%+ success rate
 - **Scalability**: Handles 1000+ patterns and concurrent agent requests
@@ -722,7 +690,7 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 
 | Component | Status | Readiness | Notes |
 |-----------|--------|-----------|-------|
-| **Ingestion Service** | ✅ Complete | 90% | Robust 2PC transaction support; handles parallel streams. |
+| **Ingestion Service** | ✅ Complete | 90% | Streamlined linear definition; leverages Vertex AI Search. |
 | **Inference Service** | ✅ Complete | 90% | Replaces deprecated Serving Service; includes granular Orchestrator API. |
 | **Streamlit App** | ✅ Complete | 85% | Implements stateful HITL workflow and async status polling. |
 | **Pattern Synthesis** | ✅ Complete | 85% | Generates IaC/Code; validates against GCS golden samples. |
