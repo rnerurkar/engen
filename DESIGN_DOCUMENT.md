@@ -1,7 +1,7 @@
 # EnGen: Architecture Pattern Documentation System
 
-**Document Version:** 1.0  
-**Date:** December 11, 2025  
+**Document Version:** 2.0  
+**Date:** February 24, 2026  
 **Author:** EnGen Development Team  
 **Status:** Production Ready
 
@@ -13,6 +13,7 @@ EnGen is an intelligent system that automates the creation of high-quality archi
 
 1. **Ingestion Plane**: Extracts and indexes architecture patterns from SharePoint into a GCP-based knowledge graph
 2. **Serving Plane**: Uses a multi-agent system to analyze new architecture diagrams and generate comprehensive documentation using relevant donor patterns
+3. **Real-Time Component Resolution**: Queries live infrastructure sources (GitHub repositories via MCP and AWS Service Catalog) to ground generated artifacts in actual schemas
 
 ### Primary Goals
 
@@ -61,6 +62,11 @@ graph TB
         Orch --> ArtVal
     end
 
+    subgraph RealTimeSources["Real-Time Component Sources"]
+        GitHubMCP[GitHub MCP Server<br/>Terraform Modules]
+        AWSSC[AWS Service Catalog<br/>CloudFormation Products]
+    end
+
     subgraph Async["Async Workers"]
         PubDocs[SharePoint<br/>Publisher]
         PubCode[GitHub<br/>Publisher]
@@ -72,21 +78,19 @@ graph TB
 
     subgraph Ingestion["INGESTION PLANE (Managed Pipelines)"]
         SP[SharePoint Client]
-        Repo[GitHub Repo]
         SPPipe[SharePoint<br/>Pipeline]
-        CompPipe[Component<br/>Catalog Pipeline]
         VertexAI[Vertex AI<br/>Discovery Engine]
         
         SP --> SPPipe
-        Repo --> CompPipe
         SPPipe --> VertexAI
-        CompPipe --> VertexAI
     end
     
     UI --> Orch
-    UI -.->|Poll| DB
+    UI -.->|Poll via Orch| DB
     Orch -->|Fire & Forget| PubDocs
     Orch -->|Fire & Forget| PubCode
+    CompSpec -->|Real-Time Lookup| GitHubMCP
+    CompSpec -->|Fallback Lookup| AWSSC
     PubDocs --> DB
     PubCode --> DB
 ```
@@ -95,14 +99,14 @@ graph TB
 
 | Agent Name | Role | Primary Responsibility |
 |------------|------|------------------------|
-| **OrchestratorAgent** | Controller | Manages the end-to-end workflow, handles state, coordinates retries, and triggers async publishing. |
+| **OrchestratorAgent** | Controller | Manages the end-to-end workflow via phase-based endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`). Coordinates A2A calls, retries, and triggers async publishing. |
 | **GeneratorAgent** | Creator | Multimodal agent that uses Gemini Vision to analyze diagrams and Gemini Pro to draft documentation. |
-| **RetrievalAgent** | Librarian | Performs hybrid search (semantic + keyword) in Vertex AI to find relevant "donor" patterns. |
+| **RetrievalAgent** | Librarian | Performs hybrid search (semantic + keyword) in Vertex AI to find relevant "Donor Pattern" documents. |
 | **ReviewerAgent** | Critic | Evaluates generated text against diverse quality rubrics and provides specific feedback for refinement. |
-| **ComponentSpecificationAgent** | Architect | Queries the Vertex AI Search Component Catalog to extract a structured dependency graph using valid schema attributes. |
+| **ComponentSpecificationAgent** | Architect | Performs **real-time** lookups against GitHub repositories (via MCP Server or PyGithub fallback) and AWS Service Catalog to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. |
 | **ArtifactGenerationAgent** | Engineer | Synthesizes IaC and Boilerplate using "Golden Sample" templates fetched from GCS. |
-| **ArtifactValidationAgent** | QA | Validates generated code for syntax errors, security best practices, and completeness. |
-| **HumanVerifierAgent** | Gatekeeper | Interfaces with the human expert to collect approvals at critical checkpoints (Docs & Code). |
+| **ArtifactValidationAgent** | QA | Validates generated code against a 6-point rubric: Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, and Best Practices. |
+| **HumanVerifierAgent** | Gatekeeper | Provides governance gates with CloudSQL persistence and Pub/Sub notifications. Currently operates in **simulated auto-approval** mode; actual user approval is handled via the Streamlit UI calling orchestrator endpoints directly. |
 
 ---
 
@@ -114,10 +118,11 @@ The Ingestion Plane handles the end-to-end processing of both unstructured conte
 
 1.  **Linear Processing**: Processes each pattern end-to-end in a single managed pipeline to ensure simplicity and reliability.
 2.  **Multimodal Extraction**: Uses Gemini 1.5 Flash to "read" architectural diagrams and convert them into searchable text descriptions.
-3.  **Interface-Aware Schema Indexing**: Crawls source code repositories to index the exact input variables/parameters of valid infrastructure modules, creating a "Component Catalog."
-4.  **Content Enrichment**: Injects AI-generated diagram descriptions directly into the HTML content to improve RAG retrieval accuracy.
+3.  **Content Enrichment**: Injects AI-generated diagram descriptions directly into the HTML content to improve RAG retrieval accuracy.
 4.  **Managed Indexing**: Leverages Google Cloud Discovery Engine's "Unstructured Data with Metadata" model for simplified state management.
 5.  **Media Offloading**: Stores images reliably in GCS while updating HTML references to point to the permanent storage.
+
+> **Note (v2.0):** The Component Catalog Pipeline that previously indexed Terraform modules and Service Catalog products into Vertex AI Search has been deprecated. Component schema resolution is now performed **at inference time** via real-time lookups (see Section 3.5 and Section 4.8).
 
 ### 3.2 End-to-End Sequence Diagram
 
@@ -200,15 +205,17 @@ For each pattern, the pipeline performs a linear sequence of transformations:
     *   **Metadata Mapping**: Maps SharePoint list fields (Title, Owner, Maturity, Status) to the pre-defined `struct_data` schema.
     *   **Upsert**: Calls `doc_client.write_document` with the enriched HTML as `content` and the metadata dictionary. This replaces any existing version of the document.
 
-### 3.4 Component Catalog Pipeline
+### 3.4 Component Catalog Pipeline (Legacy)
 
-This pipeline is responsible for **structured data ingestion**. It constructs the "ground truth" for the infrastructure agents by indexing the strict interface definitions of available cloud resources. This prevents the "hallucination" of non-existent Terraform variables or CloudFormation parameters.
+> **Deprecation Notice (v2.0):** This pipeline has been superseded by real-time component resolution at inference time. The pipeline code has been preserved as `component_catalog_pipeline_legacy.py` for reference. See Section 3.5 for the replacement architecture.
 
-#### Data Sources
+This pipeline was responsible for **structured data ingestion**. It constructed the "ground truth" for the infrastructure agents by indexing the strict interface definitions of available cloud resources into Vertex AI Search. This prevented the "hallucination" of non-existent Terraform variables or CloudFormation parameters.
+
+#### Data Sources (Legacy)
 1.  **GitHub Repository**: Source for raw Terraform modules (`.tf`).
 2.  **AWS Service Catalog**: Source for governed, pre-approved CloudFormation products.
 
-#### Execution Workflow
+#### Execution Workflow (Legacy)
 
 1.  **Terraform Module Ingestion**:
     *   **Repository Scanning**: Connects to the configured infrastructure repository using PyGithub.
@@ -225,9 +232,73 @@ This pipeline is responsible for **structured data ingestion**. It constructs th
     *   **Indexing**: Creates a Vertex Search Document with `id="sc-{product_id}"` and category `Service Catalog Product`.
 
 3.  **Unified Indexing**:
-    *   All extracted schemas (Terraform and Service Catalog) are normalized into a common JSON structure.
-    *   They are uploaded to a dedicated "Component Catalog" data store in Vertex AI Search, separate from the unstructured document store.
-    *   This allows the inference agents to perform precise fielded searches (e.g., *"Find me the interface for the RDS module"*) during the synthesis phase.
+    *   All extracted schemas (Terraform and Service Catalog) were normalized into a common JSON structure.
+    *   They were uploaded to a dedicated "Component Catalog" data store in Vertex AI Search, separate from the unstructured document store.
+
+#### Why It Was Replaced
+
+The offline pipeline approach had several limitations:
+-   **Staleness**: The indexed catalog could become out of date between pipeline runs.
+-   **Scope**: Only modules in pre-configured repositories were available.
+-   **Operational Overhead**: Required a separate pipeline execution and monitoring lifecycle.
+
+### 3.5 Real-Time Component Resolution (Current Architecture)
+
+The current architecture replaces the offline Component Catalog Pipeline with **on-demand, real-time lookups** performed at inference time by the `ComponentSpecificationAgent`. This ensures the system always works with the latest module definitions.
+
+#### Architecture Overview
+
+```mermaid
+graph LR
+    subgraph "Inference Time (Real-Time)"
+        Agent[Component Specification Agent]
+        Sources[component_sources.py<br/>Type Normalization]
+        
+        Agent --> Sources
+        Sources --> GitMCP[GitHub MCP Client]
+        Sources --> AWSSC[Service Catalog Client]
+    end
+    
+    subgraph "Tier 1: GitHub"
+        GitMCP -->|MCP Protocol| MCPServer[GitHub MCP Server]
+        GitMCP -->|Fallback| PyGithub[PyGithub REST API]
+        MCPServer --> Repos[Terraform Repos<br/>variables.tf / outputs.tf]
+        PyGithub --> Repos
+    end
+    
+    subgraph "Tier 2: AWS"
+        AWSSC -->|boto3| SC[AWS Service Catalog]
+        SC --> Products[CloudFormation Products<br/>Parameters & Constraints]
+    end
+```
+
+#### Component Resolution Flow
+
+1.  **Type Normalization**: Raw component types extracted by the LLM (e.g., "postgres", "k8s", "redis") are mapped to canonical forms (e.g., `rds_instance`, `eks_cluster`, `elasticache`) using a 40+ entry alias dictionary in `component_sources.py`.
+
+2.  **Tier 1 — GitHub MCP Lookup**:
+    *   The `GitHubMCPTerraformClient` searches configured GitHub organization repositories for matching Terraform modules.
+    *   **Primary path**: Uses the GitHub MCP Server protocol with tools like `search_code`, `search_repositories`, and `get_file_contents`.
+    *   **Fallback path**: If MCP is unavailable, falls back to PyGithub REST API, walking the repository tree to find matching `variables.tf` files.
+    *   **HCL Parsing**: Uses `python-hcl2` for structural parsing with a regex fallback for edge cases.
+    *   Returns `TerraformModuleSpec` dataclasses containing variables, outputs, and metadata.
+
+3.  **Tier 2 — AWS Service Catalog Lookup** (Fallback):
+    *   If no GitHub module is found, the `ServiceCatalogClient` searches AWS Service Catalog for matching products using `boto3`.
+    *   Extracts the latest provisioning artifact and its parameters, constraints, and allowed values.
+    *   Returns `ServiceCatalogProductSpec` dataclasses with full parameter definitions.
+    *   Results are cached in-memory to reduce API calls.
+
+4.  **Schema Assembly**: Retrieved schemas from both tiers are combined and passed to the LLM for structured component extraction, producing a JSON dependency graph with topological ordering via `graphlib.TopologicalSorter`.
+
+#### Configuration
+
+| Setting | Source | Default |
+|---------|--------|---------|
+| GitHub Repos | `GITHUB_TERRAFORM_REPOS` env var | `["rnerurkar/engen-infrastructure"]` |
+| AWS Region | `AWS_DEFAULT_REGION` env var | `us-east-1` |
+| AWS Profile | `AWS_PROFILE` env var | `default` |
+| GitHub PAT | `GITHUB_PERSONAL_ACCESS_TOKEN` env var | Required for MCP/PyGithub |
 
 ---
 
@@ -238,25 +309,27 @@ The Serving Plane uses a multi-agent system to analyze architecture diagrams, re
 ### 4.1 Design Principles
 
 1.  **Specialization**: Each agent has a single, well-defined responsibility (e.g., Retrieval, Generation, Review, Artifact Creation).
-2.  **Agent-to-Agent Communication (A2A)**: Standardized HTTP-based protocol with retry and timeout.
-3.  **Reflection Loop**: Iterative refinement (Generate -> Review -> Generate) until quality threshold met.
-4.  **Human-in-the-Loop**: Critical governance steps where human approval is required before proceeding (Pattern Approval, Artifact Approval).
-5.  **Artifact Generation**: Automated creation of deployable code based on authoritative interfaces ("Golden Samples").
-6.  **Interface-Aware RAG**: Grounds LLM generation in indexed component schemas (Vertex AI Search) to prevent hallucinated attributes.
-7.  **Observability**: Centralized logging and status tracking via `ADKAgent` framework.
+2.  **Agent-to-Agent Communication (A2A)**: Standardized HTTP-based protocol with retry, timeout, and exponential backoff via `A2AClient`.
+3.  **Reflection Loop**: Iterative refinement (Generate -> Review -> Generate) until quality threshold met (max 3 iterations).
+4.  **Human-in-the-Loop**: User approval is collected via Streamlit UI buttons that call orchestrator endpoints directly (`approve_docs`, `approve_code`). The `HumanVerifierAgent` provides an additional governance layer with Pub/Sub notifications, currently operating in simulated auto-approval mode.
+5.  **Artifact Generation**: Automated creation of deployable code based on authoritative interfaces ("Golden Samples") from GCS.
+6.  **Real-Time Schema Grounding**: Component specifications are grounded in live infrastructure schemas fetched at inference time from GitHub (via MCP or PyGithub) and AWS Service Catalog, replacing the previous offline Vertex AI Search catalog approach.
+7.  **Phase-Based Orchestration**: The workflow is split into discrete phases (`phase1_generate_docs`, `phase2_generate_code`) with explicit approval gates between them.
+8.  **Observability**: Centralized logging, metrics tracking, and health checks (liveness/readiness) via the `ADKAgent` framework.
 
 ### 4.2 Agent Swarm Architecture
 
 The system consists of the following agents, orchestrating a complex workflow:
 
-*   **Orchestrator Agent**: Workflow coordinator, traffic controller, state manager.
-*   **Vision Agent**: "Eyes" of the system, converts pixels to technical descriptions.
-*   **Retrieval Agent**: "Memory", finds relevant prior art (RAG).
-*   **Generator Agent**: "Writer", drafts content using LLMs and donor context.
+*   **Orchestrator Agent**: Workflow coordinator, traffic controller, state manager. Exposes phase-based endpoints.
+*   **Vision Agent**: "Eyes" of the system, converts pixels to technical descriptions (handled within Generator Agent).
+*   **Retrieval Agent**: "Memory", finds relevant prior art (RAG) via Vertex AI Search.
+*   **Generator Agent**: "Writer", drafts content using Gemini Vision (image analysis) and Gemini Pro (text generation) with donor context.
 *   **Reviewer Agent**: "Critic", evaluates quality using rubrics.
-*   **Artifact Generation Agent**: "Engineer", synthesizes both IaC and application reference code.
-*   **Artifact Validation Agent**: "QA Engineer", validates generated code for syntax, security, and completeness.
-*   **Human Verifier Agent**: "Gatekeeper", manages the approval lifecycle.
+*   **Component Specification Agent**: "Architect", resolves infrastructure schemas via real-time GitHub MCP and AWS Service Catalog lookups, producing a topologically-sorted dependency graph.
+*   **Artifact Generation Agent**: "Engineer", synthesizes both IaC and application reference code using Golden Sample templates.
+*   **Artifact Validation Agent**: "QA Engineer", validates generated code against a 6-point rubric (Syntax, Completeness, Integration, Security, Relevance, Best Practices).
+*   **Human Verifier Agent**: "Gatekeeper", manages the approval lifecycle with CloudSQL persistence and Pub/Sub notifications.
 
 ### 4.3 High-Level Sequence Diagram
 
@@ -269,12 +342,14 @@ sequenceDiagram
     participant Gen as Generator Agent
     participant Rev as Reviewer Agent
     participant Artifact as Artifact Gen Agent
+    participant GitMCP as GitHub MCP Client
+    participant SvcCat as Service Catalog Client
     participant Validator as Artifact Val Agent
     participant Verifier as Human Verifier
     participant DB as CloudSQL
     participant Async as Async Workers
 
-    Client->>Orch: POST /process {image, title}
+    Client->>Orch: POST /invoke {task: "phase1_generate_docs", image, title}
     
     Note over Orch,Ret: Step 1: Context
     Orch->>Vision: analyze(image)
@@ -290,34 +365,41 @@ sequenceDiagram
         Rev-->>Orch: {approved, critique}
     end
 
-    Note over Orch,Verifier: Step 3: Human Check (Pattern)
-    Orch->>Verifier: request_approval(sections)
-    Verifier-->>Orch: {status: APPROVED, review_id: "PID-1"}
+    Note over Orch,Verifier: Step 3: User Approval (Pattern)
+    Orch-->>Client: Return sections + full_doc
+    Client->>Orch: POST /invoke {task: "approve_docs"}
     
     par Async Publishing (Docs)
         Orch->>Async: publish_docs_async(review_id="PID-1")
         Async->>DB: Update Status (IN_PROGRESS)
     and Continue Workflow
+        Client->>Orch: POST /invoke {task: "phase2_generate_code"}
         Orch->>Artifact: generate_component_spec(doc)
     end
 
-    Note over Orch,Validator: Step 4: Pattern Synthesis (Holistic)
+    Note over Orch,Validator: Step 4: Pattern Synthesis (Real-Time Resolution)
+    
+    Artifact->>GitMCP: search_terraform_module(type)
+    GitMCP-->>Artifact: TerraformModuleSpec
+    Artifact->>SvcCat: search_product(type) [fallback]
+    SvcCat-->>Artifact: ServiceCatalogProductSpec
+    Artifact-->>Orch: ComponentSpecification (JSON)
     
     loop Artifact Validation (Max 3)
         Orch->>Artifact: generate_artifact(spec, doc, critique?)
         Artifact-->>Orch: artifacts (IaC + Boilerplate)
         Orch->>Validator: validate_artifacts(artifacts, spec)
-        Validator-->>Orch: {status, issues, feedback}
-        alt Approved
+        Validator-->>Orch: {status, score, issues, feedback}
+        alt Approved (PASS)
              Orch->>Orch: Exit loop
-        else Issues Found
+        else Issues Found (NEEDS_REVISION)
              Orch->>Orch: Retry with feedback
         end
     end
 
-    Note over Orch,Verifier: Step 5: Human Check (Artifacts)
-    Orch->>Verifier: request_approval(artifacts)
-    Verifier-->>Orch: {status: APPROVED, review_id: "AID-2"}
+    Note over Orch,Verifier: Step 5: User Approval (Artifacts)
+    Orch-->>Client: Return artifact bundle
+    Client->>Orch: POST /invoke {task: "approve_code"}
 
     Note over Orch,DB: Step 6: Non-Blocking Completion
     
@@ -328,10 +410,12 @@ sequenceDiagram
         Orch-->>Client: {status: "processing", pattern_id: "PID-1", artifact_id: "AID-2"}
     end
 
-    Note over Client,DB: Step 7: Client Polling
-    loop Poll Until Complete
-        Client->>DB: Check Status (PID-1, AID-2)
-        DB-->>Client: {doc_url: "...", code_url: "..."}
+    Note over Client,DB: Step 7: Client Polling via Orchestrator
+    loop Poll Until Complete (every 3s)
+        Client->>Orch: POST /invoke {task: "get_publish_status"}
+        Orch->>DB: Check Status (PID-1, AID-2)
+        DB-->>Orch: {doc_url: "...", code_url: "..."}
+        Orch-->>Client: Status update
     end
 ```
 
@@ -347,28 +431,30 @@ sequenceDiagram
 5.  **Refinement**: If the score is below threshold, the Orchestrator feeds the critique back into the `Generator Agent` for a revised draft. This repeats for up to 3 iterations.
 
 #### Phase 3: Governance (Point 1) & Async Doc Publishing
-6.  **Pattern Verification**: The Orchestrator sends the final text draft to the `HumanVerifierAgent`.
-7.  **Approval**: Once approved, the Orchestrator receives a `review_id`.
+6.  **Pattern Verification**: The Orchestrator returns the generated documentation to the Streamlit client. The user reviews and clicks "Approve" in the UI.
+7.  **Approval**: The Streamlit app calls the `approve_docs` endpoint. The Orchestrator updates CloudSQL and receives a `review_id`.
 8.  **Async Publishing**: It immediately spawns a background task to publish the documentation to SharePoint, using the `review_id` to track progress in CloudSQL. The workflow *does not wait* for this to finish but proceeds to artifact generation.
 
 #### Phase 4: Pattern Synthesis (Holistic Generation)
-9.  **Interface Retrieval**: The `ComponentSpecificationAgent` queries the Vertex AI Search Component Catalog to identify valid component attributes (e.g., specific Terraform variables for `vpc` or `rds`).
-10. **Comprehensive Specification**: It generates a structured dependency graph grounded in these real-world schemas.
+9.  **Real-Time Schema Resolution**: The `ComponentSpecificationAgent` extracts component keywords from the documentation, normalizes them using the `component_sources.py` alias dictionary (40+ mappings), and performs a two-tier real-time lookup:
+    *   **Tier 1 (GitHub)**: Searches configured GitHub repositories via the MCP Server protocol (with PyGithub fallback) for matching Terraform modules, parsing `variables.tf` and `outputs.tf` files using `python-hcl2`.
+    *   **Tier 2 (AWS)**: Falls back to AWS Service Catalog via `boto3` to find matching CloudFormation products with their provisioning parameters and constraints.
+10. **Comprehensive Specification**: It generates a structured dependency graph grounded in these real-world schemas, with topological ordering via `graphlib.TopologicalSorter` to determine execution order.
 11. **Golden Sample Injection**: The `ArtifactGenerationAgent` retrieves enterprise-approved "Golden Sample" IaC templates from GCS to use as few-shot examples.
 12. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window.
 13. **Automated Validation Loop**:
-    *   **Validate**: The `ArtifactValidationAgent` checks the generated code against a strict rubric.
+    *   **Validate**: The `ArtifactValidationAgent` checks the generated code against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices (Medium).
     *   **Feedback**: If issues are found, the critique is fed back to the generator.
-    *   **Retry**: The generator attempts to fix the specific issues.
+    *   **Retry**: The generator attempts to fix the specific issues (max 3 retries).
 
 #### Phase 5: Governance (Point 2) & Async Code Publishing
-13. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review.
-14. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub.
+13. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review (or approved directly via the Streamlit UI).
+14. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub via the REST API (direct push to the configured branch).
 15. **Immediate Return**: The Orchestrator returns a `processing` status to the client, along with the review IDs needed to track the background tasks.
 
 #### Phase 6: Client Polling
-16. **Status Check**: The client application (e.g., Streamlit) polls the CloudSQL database using the returned IDs.
-17. **Completion**: Once the background tasks update the DB status to `COMPLETED`, the client displays the final URLs for the SharePoint page and GitHub commit.
+16. **Status Check**: The client application (Streamlit) polls the orchestrator's `get_publish_status` endpoint every 3 seconds using the returned IDs.
+17. **Completion**: Once the background tasks update the DB status to `COMPLETED`, the orchestrator relays the final URLs for the SharePoint page and GitHub commit back to the client.
 
 
 ### 4.5 Response Assembly
@@ -401,10 +487,10 @@ The system separates the publishing of documentation and implementation code int
 Upon approval of the design pattern text, the `SharePointPublisher` converts the markdown content into a modern SharePoint page. This serves as the authoritative interface documentation.
 
 #### 4.7.2 GitHub (Implementation Repository)
-Upon approval of the generated artifacts, the `GitHubMCPPublisher` commits the files to the target repository.
-*   `infrastructure/`: Contains Terraform templates.
-*   `src/`: Contains application boilerplate.
-*   The publisher creates a new branch (e.g., `feat/pattern-name`) for pull request review.
+Upon approval of the generated artifacts, the `GitHubMCPPublisher` commits the files to the target repository using the GitHub REST API (Git tree manipulation: get ref → create tree → create commit → update ref).
+*   `infrastructure/{iac_type}/`: Contains Terraform or CloudFormation templates.
+*   `src/{component}/`: Contains application boilerplate code.
+*   The publisher pushes directly to the configured branch (default `main`).
 
 #### 4.7.3 SharePoint Publishing Detail
 
@@ -426,14 +512,16 @@ This workflow implements a "Pattern Synthesis" approach. Instead of generating i
 
 | Component | Responsibility |
 |-----------|----------------|
-| **OrchestratorAgent** | The central state machine that drives the workflow. It manages the lifecycle of the request, handles retries for validation failures, and coordinates the **async handover** to publishers. |
+| **OrchestratorAgent** | The central state machine that drives the workflow. It manages the lifecycle of the request, handles retries for validation failures, and coordinates the **async handover** to publishers. Exposes phase-based endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`). |
 | **CloudSQLManager** | **State Store**. It acts as the single source of truth for the status of both human reviews and async publishing tasks. It allows the frontend to poll for completion without blocking the agent. |
-| **ComponentSpecification** | **Analyzer**. It parses the high-level design documentation and queries the **Vertex AI Search Component Catalog** to extract a structured dependency graph grounded in real infrastructure schemas. |
+| **ComponentSpecification** | **Analyzer**. It parses the high-level design documentation and performs **real-time lookups** against GitHub repositories (via `GitHubMCPTerraformClient`) and AWS Service Catalog (via `ServiceCatalogClient`) to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. |
+| **GitHubMCPTerraformClient** | **Tier 1 Schema Source**. Searches configured GitHub repos for Terraform modules using the MCP Server protocol (with PyGithub REST API fallback). Parses `variables.tf` and `outputs.tf` using `python-hcl2`. Returns `TerraformModuleSpec` dataclasses. |
+| **ServiceCatalogClient** | **Tier 2 Schema Source** (Fallback). Queries AWS Service Catalog via `boto3` for CloudFormation products, extracts provisioning parameters and constraints. Returns `ServiceCatalogProductSpec` dataclasses. Caches results in-memory. |
 | **ArtifactGenerator** | **Synthesizer**. It fetches **"Golden Sample" IaC templates** from a GCS bucket to benchmark the generated code against organizational best practices. It then generates a holistic "Artifact Bundle" (IaC + Boilerplate) in a single consistent pass. |
-| **ArtifactValidator** | **Quality Gate**. It acts as an automated reviewer. It inspects the generated Artifact Bundle against a strict rubric (Syntax, Security, Completeness). |
-| **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. |
-| **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub) as a background task. |
-| **SharePointPublisher** | **Docs Publisher**. Updates the enterprise knowledge base with the design documentation as a background task. |
+| **ArtifactValidator** | **Quality Gate**. It inspects the generated Artifact Bundle against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices Adherence (Medium). Scores 0-100 with PASS/NEEDS_REVISION verdicts. |
+| **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. Currently operates in simulated auto-approval mode; user approval is handled via Streamlit UI. |
+| **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub) as a background task using direct REST API Git tree manipulation. |
+| **SharePointPublisher** | **Docs Publisher**. Updates the enterprise knowledge base with the design documentation as a background task. Converts Markdown to SharePoint modern page canvas layout with web parts, rendering Mermaid diagrams via Kroki. |
 
 #### 4.8.2 Component Diagram
 
@@ -456,6 +544,12 @@ graph TD
         ArtVal["Artifact<br/>Validator"]
     end
 
+    subgraph "Real-Time Component Sources"
+        CompSources["component_sources.py<br/>Type Normalization"]
+        GitMCP["GitHub MCP Client<br/>(MCP + PyGithub fallback)"]
+        SvcCat["Service Catalog Client<br/>(boto3)"]
+    end
+
     subgraph "Async Workers"
         PubDocs[SharePoint<br/>Publisher]
         PubCode[GitHub<br/>Publisher]
@@ -463,11 +557,13 @@ graph TD
 
     subgraph "External Resources"
         GCS[GCS Bucket<br/>Golden Samples]
+        GitRepos[GitHub Terraform<br/>Repositories]
+        AWSSC[AWS Service<br/>Catalog]
     end
 
     %% Data Flow
     UI -->|Start| Orch
-    UI -.->|Poll Status| DB
+    UI -.->|Poll Status via Orch| DB
 
     Orch -->|Update State| DB
     Orch -->|Trigger Async| PubDocs
@@ -476,9 +572,15 @@ graph TD
     PubDocs -->|Update State| DB
     PubCode -->|Update State| DB
     
+    GCS -->|Fetch Templates| ArtGen
     GCS -->|Fetch Templates| ArtVal
 
     Orch -->|Doc Text| CompSpec
+    CompSpec -->|Normalize Types| CompSources
+    CompSources -->|Tier 1 Lookup| GitMCP
+    CompSources -->|Tier 2 Fallback| SvcCat
+    GitMCP -->|Search & Parse| GitRepos
+    SvcCat -->|Query Products| AWSSC
     CompSpec -->|Specification JSON| Orch
 
     Orch -->|Spec + Doc| ArtGen
@@ -498,7 +600,8 @@ sequenceDiagram
     participant Client as Streamlit App
     participant Orch as Orchestrator Agent
     participant Spec as Component Spec Agent
-    participant VertexAI as Component Catalog
+    participant GitMCP as GitHub MCP Client
+    participant SvcCat as Service Catalog Client
     participant Gen as Artifact Gen Agent
     participant GCS as GCS Bucket
     participant Val as Artifact Validator Agent
@@ -520,10 +623,23 @@ sequenceDiagram
         Orch->>Spec: generate_component_spec(pattern_text)
     end
     
-    Note over Orch, Async: Phase 2: Holistic Synthesis Loop
+    Note over Orch, Async: Phase 2: Real-Time Schema Resolution & Holistic Synthesis
 
-    Spec->>VertexAI: query_schemas(keywords)
-    VertexAI-->>Spec: valid_schemas (JSON)
+    Spec->>Spec: Extract keywords via LLM
+    Spec->>Spec: Normalize types (component_sources.py)
+    
+    loop For each component type
+        Spec->>GitMCP: search_terraform_module(type)
+        alt Module found in GitHub
+            GitMCP-->>Spec: TerraformModuleSpec (variables, outputs)
+        else Not found — Fallback
+            GitMCP-->>Spec: None
+            Spec->>SvcCat: search_product(type)
+            SvcCat-->>Spec: ServiceCatalogProductSpec (parameters)
+        end
+    end
+    
+    Spec->>Spec: Topological sort (graphlib)
     Spec-->>Orch: ComponentSpecification (JSON)
 
     loop Quality Assurance Loop (Max 3 Retries)
@@ -532,7 +648,7 @@ sequenceDiagram
         GCS-->>Gen: approved_templates
         Gen-->>Orch: ArtifactBundle
         Orch->>Val: validate_artifact(artifacts)
-        Val-->>Orch: ValidationResult
+        Val-->>Orch: ValidationResult (score, PASS/NEEDS_REVISION)
     end
 
     Note over Orch, Async: Phase 3: Artifact Approval & Async Code Publishing
@@ -543,7 +659,7 @@ sequenceDiagram
     par Fire & Forget
         Orch->>Async: publish_code(AID-2)
         Async->>DB: UPDATE status='IN_PROGRESS'
-        Note right of Async: Pushes to GitHub...
+        Note right of Async: Pushes to GitHub (REST API)...
         Async->>DB: UPDATE status='COMPLETED' url='...'
     and Return Immediate Result
         Orch-->>Client: {status: "processing", p_id: "PID-1", a_id: "AID-2"}
@@ -552,33 +668,39 @@ sequenceDiagram
     Note over Client, DB: Phase 4: Client-Side Polling
     
     loop Poll until both COMPLETED
-        Client->>DB: SELECT status, url FROM reviews WHERE id IN (PID-1, AID-2)
-        DB-->>Client: {doc_status: "COMPLETED", code_status: "IN_PROGRESS"}
+        Client->>Orch: GET /invoke {task: "get_publish_status"}
+        Orch->>DB: SELECT status, url FROM reviews
+        DB-->>Orch: {doc_status: "COMPLETED", code_status: "IN_PROGRESS"}
+        Orch-->>Client: Status update
     end
 ```
 
 **Step-by-Step Explanation:**
 
-1.  **Request Pattern Approval**: The `OrchestratorAgent` sends the generated markdown documentation to the `HumanVerifierAgent` for review.
+1.  **Request Pattern Approval**: The `OrchestratorAgent` sends the generated markdown documentation to the `HumanVerifierAgent` for review (or the user approves directly via the Streamlit UI).
 2.  **Pattern Approved**: The human expert approves the content. The Verifier returns `APPROVED` status and a unique review ID (`PID-1`).
 3.  **Trigger Async Publish (Docs)**: The Orchestrator immediately spawns a background task (`asyncio.create_task`) to publish the docs, passing `PID-1`.
 4.  **Docs Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `PID-1` to `IN_PROGRESS`.
 5.  **Docs Status: COMPLETED**: After successfully uploading to SharePoint, the worker updates the status to `COMPLETED` and saves the Page URL.
-6.  **Generate Component Spec**: *Concurrently* with step 3-5, the Orchestrator calls the `ComponentSpecificationAgent`. It queries the **Vertex AI Component Catalog** to identify valid attributes for required resources.
-7.  **Return Specification**: The agent returns a structured JSON dependency graph grounded in real infrastructure schemas.
-8.  **Generate Artifact Bundle**: The Orchestrator calls the `ArtifactGenerationAgent` with the specification.
-9.  **Fetch Golden Samples**: The Generator fetches **approved IaC templates** (Golden Samples) from the GCS bucket to use as few-shot examples for the identified components.
-10. **Return Artifacts**: The generator produces a complete bundle containing Terraform and application code, strictly following the Golden Sample patterns.
-11. **Validate Artifacts**: The Orchestrator sends the bundle to the `ArtifactValidationAgent` for automated quality checks.
-12. **Return Validation Result**: The validator returns a PASS/FAIL status. If FAIL, the loop repeats with feedback.
-13. **Request Artifact Approval**: Once validated, the Orchestrator sends the code bundle to the `HumanVerifierAgent` for final sign-off.
-14. **Artifact Approved**: The human expert approves the code. The Verifier returns `APPROVED` status and a unique review ID (`AID-2`).
-15. **Trigger Async Publish (Code)**: The Orchestrator immediately spawns a background task to publish the code, passing `AID-2`.
-16. **Code Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `AID-2` to `IN_PROGRESS`.
-17. **Code Status: COMPLETED**: After successfully pushing to GitHub, the worker updates the status to `COMPLETED` and saves the Commit URL.
-18. **Return Immediate Response**: *Concurrently* with step 15-17, the Orchestrator returns a response to the Client with `status: processing` and both IDs (`PID-1`, `AID-2`).
-19. **Poll Status**: The Client (`Streamlit App`) queries the `CloudSQLManager` using the provided IDs.
-20. **Return Status**: The database returns the current status (e.g., Docs=COMPLETED, Code=IN_PROGRESS) and any available URLs.
+6.  **Generate Component Spec**: *Concurrently* with steps 3-5, the Orchestrator calls the `ComponentSpecificationAgent`.
+7.  **Keyword Extraction**: The agent uses Gemini 1.5 Pro to extract infrastructure component keywords from the documentation.
+8.  **Type Normalization**: Raw keywords are normalized to canonical component types using the `component_sources.py` alias dictionary (40+ mappings, e.g., "postgres" → `rds_instance`).
+9.  **Real-Time Schema Lookup (Tier 1 — GitHub)**: For each component type, the `GitHubMCPTerraformClient` searches configured repositories for matching Terraform modules. It uses the MCP Server protocol when available, falling back to PyGithub REST API. Found modules are parsed from `variables.tf` and `outputs.tf` using `python-hcl2`.
+10. **Real-Time Schema Lookup (Tier 2 — AWS)**: If no GitHub module is found for a component, the `ServiceCatalogClient` queries AWS Service Catalog via `boto3` for matching CloudFormation products, extracting provisioning parameters and constraints.
+11. **Return Specification**: The agent assembles all retrieved schemas and uses the LLM to produce a structured JSON dependency graph, topologically sorted via `graphlib.TopologicalSorter`.
+12. **Generate Artifact Bundle**: The Orchestrator calls the `ArtifactGenerationAgent` with the specification and pattern documentation.
+13. **Fetch Golden Samples**: The Generator fetches **approved IaC templates** (Golden Samples) from the GCS bucket to use as few-shot examples for the identified components.
+14. **Return Artifacts**: The generator produces a complete bundle containing Terraform and application code, strictly following the Golden Sample patterns.
+15. **Validate Artifacts**: The Orchestrator sends the bundle to the `ArtifactValidationAgent` for automated quality checks against a 6-point rubric (Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, Best Practices). Returns a score (0-100) and PASS/NEEDS_REVISION status.
+16. **Return Validation Result**: If FAIL, the loop repeats with critique feedback (max 3 retries).
+17. **Request Artifact Approval**: Once validated, the Orchestrator sends the code bundle to the `HumanVerifierAgent` for final sign-off (or the user approves via Streamlit UI).
+18. **Artifact Approved**: The human expert approves the code. The Verifier returns `APPROVED` status and a unique review ID (`AID-2`).
+19. **Trigger Async Publish (Code)**: The Orchestrator immediately spawns a background task to publish the code, passing `AID-2`.
+20. **Code Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `AID-2` to `IN_PROGRESS`.
+21. **Code Status: COMPLETED**: After successfully pushing to GitHub via REST API (Git tree manipulation), the worker updates the status to `COMPLETED` and saves the Commit URL.
+22. **Return Immediate Response**: *Concurrently* with steps 19-21, the Orchestrator returns a response to the Client with `status: processing` and both IDs (`PID-1`, `AID-2`).
+23. **Poll Status**: The Client (`Streamlit App`) polls the Orchestrator's `get_publish_status` endpoint, which queries `CloudSQLManager` using the provided IDs.
+24. **Return Status**: The Orchestrator returns the current status (e.g., Docs=COMPLETED, Code=IN_PROGRESS) and any available URLs.
 
 ## 4.9 Client-Side Design: Streamlit App
 
@@ -590,9 +712,9 @@ To support the asynchronous and multi-step nature of the workflow, the applicati
 
 **Key State Variables:**
 - `step`: Tracks the current workflow phase (`INPUT` -> `DOC_REVIEW` -> `CODE_GEN` -> `CODE_REVIEW` -> `PUBLISH`).
-- `doc_content`: Stores the generated markdown documentation for display.
+- `doc_data`: Stores the generated documentation response (sections, full markdown) for display.
 - `doc_review_id`: The ID returned by the Orchestrator after document approval, used to track SharePoint publishing.
-- `code_content`: Stores the generated file structure and code snippets.
+- `code_data`: Stores the generated artifact bundle (IaC templates, boilerplate code) for display.
 - `code_review_id`: The ID returned after code approval, used to track GitHub publishing.
 
 ### 4.9.2 Workflow Integration Phases
@@ -600,33 +722,33 @@ To support the asynchronous and multi-step nature of the workflow, the applicati
 The application interacts with specific Orchestrator endpoints that correspond to the workflow lifecycle:
 
 **1. Phase 1: Input & Document Generation**
-   - **User Action**: Enters a prompt (e.g., "Create a secure storage pattern").
-   - **API Call**: `POST /phase1/generate_docs`
-   - **System**: Orchestrator invokes Retriever, Visualizer, and Generator agents.
-   - **Result**: Returns Markdown content. App transitions to `DOC_REVIEW`.
+   - **User Action**: Uploads an architecture diagram image and enters a title/prompt.
+   - **API Call**: `POST /invoke` with task `phase1_generate_docs`
+   - **System**: Orchestrator invokes Generator (Vision analysis), Retriever (donor lookup), Generator+Reviewer loop (content refinement, max 3 iterations).
+   - **Result**: Returns sections and full markdown content. App transitions to `DOC_REVIEW`.
 
 **2. Phase 2: Document Human Review**
    - **User Action**: Reviews rendered Markdown in the UI. Clicks "Approve".
-   - **API Call**: `POST /phase1/approve_docs`
-   - **System**: Orchestrator triggers async SharePoint publishing and logs `transaction_id`.
+   - **API Call**: `POST /invoke` with task `approve_docs`
+   - **System**: Orchestrator updates CloudSQL review status, triggers async SharePoint publishing via background task.
    - **Result**: Returns `doc_review_id`. App transitions to `CODE_GEN`.
 
 **3. Phase 3: Code Generation & Validation**
    - **System Action**: Automatically triggers code generation.
-   - **API Call**: `POST /phase2/generate_code`
-   - **System**: Orchestrator calls Component Generator -> Artifact Generator -> Validator (fetching Golden Samples).
-   - **Result**: Returns file bundle layout. App transitions to `CODE_REVIEW`.
+   - **API Call**: `POST /invoke` with task `phase2_generate_code`
+   - **System**: Orchestrator calls ComponentSpecificationAgent (real-time GitHub MCP + AWS Service Catalog lookups) → ArtifactGenerationAgent (Golden Sample injection) → ArtifactValidationAgent (6-point rubric, max 3 retries).
+   - **Result**: Returns artifact bundle layout. App transitions to `CODE_REVIEW`.
 
 **4. Phase 4: Code Human Review**
-   - **User Action**: Reviews file structure. Clicks "Approve & Publish".
-   - **API Call**: `POST /phase2/approve_code`
-   - **System**: Orchestrator triggers async GitHub publishing.
+   - **User Action**: Reviews file structure and code. Clicks "Approve & Publish".
+   - **API Call**: `POST /invoke` with task `approve_code`
+   - **System**: Orchestrator updates CloudSQL, triggers async GitHub publishing via REST API.
    - **Result**: Returns `code_review_id`. App transitions to `PUBLISH`.
 
 **5. Phase 5: Async Status Polling**
    - **System Action**: UI enters a polling loop.
-   - **API Call**: `GET /status?p_id={doc_id}&c_id={code_id}`
-   - **Display**: Shows real-time progress bars for "Documentation Publishing (SharePoint)" and "Code Publishing (GitHub)".
+   - **API Call**: `POST /invoke` with task `get_publish_status` (polls every 3 seconds)
+   - **Display**: Shows real-time progress for "Documentation Publishing (SharePoint)" and "Code Publishing (GitHub)".
    - **Termination**: Loop ends when both statuses are `COMPLETED` or `FAILED`.
 
 ### 4.9.3 Integration Diagram
@@ -635,34 +757,34 @@ The application interacts with specific Orchestrator endpoints that correspond t
 sequenceDiagram
     participant User
     participant Streamlit
-    participant Orch as Orchestrator API
+    participant Orch as Orchestrator API (/invoke)
     participant DB as CloudSQL
 
-    User->>Streamlit: 1. Enter Prompt
-    Streamlit->>Orch: POST /phase1/generate_docs
-    Orch-->>Streamlit: Return Markdown
+    User->>Streamlit: 1. Upload Diagram + Enter Title
+    Streamlit->>Orch: POST /invoke {task: "phase1_generate_docs"}
+    Orch-->>Streamlit: Return Sections + Markdown
     Streamlit-->>User: Display Docs for Review
 
     User->>Streamlit: 2. Approve Docs
-    Streamlit->>Orch: POST /phase1/approve_docs
+    Streamlit->>Orch: POST /invoke {task: "approve_docs"}
     Orch->>DB: Create DOC_TASK (In Progress)
     Orch-->>Streamlit: Return doc_review_id
     
-    Streamlit->>Orch: 3. POST /phase2/generate_code
-    Orch-->>Streamlit: Return Code Bundle
+    Streamlit->>Orch: 3. POST /invoke {task: "phase2_generate_code"}
+    Orch-->>Streamlit: Return Artifact Bundle
     Streamlit-->>User: Display Code Structure for Review
 
     User->>Streamlit: 4. Approve Code
-    Streamlit->>Orch: POST /phase2/approve_code
+    Streamlit->>Orch: POST /invoke {task: "approve_code"}
     Orch->>DB: Create CODE_TASK (In Progress)
     Orch-->>Streamlit: Return code_review_id
 
-    loop Every 2 Seconds
-        Streamlit->>Orch: GET /status
+    loop Every 3 Seconds
+        Streamlit->>Orch: POST /invoke {task: "get_publish_status"}
         Orch->>DB: Check Task Status
         DB-->>Orch: {doc: COMPLETED, code: IN_PROGRESS}
         Orch-->>Streamlit: Status Update
-        Streamlit-->>User: Update Progress Bars
+        Streamlit-->>User: Update Progress Display
     end
 ```
 
@@ -675,30 +797,34 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 1. **Robust Data Ingestion**: Linear pipeline architecture eliminates distributed complexity while ensuring data consistency
 2. **Intelligent Retrieval**: Semantic search and vector similarity find the most relevant patterns
 3. **Multi-Agent Serving**: Specialized agents collaborate to produce high-quality documentation
-4. **Quality Assurance**: Reflection loop ensures output meets production standards
+4. **Real-Time Schema Grounding**: Live infrastructure lookups via GitHub MCP and AWS Service Catalog ensure generated artifacts always reflect actual module interfaces
+5. **Quality Assurance**: Reflection loop with multi-rubric automated validation ensures output meets production standards
 
 ### Key Achievements
 
 - **Reliability**: Linear processing pipelines ensure consistent state without complex transaction management
+- **Freshness**: Real-time component resolution eliminates stale catalog data by querying live GitHub repos and AWS Service Catalog at inference time
 - **Efficiency**: Managed pipelines leveraging Vertex AI Discovery Engine reduce operational overhead
-- **Quality**: Reflection loop with automated review achieves 90+ quality scores
-- **Resilience**: Retry logic and health checks ensure 99%+ success rate
+- **Quality**: Reflection loop with 6-point automated validation rubric achieves production-grade artifact quality
+- **Resilience**: Retry logic, exponential backoff, and health checks (liveness/readiness) ensure 99%+ success rate
 - **Scalability**: Handles 1000+ patterns and concurrent agent requests
-- **Integration**: SharePoint publishing enables direct enterprise content delivery
+- **Integration**: Multi-channel publishing to SharePoint (docs) and GitHub (code) with async status tracking
 
 ### Production Readiness
 
 | Component | Status | Readiness | Notes |
 |-----------|--------|-----------|-------|
-| **Ingestion Service** | ✅ Complete | 90% | Streamlined linear definition; leverages Vertex AI Search. |
-| **Inference Service** | ✅ Complete | 90% | Replaces deprecated Serving Service; includes granular Orchestrator API. |
-| **Streamlit App** | ✅ Complete | 85% | Implements stateful HITL workflow and async status polling. |
-| **Pattern Synthesis** | ✅ Complete | 85% | Generates IaC/Code; validates against GCS golden samples. |
-| **GCP Integration** | ✅ Complete | 95% | Vertex AI, CloudSQL, and GCS fully integrated. |
-| **SharePoint Integration**| ✅ Complete | 90% | Supports both ingestion and automated publishing. |
-| **GitHub Integration** | ✅ Complete | 90% | automated code publishing with repo creation. |
-| **Error Handling** | ✅ Complete | 90% | Retry logic and component-level error boundaries. |
-| **Monitoring** | ⚠️ Partial | 60% | Basic logging; needs OpenTelemetry/Dashboards. |
+| **Ingestion Service** | ✅ Complete | 90% | Streamlined linear definition; leverages Vertex AI Search for pattern documents. |
+| **Component Catalog** | ✅ Refactored | 85% | Migrated from offline pipeline to real-time GitHub MCP + AWS Service Catalog lookups. Legacy pipeline preserved. |
+| **Inference Service** | ✅ Complete | 90% | Phase-based orchestrator with A2A communication, async publishing, and CloudSQL state management. |
+| **Streamlit App** | ✅ Complete | 85% | Implements stateful HITL workflow with async status polling via orchestrator. |
+| **Pattern Synthesis** | ✅ Complete | 85% | Generates IaC/Code; validates against 6-point rubric with GCS golden samples. |
+| **GCP Integration** | ✅ Complete | 95% | Vertex AI, CloudSQL, GCS, and Pub/Sub fully integrated. |
+| **SharePoint Integration**| ✅ Complete | 90% | Supports both ingestion and automated publishing with Mermaid diagram rendering via Kroki. |
+| **GitHub Integration** | ✅ Complete | 90% | Real-time module lookup (MCP + PyGithub) and automated code publishing (REST API). |
+| **AWS Integration** | ✅ Complete | 85% | Service Catalog product discovery via boto3 with in-memory caching. |
+| **Error Handling** | ✅ Complete | 90% | Retry logic, exponential backoff, and component-level error boundaries. |
+| **Monitoring** | ⚠️ Partial | 60% | Basic logging and agent metrics; needs OpenTelemetry/Dashboards. |
 | **Testing** | ⚠️ Partial | 70% | Unit tests exist; end-to-end integration tests needed. |
 
 ### Next Steps
@@ -707,18 +833,22 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 - Create end-to-end integration tests
 - Establish shared data contracts between services
 - Align configuration variables across services
+- Resolve `TaskStatus.FAILED_RETRYABLE` enum gap (used by `ArtifactValidationAgent` but not defined in `adk_core.py`)
 
 **Phase 4 - Production Hardening** (Weeks 3-4):
 - Implement distributed tracing (OpenTelemetry)
 - Add comprehensive metrics and telemetry
 - Implement service mesh for dynamic discovery
 - Add rate limiting for Vertex AI APIs
+- Replace simulated auto-approval in `HumanVerifierAgent` with real async approval workflow
+- Implement GitHub feature branch + PR workflow in `GitHubMCPPublisher`
 
 **Phase 5 - Optimization** (Weeks 5-6):
-- Implement caching for frequently retrieved patterns
+- Implement caching for frequently retrieved patterns and component schemas
 - Add batch processing for multiple diagrams
 - Optimize LLM token usage
 - Performance tuning and load testing
+- Evaluate MCP Server vs PyGithub performance for component lookups
 
 ### System Metrics
 
@@ -739,10 +869,40 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 - Agent Swarm: 4-6 GB RAM total, 2-3 vCPU per agent
 - GCP Storage: ~500 MB per pattern (images + embeddings + text)
 
+### Agent Service Ports
+
+| Agent | Port | Endpoint |
+|-------|------|----------|
+| Orchestrator | 9000 | `http://localhost:9000/invoke` |
+| Retriever | 9001 | `http://localhost:9001/invoke` |
+| Generator | 9002 | `http://localhost:9002/invoke` |
+| Reviewer | 9003 | `http://localhost:9003/invoke` |
+| Artifact (Unified) | 9004 | `http://localhost:9004/invoke` |
+| Human Verifier | 9005 | `http://localhost:9005/invoke` |
+
+### Key Dependencies
+
+| Package | Purpose | Added in v2.0 |
+|---------|---------|---------------|
+| `FastAPI` / `uvicorn` | Agent HTTP servers | No |
+| `pydantic` | Request/response models | No |
+| `aiohttp` | Async A2A communication | No |
+| `google-cloud-aiplatform` | Vertex AI (Gemini LLM) | No |
+| `google-cloud-discoveryengine` | Vertex AI Search (RAG) | No |
+| `google-cloud-storage` | GCS (golden samples, images) | No |
+| `google-cloud-pubsub` | Pub/Sub (notifications) | No |
+| `sqlalchemy` / `pg8000` | CloudSQL (state management) | No |
+| `msal` | SharePoint authentication | No |
+| `streamlit` | Frontend UI | No |
+| `PyGithub` | GitHub API fallback for module discovery | **Yes** |
+| `boto3` | AWS Service Catalog client | **Yes** |
+| `python-hcl2` | Terraform HCL parsing | **Yes** |
+| `python-dotenv` | Environment variable management | **Yes** |
+
 ---
 
 **Document Control**  
-Last Updated: December 11, 2025  
+Last Updated: February 24, 2026  
 Review Cycle: Quarterly  
 Owner: EnGen Development Team  
 Classification: Internal Use
