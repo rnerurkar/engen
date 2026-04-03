@@ -485,9 +485,51 @@ Start with <?xml or <mxfile and end with </mxfile>.
 
     @staticmethod
     def _svg_to_png(svg_content: str) -> bytes:
-        """Convert SVG string to PNG bytes using cairosvg."""
+        """
+        Convert SVG string to PNG bytes.
+
+        Uses svglib + reportlab with a pycairo shim so it works on all
+        platforms (Windows, Linux, macOS) without requiring the native
+        ``libcairo`` shared library to be installed separately.
+
+        Falls back to cairosvg if svglib is unavailable (e.g. on Linux
+        containers where native Cairo is present).
+        """
         if not svg_content:
             return b""
+
+        # ── Approach 1: svglib + reportlab (pure-Python, cross-platform) ─
+        try:
+            # Shim: let rlPyCairo/cairocffi resolve via pycairo's bundled lib
+            import cairo as _pycairo          # pycairo (bundles native DLLs)
+            import sys as _sys
+            if "cairocffi" not in _sys.modules:
+                _sys.modules["cairocffi"] = _pycairo
+
+            import tempfile
+            import os
+            from svglib.svglib import svg2rlg
+            from reportlab.graphics import renderPM
+
+            with tempfile.NamedTemporaryFile(
+                suffix=".svg", delete=False, mode="w", encoding="utf-8"
+            ) as tmp:
+                tmp.write(svg_content)
+                tmp_path = tmp.name
+
+            try:
+                drawing = svg2rlg(tmp_path)
+                if drawing is None:
+                    raise ValueError("svglib returned None — SVG may be invalid")
+                png_bytes = renderPM.drawToString(drawing, fmt="PNG")
+                return png_bytes
+            finally:
+                os.unlink(tmp_path)
+
+        except Exception as svg_err:
+            logger.warning(f"svglib SVG→PNG failed ({svg_err}), trying cairosvg…")
+
+        # ── Approach 2: cairosvg (needs native libcairo — works in Linux) ─
         try:
             import cairosvg
             png_bytes = cairosvg.svg2png(
@@ -498,8 +540,8 @@ Start with <?xml or <mxfile and end with </mxfile>.
             return png_bytes
         except ImportError:
             logger.warning(
-                "cairosvg not installed — PNG conversion skipped. "
-                "Install with: pip install cairosvg"
+                "Neither svglib nor cairosvg could convert SVG→PNG. "
+                "Install with: pip install svglib reportlab pycairo"
             )
             return b""
         except Exception as e:
