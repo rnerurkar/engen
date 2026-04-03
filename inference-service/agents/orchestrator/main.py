@@ -5,7 +5,7 @@ import base64
 import json
 import logging
 import re
-from typing import Dict
+from typing import Dict, Optional
 
 # Add path hacks to support imports from sibling services
 current_file_path = os.path.abspath(__file__)
@@ -25,6 +25,13 @@ from lib.github_publisher import GitHubMCPPublisher
 from lib.cloudsql_client import CloudSQLManager, logger as sql_logger
 from core.pattern_synthesis.service_hadr_retriever import ServiceHADRRetriever
 from core.pattern_synthesis.hadr_generator import HADRDocumentationGenerator
+from core.pattern_synthesis.hadr_diagram_generator import (
+    HADRDiagramGenerator,
+    PatternDiagramBundle,
+    DR_STRATEGIES,
+    LIFECYCLE_PHASES,
+)
+from core.pattern_synthesis.hadr_diagram_storage import HADRDiagramStorage
 from config import Config
 
 class OrchestratorAgent(ADKAgent):
@@ -66,6 +73,16 @@ class OrchestratorAgent(ADKAgent):
         self.hadr_generator = HADRDocumentationGenerator(
             project_id=Config.PROJECT_ID,
             location=Config.LOCATION,
+        )
+
+        # HA/DR Diagram Generation & Storage
+        self.hadr_diagram_generator = HADRDiagramGenerator(
+            project_id=Config.PROJECT_ID,
+            location=Config.LOCATION,
+        )
+        self.hadr_diagram_storage = HADRDiagramStorage(
+            bucket_name=Config.HADR_DIAGRAM_GCS_BUCKET,
+            project_id=Config.PROJECT_ID,
         )
 
     async def handle(self, req: AgentRequest) -> AgentResponse:
@@ -142,19 +159,44 @@ class OrchestratorAgent(ADKAgent):
 
         # --- HA/DR SECTION GENERATION ---
         self.logger.info("--- Step 3: GENERATING HA/DR SECTIONS ---")
+        hadr_sections = {}
+        diagram_urls = {}
         try:
             hadr_sections = self._generate_hadr_sections(
                 generated_sections=generated_sections or {},
                 donor_context=donor_context,
             )
-            # Merge HA/DR sections into the generated sections
+        except Exception as e:
+            self.logger.error(f"HA/DR text generation failed (non-blocking): {e}", exc_info=True)
+
+        # --- HA/DR DIAGRAM GENERATION & STORAGE ---
+        self.logger.info("--- Step 3b: GENERATING HA/DR DIAGRAMS ---")
+        try:
+            if hadr_sections:
+                diagram_urls = self._generate_and_store_hadr_diagrams(
+                    pattern_title=title,
+                    generated_sections=generated_sections or {},
+                    hadr_sections=hadr_sections,
+                )
+        except Exception as e:
+            self.logger.error(f"HA/DR diagram generation failed (non-blocking): {e}", exc_info=True)
+
+        # --- Merge HA/DR into generated sections ---
+        try:
             if hadr_sections:
                 if generated_sections is None:
                     generated_sections = {}
-                generated_sections["HA/DR"] = self._format_hadr_sections(hadr_sections)
+                generated_sections["HA/DR"] = self._format_hadr_sections(
+                    hadr_sections, diagram_urls
+                )
+            elif not hadr_sections:
+                if generated_sections is None:
+                    generated_sections = {}
+                generated_sections["HA/DR"] = (
+                    "*HA/DR section generation failed. Please complete manually.*"
+                )
         except Exception as e:
-            self.logger.error(f"HA/DR generation failed (non-blocking): {e}", exc_info=True)
-            # Non-blocking: we still return the pattern doc without HA/DR
+            self.logger.error(f"HA/DR merge failed (non-blocking): {e}", exc_info=True)
             if generated_sections is None:
                 generated_sections = {}
             generated_sections["HA/DR"] = (
@@ -390,21 +432,130 @@ class OrchestratorAgent(ADKAgent):
 
         return list(found_services)
 
+    def _generate_and_store_hadr_diagrams(
+        self,
+        pattern_title: str,
+        generated_sections: Dict,
+        hadr_sections: Dict[str, str],
+    ) -> Dict:
+        """
+        Generate component diagrams for every DR-strategy × lifecycle-phase
+        combination, upload to GCS, and return a URL map.
+
+        Returns:
+            Dict keyed by (strategy, phase) tuples → dict with svg_url,
+            drawio_url, png_url.
+        """
+        # Extract service names for diagram generation
+        doc_text = "\n".join(str(v) for v in generated_sections.values())
+        service_names = self._extract_service_names_from_doc(doc_text)
+        if not service_names:
+            self.logger.warning("No services found — skipping diagram generation")
+            return {}
+
+        pattern_context = {
+            "title": pattern_title,
+            "services": service_names,
+        }
+
+        # Generate all diagrams
+        bundle = self.hadr_diagram_generator.generate_all_diagrams(
+            pattern_name=pattern_title,
+            services=service_names,
+            hadr_text_sections=hadr_sections,
+            pattern_context=pattern_context,
+        )
+
+        # Upload each diagram to GCS
+        url_map = {}
+        for (strategy, phase), artifact in bundle.diagrams.items():
+            try:
+                urls = self.hadr_diagram_storage.upload_diagram_bundle(
+                    pattern_name=pattern_title,
+                    strategy=strategy,
+                    phase=phase,
+                    svg_content=artifact.svg_content,
+                    drawio_xml=artifact.drawio_xml,
+                    png_bytes=artifact.png_bytes,
+                )
+                url_map[(strategy, phase)] = urls
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to upload diagram {strategy}/{phase}: {e}"
+                )
+                url_map[(strategy, phase)] = {}
+
+        self.logger.info(
+            f"Stored {len(url_map)} diagram bundles on GCS for '{pattern_title}'"
+        )
+        return url_map
+
     @staticmethod
-    def _format_hadr_sections(hadr_sections: Dict[str, str]) -> str:
+    def _format_hadr_sections(
+        hadr_sections: Dict[str, str],
+        diagram_urls: Optional[Dict] = None,
+    ) -> str:
         """
         Combine the four individual DR strategy sections into a single
-        Markdown block suitable for inclusion in the pattern document.
+        Markdown block with embedded diagram references for each
+        DR-strategy × lifecycle-phase combination.
         """
+        if diagram_urls is None:
+            diagram_urls = {}
+
         parts = ["## High Availability / Disaster Recovery\n"]
+
         for strategy in HADRDocumentationGenerator.DR_STRATEGIES:
             section_text = hadr_sections.get(strategy, "")
-            if section_text:
-                parts.append(section_text)
-            else:
+            if not section_text:
                 parts.append(
                     f"## {strategy}\n\n*Section not generated.*\n"
                 )
+                continue
+
+            # Inject diagram references into the section text for each phase
+            enriched_text = section_text
+            for phase in LIFECYCLE_PHASES:
+                urls = diagram_urls.get((strategy, phase), {})
+                if urls and urls.get("png_url"):
+                    # Build the diagram embed block
+                    png_url = urls["png_url"]
+                    svg_url = urls.get("svg_url", "")
+                    drawio_url = urls.get("drawio_url", "")
+
+                    diagram_block = (
+                        f"\n\n**Component Diagram — {phase}**\n\n"
+                        f"![{strategy} - {phase}]({png_url})\n\n"
+                    )
+                    if svg_url:
+                        diagram_block += f"[View SVG]({svg_url})"
+                    if drawio_url:
+                        diagram_block += (
+                            f" | [Edit in draw.io]({drawio_url})"
+                        )
+                    diagram_block += "\n"
+
+                    # Insert diagram block right after the phase heading
+                    # Look for ### <phase> heading and insert after it
+                    import re
+                    phase_pattern = re.compile(
+                        rf"(###\s*{re.escape(phase)}[^\n]*\n)",
+                        re.IGNORECASE,
+                    )
+                    match = phase_pattern.search(enriched_text)
+                    if match:
+                        insert_pos = match.end()
+                        enriched_text = (
+                            enriched_text[:insert_pos]
+                            + diagram_block
+                            + enriched_text[insert_pos:]
+                        )
+                    else:
+                        # Fallback: append at the end of the strategy section
+                        enriched_text += diagram_block
+
+            parts.append(enriched_text)
+
         return "\n\n---\n\n".join(parts)
 
     async def run_workflow_loop(self, payload):

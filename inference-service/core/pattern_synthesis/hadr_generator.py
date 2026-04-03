@@ -141,21 +141,28 @@ Write in clean Markdown. Use these exact sub-headings:
 ## {dr_strategy}
 
 ### Initial Provisioning
-(content)
+(content — describe the component architecture: which services are deployed
+in each region, their state, replication mechanisms, and how the initial
+setup looks. This description accompanies a component diagram that will be
+generated separately, so be specific about service states and connections.)
 
 | Service | Primary Region State | DR Region State |
 |---------|---------------------|-----------------|
 | ...     | ...                 | ...             |
 
 ### Failover
-(content including sequence, triggers, RTO/RPO)
+(content — describe the failover sequence step by step: what triggers it,
+which services fail over first, dependencies, expected RTO/RPO. Be specific
+about each service's state transition as this accompanies a component diagram.)
 
 | Service | Pre-Failover State | Post-Failover State | Failover Mechanism |
 |---------|-------------------|--------------------|--------------------|
 | ...     | ...               | ...                | ...                |
 
 ### Failback
-(content including sequence, data sync requirements)
+(content — describe the failback sequence: how services are restored to the
+primary region, data synchronisation requirements, order of operations. Be
+specific about state transitions as this accompanies a component diagram.)
 
 | Service | Pre-Failback State | Post-Failback State | Sync Required |
 |---------|--------------------|--------------------|---------------|

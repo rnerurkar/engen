@@ -36,3 +36,6 @@ class Config:
     # Service HA/DR Configuration
     SERVICE_HADR_DATA_STORE_ID = os.getenv("SERVICE_HADR_DS_ID", "service-hadr-datastore")
     SERVICE_HADR_GCS_BUCKET = os.getenv("SERVICE_HADR_GCS_BUCKET", "engen-service-hadr-images")
+
+    # HA/DR Diagram Storage (SVG, draw.io XML, PNG)
+    HADR_DIAGRAM_GCS_BUCKET = os.getenv("HADR_DIAGRAM_GCS_BUCKET", "engen-hadr-diagrams")
