@@ -1,7 +1,7 @@
 # EnGen: Architecture Pattern Documentation System
 
-**Document Version:** 2.0  
-**Date:** February 24, 2026  
+**Document Version:** 2.1  
+**Date:** April 3, 2026  
 **Author:** EnGen Development Team  
 **Status:** Production Ready
 
@@ -12,8 +12,9 @@
 EnGen is an intelligent system that automates the creation of high-quality architecture documentation by leveraging a two-part approach:
 
 1. **Ingestion Plane**: Extracts and indexes architecture patterns from SharePoint into a GCP-based knowledge graph
-2. **Serving Plane**: Uses a multi-agent system to analyze new architecture diagrams and generate comprehensive documentation using relevant donor patterns
-3. **Real-Time Component Resolution**: Queries live infrastructure sources (GitHub repositories via MCP and AWS Service Catalog) to ground generated artifacts in actual schemas
+2. **Service HA/DR Ingestion**: Ingests service-level High Availability and Disaster Recovery documentation into a dedicated data store with structured metadata for precise filtered retrieval
+3. **Serving Plane**: Uses a multi-agent system to analyze new architecture diagrams and generate comprehensive documentation — including HA/DR sections — using relevant donor patterns
+4. **Real-Time Component Resolution**: Queries live infrastructure sources (GitHub repositories via MCP and AWS Service Catalog) to ground generated artifacts in actual schemas
 
 ### Primary Goals
 
@@ -21,6 +22,7 @@ EnGen is an intelligent system that automates the creation of high-quality archi
 - **Knowledge Reuse**: Leverage existing architecture patterns to ensure consistency and quality
 - **Scalability**: Handle large volumes of patterns and concurrent documentation requests
 - **Quality Assurance**: Multi-agent review and refinement for production-grade output
+- **HA/DR Documentation**: Automated generation of High Availability and Disaster Recovery sections grounded in service-level reference documentation
 
 ---
 
@@ -80,11 +82,24 @@ graph TB
         SP[SharePoint Client]
         SPPipe[SharePoint<br/>Pipeline]
         VertexAI[Vertex AI<br/>Discovery Engine]
+        HADRPipe[Service HA/DR<br/>Pipeline]
+        HADRDS[HA/DR Data Store<br/>Vertex AI Search]
         
         SP --> SPPipe
+        SP --> HADRPipe
         SPPipe --> VertexAI
+        HADRPipe --> HADRDS
+    end
+
+    subgraph HADRGeneration["HA/DR Generation"]
+        HADRRet[Service HA/DR<br/>Retriever]
+        HADRGen[HA/DR Documentation<br/>Generator]
     end
     
+    Orch --> HADRRet
+    Orch --> HADRGen
+    HADRRet -->|Filtered Retrieval| HADRDS
+
     UI --> Orch
     UI -.->|Poll via Orch| DB
     Orch -->|Fire & Forget| PubDocs
@@ -99,7 +114,7 @@ graph TB
 
 | Agent Name | Role | Primary Responsibility |
 |------------|------|------------------------|
-| **OrchestratorAgent** | Controller | Manages the end-to-end workflow via phase-based endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`). Coordinates A2A calls, retries, and triggers async publishing. |
+| **OrchestratorAgent** | Controller | Manages the end-to-end workflow via phase-based endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`). Coordinates A2A calls, retries, triggers async publishing, and orchestrates HA/DR section generation after the content generation loop. |
 | **GeneratorAgent** | Creator | Multimodal agent that uses Gemini Vision to analyze diagrams and Gemini Pro to draft documentation. |
 | **RetrievalAgent** | Librarian | Performs hybrid search (semantic + keyword) in Vertex AI to find relevant "Donor Pattern" documents. |
 | **ReviewerAgent** | Critic | Evaluates generated text against diverse quality rubrics and provides specific feedback for refinement. |
@@ -107,12 +122,14 @@ graph TB
 | **ArtifactGenerationAgent** | Engineer | Synthesizes IaC and Boilerplate using "Golden Sample" templates fetched from GCS. |
 | **ArtifactValidationAgent** | QA | Validates generated code against a 6-point rubric: Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, and Best Practices. |
 | **HumanVerifierAgent** | Gatekeeper | Provides governance gates with CloudSQL persistence and Pub/Sub notifications. Currently operates in **simulated auto-approval** mode; actual user approval is handled via the Streamlit UI calling orchestrator endpoints directly. |
+| **ServiceHADRRetriever** | HA/DR Librarian | Performs **hybrid retrieval** (metadata filter + vector search) against a dedicated `service-hadr-datastore` in Vertex AI Search to fetch service-level HA/DR documentation chunks, scoped by service name, DR strategy, and lifecycle phase. |
+| **HADRDocumentationGenerator** | HA/DR Writer | Generates pattern-level HA/DR documentation by synthesizing service-level HA/DR references with the donor pattern's HA/DR sections as one-shot structural examples, producing one DR strategy section at a time via Gemini 1.5 Pro. |
 
 ---
 
 ## 3. Ingestion Plane (Managed Pipelines)
 
-The Ingestion Plane handles the end-to-end processing of both unstructured content (SharePoint patterns) and structured infrastructure definitions (Terraform/CloudFormation) into Vertex AI Search. It uses managed pipelines to consolidate metadata, diagrams, text, and code schemas into a unified knowledge graph.
+The Ingestion Plane handles the end-to-end processing of both unstructured content (SharePoint patterns) and structured infrastructure definitions (Terraform/CloudFormation) into Vertex AI Search. It also maintains a dedicated data store for service-level HA/DR documentation. It uses managed pipelines to consolidate metadata, diagrams, text, and code schemas into a unified knowledge graph.
 
 ### 3.1 Design Principles
 
@@ -123,6 +140,8 @@ The Ingestion Plane handles the end-to-end processing of both unstructured conte
 5.  **Media Offloading**: Stores images reliably in GCS while updating HTML references to point to the permanent storage.
 
 > **Note (v2.0):** The Component Catalog Pipeline that previously indexed Terraform modules and Service Catalog products into Vertex AI Search has been deprecated. Component schema resolution is now performed **at inference time** via real-time lookups (see Section 3.5 and Section 4.8).
+
+> **Note (v2.1):** A new Service HA/DR Ingestion Pipeline has been added to index service-level HA/DR documentation into a dedicated Vertex AI Search data store. This enables the Serving Plane to generate grounded HA/DR sections for pattern documents (see Section 3.6 and Section 4.10).
 
 ### 3.2 End-to-End Sequence Diagram
 
@@ -300,11 +319,104 @@ graph LR
 | AWS Profile | `AWS_PROFILE` env var | `default` |
 | GitHub PAT | `GITHUB_PERSONAL_ACCESS_TOKEN` env var | Required for MCP/PyGithub |
 
+### 3.6 Service HA/DR Ingestion Pipeline
+
+The Service HA/DR Ingestion Pipeline processes service-level HA/DR documentation from SharePoint into a **dedicated** Vertex AI Search data store (`service-hadr-datastore`). Each service (e.g., Amazon RDS, AWS Lambda) has its own HA/DR documentation page that describes how the service behaves under different DR strategies during provisioning, failover, and failback scenarios.
+
+> **Key Difference from Pattern Ingestion (3.3):** This pipeline does not process architecture diagrams for visual analysis. Instead, it focuses on structured metadata extraction and hierarchical chunking by DR strategy and lifecycle phase.
+
+#### 3.6.1 Design Principles
+
+1.  **Hierarchical Chunking**: Content is split first by DR strategy heading, then by lifecycle phase heading, then by a sliding word-count window (1500 words, 200-word overlap). This preserves contextual boundaries.
+2.  **Rich Structured Metadata**: Every chunk carries `service_name`, `service_type` (Compute | Storage | Database | Network), `dr_strategy`, and `lifecycle_phase` fields. This enables precise metadata-filtered retrieval at inference time.
+3.  **HA/DR Diagram Handling**: HA/DR diagrams in the source pages are downloaded, stored in GCS, and replaced in the text with LLM-generated textual descriptions (using Gemini 1.5 Flash) so the visual knowledge is captured in the vector space.
+4.  **Separation of Concerns**: Uses a dedicated data store separate from the pattern document store. This prevents cross-contamination and enables independent scaling.
+
+#### 3.6.2 End-to-End Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Pipeline as Service HA/DR Pipeline
+    participant SP as SharePoint Client
+    participant Gemini as Gemini 1.5 Flash
+    participant GCS as Cloud Storage
+    participant ES as Vertex AI Search<br/>(HA/DR Data Store)
+
+    Pipeline->>Pipeline: Load service_catalog.json
+
+    loop For each service
+        Pipeline->>SP: fetch_page_html(service.page_url)
+        SP-->>Pipeline: raw_html
+
+        Note over Pipeline,GCS: Image Processing Phase
+        loop For each <img> tag
+            Pipeline->>SP: download_image(src)
+            SP-->>Pipeline: image_bytes
+
+            Pipeline->>Gemini: describe_diagram(image_bytes)
+            Gemini-->>Pipeline: text_description
+
+            Pipeline->>GCS: upload_blob(services/{name}/hadr-diagrams/)
+            GCS-->>Pipeline: OK
+
+            Pipeline->>Pipeline: Replace <img> with description text
+        end
+
+        Note over Pipeline,ES: Hierarchical Chunking Phase
+        Pipeline->>Pipeline: Extract plain text from HTML
+        Pipeline->>Pipeline: Split by DR Strategy heading
+        Pipeline->>Pipeline: Split each strategy by Lifecycle Phase heading
+        Pipeline->>Pipeline: Window-chunk each phase (1500w / 200w overlap)
+
+        Note over Pipeline,ES: Indexing Phase
+        loop For each chunk
+            Pipeline->>Pipeline: Attach struct_data metadata
+            Pipeline->>ES: create_document(id, content, struct_data)
+            ES-->>Pipeline: 200 OK
+        end
+    end
+```
+
+#### 3.6.3 End-to-End Flow Description
+
+1.  **Service Discovery**: The pipeline reads a service list from a JSON file (`service_catalog.json`). Each entry specifies the `service_name`, `service_description`, `service_type`, and `page_url` for the service's HA/DR documentation in SharePoint.
+2.  **HTML Extraction**: For each service, the pipeline fetches the raw HTML body from the SharePoint page URL.
+3.  **HA/DR Diagram Processing**: Unlike the pattern pipeline (which targets the first two diagrams), this pipeline processes **all** `<img>` tags in the document:
+    *   Downloads the image from SharePoint.
+    *   Sends it to **Gemini 1.5 Flash** with the prompt: *"Analyse this HA/DR architecture diagram. Describe the infrastructure components, their redundancy setup, replication flows, and failover mechanisms."*
+    *   Uploads the original image to GCS under `services/{safe_name}/hadr-diagrams/diagram_{n}.png`.
+    *   Replaces the HTML `<img>` tag with the generated description.
+4.  **Hierarchical Chunking**: The enriched plain text is split using a three-level hierarchy:
+    *   **Level 1 — DR Strategy**: Heading detection using regex patterns (`DR_STRATEGY_PATTERNS`) identifies the four DR strategies: Backup and Restore, Pilot Light On Demand, Pilot Light Cold Standby, and Warm Standby.
+    *   **Level 2 — Lifecycle Phase**: Within each strategy section, heading detection using `LIFECYCLE_PHASE_PATTERNS` splits content into: Initial Provisioning, Failover, and Failback.
+    *   **Level 3 — Word Window**: Each phase section is further split by a sliding word window (1500 words max, 200-word overlap) to stay within embedding model limits.
+5.  **Metadata Attachment**: Every chunk receives a `struct_data` dictionary containing: `service_name`, `service_description`, `service_type`, `dr_strategy`, `lifecycle_phase`, and `chunk_index`.
+6.  **Indexing**: Each chunk is upserted as a Document in the HA/DR data store using the Discovery Engine `CreateDocumentRequest` API.
+
+#### 3.6.4 Data Store Schema
+
+| Metadata Field | Type | Example | Purpose |
+|----------------|------|---------|----------|
+| `service_name` | String | `"Amazon RDS"` | Exact-match filter during retrieval |
+| `service_description` | String | `"Managed relational DB service"` | Context enrichment |
+| `service_type` | String | `"Database"` | Category filter (Compute, Storage, Database, Network) |
+| `dr_strategy` | String | `"Warm Standby"` | Strategy-scoped retrieval |
+| `lifecycle_phase` | String | `"Failover"` | Phase-level precision |
+| `chunk_index` | Integer | `3` | Ordering within a document |
+
+#### 3.6.5 Configuration
+
+| Setting | Source | Default |
+|---------|--------|---------|
+| HA/DR Data Store ID | `SERVICE_HADR_DS_ID` env var | `service-hadr-datastore` |
+| HA/DR GCS Bucket | `SERVICE_HADR_GCS_BUCKET` env var | `engen-service-hadr-images` |
+| Service List | `SERVICE_HADR_LIST` env var | `service_catalog.json` (local file) |
+
 ---
 
 ## 4. Serving Plane
 
-The Serving Plane uses a multi-agent system to analyze architecture diagrams, retrieve relevant "donor" patterns, generate comprehensive documentation, create Infrastructure-as-Code (IaC) artifacts, and publish the results to SharePoint after human verification.
+The Serving Plane uses a multi-agent system to analyze architecture diagrams, retrieve relevant "donor" patterns, generate comprehensive documentation including HA/DR sections, create Infrastructure-as-Code (IaC) artifacts, and publish the results to SharePoint after human verification.
 
 ### 4.1 Design Principles
 
@@ -315,7 +427,8 @@ The Serving Plane uses a multi-agent system to analyze architecture diagrams, re
 5.  **Artifact Generation**: Automated creation of deployable code based on authoritative interfaces ("Golden Samples") from GCS.
 6.  **Real-Time Schema Grounding**: Component specifications are grounded in live infrastructure schemas fetched at inference time from GitHub (via MCP or PyGithub) and AWS Service Catalog, replacing the previous offline Vertex AI Search catalog approach.
 7.  **Phase-Based Orchestration**: The workflow is split into discrete phases (`phase1_generate_docs`, `phase2_generate_code`) with explicit approval gates between them.
-8.  **Observability**: Centralized logging, metrics tracking, and health checks (liveness/readiness) via the `ADKAgent` framework.
+8.  **Non-Blocking HA/DR Generation**: HA/DR section generation executes after the content generation loop completes. It is wrapped in a non-blocking try/except so that failures do not prevent the main pattern document from being returned.
+9.  **Observability**: Centralized logging, metrics tracking, and health checks (liveness/readiness) via the `ADKAgent` framework.
 
 ### 4.2 Agent Swarm Architecture
 
@@ -330,6 +443,8 @@ The system consists of the following agents, orchestrating a complex workflow:
 *   **Artifact Generation Agent**: "Engineer", synthesizes both IaC and application reference code using Golden Sample templates.
 *   **Artifact Validation Agent**: "QA Engineer", validates generated code against a 6-point rubric (Syntax, Completeness, Integration, Security, Relevance, Best Practices).
 *   **Human Verifier Agent**: "Gatekeeper", manages the approval lifecycle with CloudSQL persistence and Pub/Sub notifications.
+*   **Service HA/DR Retriever**: "HA/DR Librarian", performs hybrid retrieval (metadata filter + vector search) against a dedicated `service-hadr-datastore` to fetch service-level HA/DR documentation chunks.
+*   **HA/DR Documentation Generator**: "HA/DR Writer", synthesizes service-level HA/DR references with donor pattern examples to produce pattern-level HA/DR sections via Gemini 1.5 Pro.
 
 ### 4.3 High-Level Sequence Diagram
 
@@ -364,6 +479,15 @@ sequenceDiagram
         Orch->>Rev: review_pattern(draft)
         Rev-->>Orch: {approved, critique}
     end
+
+    Note over Orch,Ret: Step 2b: HA/DR Section Generation (Non-Blocking)
+    Orch->>Orch: Extract service names from draft
+    Orch->>Ret: retrieve_all_services_hadr(services)
+    Ret-->>Orch: service_hadr_docs (per-service × per-strategy)
+    Orch->>Orch: Extract donor HA/DR sections
+    Orch->>Gen: generate_hadr_sections(4 strategies)
+    Gen-->>Orch: hadr_sections{strategy→markdown}
+    Orch->>Orch: Merge HA/DR into generated_sections
 
     Note over Orch,Verifier: Step 3: User Approval (Pattern)
     Orch-->>Client: Return sections + full_doc
@@ -430,31 +554,38 @@ sequenceDiagram
 4.  **Review**: The `Reviewer Agent` analyzes the draft against quality guidelines. It returns a score and specific critique.
 5.  **Refinement**: If the score is below threshold, the Orchestrator feeds the critique back into the `Generator Agent` for a revised draft. This repeats for up to 3 iterations.
 
+#### Phase 2b: HA/DR Section Generation (Non-Blocking)
+6.  **Service Name Extraction**: After the content generation loop completes, the Orchestrator extracts canonical service names from the generated documentation using regex matching against the `component_sources.py` alias dictionary (40+ mappings) and a curated list of common service names (AWS and GCP).
+7.  **Service HA/DR Retrieval**: For each extracted service, the `ServiceHADRRetriever` queries the dedicated `service-hadr-datastore` in Vertex AI Search using **hybrid retrieval**: a metadata filter (exact `service_name` + `dr_strategy`) combined with semantic/vector search. This returns HA/DR chunks organized as `service → strategy → [chunks]`.
+8.  **Donor HA/DR Extraction**: The Orchestrator parses the donor pattern's HTML content to extract existing HA/DR sub-sections keyed by DR strategy name, using regex-based heading detection. These serve as one-shot structural examples for the generator.
+9.  **HA/DR Generation**: The `HADRDocumentationGenerator` generates one DR strategy section at a time (Backup and Restore, Pilot Light On Demand, Pilot Light Cold Standby, Warm Standby) via Gemini 1.5 Pro. Each prompt includes the donor example, service-level reference chunks, and the new pattern's component context. The output includes per-phase summary tables showing each service's state (Active, Standby, Scaled-Down, Not-Deployed).
+10. **Non-Blocking Merge**: The generated HA/DR sections are merged into the `generated_sections` dictionary under the `HA/DR` key. If HA/DR generation fails for any reason, a placeholder message is inserted and the workflow continues normally — the main pattern document is never blocked by HA/DR failures.
+
 #### Phase 3: Governance (Point 1) & Async Doc Publishing
-6.  **Pattern Verification**: The Orchestrator returns the generated documentation to the Streamlit client. The user reviews and clicks "Approve" in the UI.
-7.  **Approval**: The Streamlit app calls the `approve_docs` endpoint. The Orchestrator updates CloudSQL and receives a `review_id`.
-8.  **Async Publishing**: It immediately spawns a background task to publish the documentation to SharePoint, using the `review_id` to track progress in CloudSQL. The workflow *does not wait* for this to finish but proceeds to artifact generation.
+11. **Pattern Verification**: The Orchestrator returns the generated documentation — including HA/DR sections — to the Streamlit client. The user reviews the pattern sections and the HA/DR content in separate expanders, then clicks "Approve" in the UI.
+12. **Approval**: The Streamlit app calls the `approve_docs` endpoint. The Orchestrator updates CloudSQL and receives a `review_id`.
+13. **Async Publishing**: It immediately spawns a background task to publish the documentation to SharePoint, using the `review_id` to track progress in CloudSQL. The workflow *does not wait* for this to finish but proceeds to artifact generation.
 
 #### Phase 4: Pattern Synthesis (Holistic Generation)
-9.  **Real-Time Schema Resolution**: The `ComponentSpecificationAgent` extracts component keywords from the documentation, normalizes them using the `component_sources.py` alias dictionary (40+ mappings), and performs a two-tier real-time lookup:
+14. **Real-Time Schema Resolution**: The `ComponentSpecificationAgent` extracts component keywords from the documentation, normalizes them using the `component_sources.py` alias dictionary (40+ mappings), and performs a two-tier real-time lookup:
     *   **Tier 1 (GitHub)**: Searches configured GitHub repositories via the MCP Server protocol (with PyGithub fallback) for matching Terraform modules, parsing `variables.tf` and `outputs.tf` files using `python-hcl2`.
     *   **Tier 2 (AWS)**: Falls back to AWS Service Catalog via `boto3` to find matching CloudFormation products with their provisioning parameters and constraints.
-10. **Comprehensive Specification**: It generates a structured dependency graph grounded in these real-world schemas, with topological ordering via `graphlib.TopologicalSorter` to determine execution order.
-11. **Golden Sample Injection**: The `ArtifactGenerationAgent` retrieves enterprise-approved "Golden Sample" IaC templates from GCS to use as few-shot examples.
-12. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window.
-13. **Automated Validation Loop**:
+15. **Comprehensive Specification**: It generates a structured dependency graph grounded in these real-world schemas, with topological ordering via `graphlib.TopologicalSorter` to determine execution order.
+16. **Golden Sample Injection**: The `ArtifactGenerationAgent` retrieves enterprise-approved "Golden Sample" IaC templates from GCS to use as few-shot examples.
+17. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window.
+18. **Automated Validation Loop**:
     *   **Validate**: The `ArtifactValidationAgent` checks the generated code against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices (Medium).
     *   **Feedback**: If issues are found, the critique is fed back to the generator.
     *   **Retry**: The generator attempts to fix the specific issues (max 3 retries).
 
 #### Phase 5: Governance (Point 2) & Async Code Publishing
-13. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review (or approved directly via the Streamlit UI).
-14. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub via the REST API (direct push to the configured branch).
-15. **Immediate Return**: The Orchestrator returns a `processing` status to the client, along with the review IDs needed to track the background tasks.
+19. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review (or approved directly via the Streamlit UI).
+20. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub via the REST API (direct push to the configured branch).
+21. **Immediate Return**: The Orchestrator returns a `processing` status to the client, along with the review IDs needed to track the background tasks.
 
 #### Phase 6: Client Polling
-16. **Status Check**: The client application (Streamlit) polls the orchestrator's `get_publish_status` endpoint every 3 seconds using the returned IDs.
-17. **Completion**: Once the background tasks update the DB status to `COMPLETED`, the orchestrator relays the final URLs for the SharePoint page and GitHub commit back to the client.
+22. **Status Check**: The client application (Streamlit) polls the orchestrator's `get_publish_status` endpoint every 3 seconds using the returned IDs.
+23. **Completion**: Once the background tasks update the DB status to `COMPLETED`, the orchestrator relays the final URLs for the SharePoint page and GitHub commit back to the client.
 
 
 ### 4.5 Response Assembly
@@ -479,6 +610,7 @@ The Orchestrator implements robust error handling for both synchronous agent int
     -   If SharePoint or GitHub API calls fail, the background worker catches the exception.
     -   It updates the CloudSQL status to `FAILED`.
     -   The client polling mechanism sees the failure and can display an error message or retry button to the user.
+-   **HA/DR Generation Fails**: The entire HA/DR generation step (service name extraction, retrieval, generation) is wrapped in a top-level try/except. If any sub-step fails, a placeholder message ("*HA/DR section generation failed. Please complete manually.*") is inserted into the `generated_sections` dictionary and the workflow continues. The pattern document is never blocked by HA/DR failures.
 ### 4.7 Multi-Channel Publishing
 
 The system separates the publishing of documentation and implementation code into distinct, asynchronous workflows. This ensures that documentation is available immediately upon approval, while code generation (which takes longer) proceeds in parallel.
@@ -702,11 +834,153 @@ sequenceDiagram
 23. **Poll Status**: The Client (`Streamlit App`) polls the Orchestrator's `get_publish_status` endpoint, which queries `CloudSQLManager` using the provided IDs.
 24. **Return Status**: The Orchestrator returns the current status (e.g., Docs=COMPLETED, Code=IN_PROGRESS) and any available URLs.
 
-## 4.9 Client-Side Design: Streamlit App
+### 4.9 HA/DR Documentation Generation Workflow
+
+This workflow generates the High Availability / Disaster Recovery (HA/DR) section of a pattern document by synthesizing service-level HA/DR reference documentation with donor pattern examples. It executes as **Step 3** within `run_phase1_docs`, after the content generation loop completes but before the documentation is returned to the user.
+
+#### 4.9.1 System Components
+
+| Component | Responsibility |
+|-----------|----------------|
+| **OrchestratorAgent** | Coordinates the HA/DR generation flow: extracts service names, calls the retriever, parses donor sections, invokes the generator, and merges HA/DR output into `generated_sections`. Wraps the entire flow in try/except for non-blocking behavior. |
+| **ServiceHADRRetriever** | Queries the `service-hadr-datastore` in Vertex AI Search using hybrid retrieval (metadata filter + vector search). Returns chunks organized as `service_name → dr_strategy → [chunks]`. Each chunk carries structured metadata including `service_name`, `service_type`, `dr_strategy`, and `lifecycle_phase`. |
+| **HADRDocumentationGenerator** | Takes service-level HA/DR chunks, donor pattern HA/DR sections (one-shot), and pattern context. Generates one DR strategy section at a time via Gemini 1.5 Pro. Produces Markdown with per-phase summary tables showing each service's state. |
+| **Vertex AI Search (HA/DR Data Store)** | Dedicated data store containing service-level HA/DR documentation chunks with structured metadata for precise filtered retrieval. Populated by the Service HA/DR Ingestion Pipeline (Section 3.6). |
+
+#### 4.9.2 Component Diagram
+
+```mermaid
+graph TD
+    subgraph "Orchestrator (run_phase1_docs — Step 3)"
+        Orch[Orchestrator Agent]
+        Extract[Extract Service Names<br/>regex + component_sources.py]
+        Merge[Merge into generated_sections]
+    end
+
+    subgraph "HA/DR Retrieval"
+        Retriever[ServiceHADRRetriever]
+        HADRDS[(Vertex AI Search<br/>service-hadr-datastore)]
+    end
+
+    subgraph "HA/DR Generation"
+        Generator[HADRDocumentationGenerator]
+        Gemini[Gemini 1.5 Pro]
+    end
+
+    subgraph "Donor Context"
+        DonorHTML[Donor Pattern HTML]
+        DonorParse[extract_donor_hadr_sections]
+    end
+
+    %% Flow
+    Orch -->|doc_text| Extract
+    Extract -->|service_names| Retriever
+    Retriever -->|metadata filter + vector| HADRDS
+    HADRDS -->|service_hadr_docs| Retriever
+    Retriever -->|service→strategy→chunks| Orch
+
+    DonorHTML --> DonorParse
+    DonorParse -->|donor_hadr_sections| Orch
+
+    Orch -->|pattern_context + donor + service_docs| Generator
+    Generator -->|prompt per strategy| Gemini
+    Gemini -->|markdown section| Generator
+    Generator -->|hadr_sections: strategy→text| Orch
+    Orch --> Merge
+```
+
+#### 4.9.3 Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orch as Orchestrator Agent
+    participant Extract as Service Name Extractor
+    participant Ret as ServiceHADRRetriever
+    participant HADRDS as Vertex AI Search<br/>(HA/DR Data Store)
+    participant DonorParse as Donor HA/DR Parser
+    participant Gen as HADRDocumentationGenerator
+    participant Gemini as Gemini 1.5 Pro
+
+    Note over Orch,Gemini: Step 3: HA/DR Section Generation (after content gen loop)
+    
+    Orch->>Extract: _extract_service_names_from_doc(doc_text)
+    Extract->>Extract: Regex match against COMPONENT_TYPE_ALIASES
+    Extract->>Extract: Match common service names (AWS+GCP)
+    Extract-->>Orch: service_names[] (e.g. ["Amazon RDS", "AWS Lambda"])
+
+    Orch->>Ret: retrieve_all_services_hadr(service_names)
+    
+    loop For each service × each DR strategy
+        Ret->>HADRDS: SearchRequest(filter=service_name+dr_strategy, query=semantic)
+        HADRDS-->>Ret: SearchResponse (extractive answers + metadata)
+    end
+    Ret-->>Orch: service_hadr_docs {svc→strategy→[chunks]}
+
+    Orch->>DonorParse: extract_donor_hadr_sections(donor_html)
+    DonorParse-->>Orch: donor_hadr_sections {strategy→text}
+
+    Orch->>Orch: Build pattern_context (title, solution, services)
+
+    loop For each DR strategy (4 strategies)
+        Orch->>Gen: _build_hadr_prompt(strategy, donor, service_docs, context)
+        Gen->>Gemini: generate_content(prompt, temp=0.3)
+        Gemini-->>Gen: markdown section with summary tables
+        Gen-->>Orch: hadr_sections[strategy] = markdown
+    end
+
+    Orch->>Orch: _format_hadr_sections() → combine with --- separators
+    Orch->>Orch: generated_sections["HA/DR"] = formatted_hadr
+    
+    Note over Orch: Non-blocking: if any step fails,<br/>placeholder inserted and workflow continues
+```
+
+#### 4.9.4 Step-by-Step Explanation
+
+1.  **Service Name Extraction**: The Orchestrator calls `_extract_service_names_from_doc()` which performs a two-pass extraction:
+    *   **Pass 1 — Alias Matching**: Iterates through the 40+ entries in `COMPONENT_TYPE_ALIASES` from `component_sources.py`, matching each alias as a whole word in the document text. Matches are normalized to display names (e.g., "postgres" → "Amazon RDS").
+    *   **Pass 2 — Common Name Matching**: Checks for full service names (e.g., "Amazon RDS", "Cloud SQL") directly in the text.
+2.  **Bulk HA/DR Retrieval**: The `ServiceHADRRetriever.retrieve_all_services_hadr()` method queries the Vertex AI Search HA/DR data store for every combination of `service_name × dr_strategy` (typically 4–8 services × 4 strategies = 16–32 queries). Each query uses:
+    *   **Metadata filter**: `service_name = "{name}" AND dr_strategy = "{strategy}"` to prevent cross-contamination.
+    *   **Semantic query**: `"{service_name} HA/DR {strategy} behaviour during provisioning failover failback"` to rank the filtered chunks.
+    *   **Extractive content**: Returns up to 5 extractive answers and 5 extractive segments per query.
+3.  **Donor HA/DR Parsing**: The `HADRDocumentationGenerator.extract_donor_hadr_sections()` static method uses regex to find Markdown `##`/`###` headings or HTML `<h2>`/`<h3>` tags matching the four DR strategy names, and captures all content between consecutive strategy headings.
+4.  **Per-Strategy Generation**: The `HADRDocumentationGenerator.generate_hadr_sections()` method iterates through the four DR strategies and generates each section independently. This design allows:
+    *   **Prompt focus**: Each prompt contains only the service references relevant to one strategy.
+    *   **Independent retry**: A failed strategy generation doesn't block others.
+    *   **Controlled token usage**: Each prompt stays within the Gemini context window.
+5.  **Prompt Structure**: Each prompt includes:
+    *   **Role instruction**: "You are a Principal Cloud Architect specialising in HA/DR."
+    *   **Donor example** (one-shot): The corresponding section from the donor pattern, providing structural and stylistic guidance.
+    *   **Service-level references**: Per-service HA/DR chunks for this specific strategy.
+    *   **Pattern context**: Title, solution overview, and service list of the new pattern.
+    *   **Output format**: Requires three sub-sections (Initial Provisioning, Failover, Failback) each with a summary table showing per-service state.
+6.  **Output Merge**: The four generated sections are combined using `_format_hadr_sections()` which joins them with `---` separators under a top-level `## High Availability / Disaster Recovery` heading. The result is stored in `generated_sections["HA/DR"]`.
+7.  **Non-Blocking Guarantee**: The entire Step 3 is wrapped in a try/except at the Orchestrator level. If any sub-step raises an exception, the error is logged and a placeholder string is inserted: "*HA/DR section generation failed. Please complete manually.*"
+
+#### 4.9.5 DR Strategies Covered
+
+| DR Strategy | Description | Typical RTO | Typical RPO |
+|-------------|-------------|-------------|-------------|
+| **Backup and Restore** | All resources deployed from backups after a disaster | Hours | Hours (last backup) |
+| **Pilot Light On Demand** | Minimal core services running; full infrastructure scaled up on demand | 10–30 minutes | Minutes |
+| **Pilot Light Cold Standby** | Core services in standby with data replication; compute scaled up on failover | 5–15 minutes | Near-zero |
+| **Warm Standby** | Fully running DR region at reduced capacity; scaled up on failover | Minutes | Near-zero |
+
+#### 4.9.6 Configuration
+
+| Setting | Source | Default |
+|---------|--------|---------|
+| HA/DR Data Store ID | `SERVICE_HADR_DS_ID` env var | `service-hadr-datastore` |
+| HA/DR GCS Bucket | `SERVICE_HADR_GCS_BUCKET` env var | `engen-service-hadr-images` |
+| GCP Project ID | `PROJECT_ID` env var | Required |
+| Vertex AI Location | `LOCATION` env var | `us-central1` |
+
+## 4.10 Client-Side Design: Streamlit App
 
 The Streamlit application serves as the interactive frontend for the EnGen system, implementing a stateful "Wizard" interface that guides the user through the multi-stage artifact generation process. Unlike a simple request-response interface, the app uses **`st.session_state`** as a client-side state machine to handle the Human-in-the-Loop (HITL) requirements for both documentation and code verification.
 
-### 4.9.1 State Management Architecture
+### 4.10.1 State Management Architecture
 
 To support the asynchronous and multi-step nature of the workflow, the application preserves context (generated artifacts, review IDs, status) across re-runs.
 
@@ -717,18 +991,18 @@ To support the asynchronous and multi-step nature of the workflow, the applicati
 - `code_data`: Stores the generated artifact bundle (IaC templates, boilerplate code) for display.
 - `code_review_id`: The ID returned after code approval, used to track GitHub publishing.
 
-### 4.9.2 Workflow Integration Phases
+### 4.10.2 Workflow Integration Phases
 
 The application interacts with specific Orchestrator endpoints that correspond to the workflow lifecycle:
 
 **1. Phase 1: Input & Document Generation**
    - **User Action**: Uploads an architecture diagram image and enters a title/prompt.
    - **API Call**: `POST /invoke` with task `phase1_generate_docs`
-   - **System**: Orchestrator invokes Generator (Vision analysis), Retriever (donor lookup), Generator+Reviewer loop (content refinement, max 3 iterations).
-   - **Result**: Returns sections and full markdown content. App transitions to `DOC_REVIEW`.
+   - **System**: Orchestrator invokes Generator (Vision analysis), Retriever (donor lookup), Generator+Reviewer loop (content refinement, max 3 iterations), and HA/DR section generation (ServiceHADRRetriever + HADRDocumentationGenerator).
+   - **Result**: Returns sections (including HA/DR) and full markdown content. App transitions to `DOC_REVIEW`.
 
 **2. Phase 2: Document Human Review**
-   - **User Action**: Reviews rendered Markdown in the UI. Clicks "Approve".
+   - **User Action**: Reviews rendered Markdown in the UI. Pattern documentation sections are shown in one expander; HA/DR sections are shown in a separate "🛡️ HA/DR Documentation" expander. Clicks "Approve".
    - **API Call**: `POST /invoke` with task `approve_docs`
    - **System**: Orchestrator updates CloudSQL review status, triggers async SharePoint publishing via background task.
    - **Result**: Returns `doc_review_id`. App transitions to `CODE_GEN`.
@@ -751,7 +1025,7 @@ The application interacts with specific Orchestrator endpoints that correspond t
    - **Display**: Shows real-time progress for "Documentation Publishing (SharePoint)" and "Code Publishing (GitHub)".
    - **Termination**: Loop ends when both statuses are `COMPLETED` or `FAILED`.
 
-### 4.9.3 Integration Diagram
+### 4.10.3 Integration Diagram
 
 ```mermaid
 sequenceDiagram
@@ -795,10 +1069,12 @@ sequenceDiagram
 EnGen represents a production-ready implementation of a knowledge-augmented documentation system that combines:
 
 1. **Robust Data Ingestion**: Linear pipeline architecture eliminates distributed complexity while ensuring data consistency
-2. **Intelligent Retrieval**: Semantic search and vector similarity find the most relevant patterns
-3. **Multi-Agent Serving**: Specialized agents collaborate to produce high-quality documentation
-4. **Real-Time Schema Grounding**: Live infrastructure lookups via GitHub MCP and AWS Service Catalog ensure generated artifacts always reflect actual module interfaces
-5. **Quality Assurance**: Reflection loop with multi-rubric automated validation ensures output meets production standards
+2. **Service HA/DR Ingestion**: Dedicated pipeline indexes service-level HA/DR documentation with rich structured metadata for precise filtered retrieval
+3. **Intelligent Retrieval**: Semantic search and vector similarity find the most relevant patterns
+4. **Multi-Agent Serving**: Specialized agents collaborate to produce high-quality documentation
+5. **HA/DR Documentation Generation**: Automated synthesis of pattern-level HA/DR sections grounded in service-level references and donor pattern examples
+6. **Real-Time Schema Grounding**: Live infrastructure lookups via GitHub MCP and AWS Service Catalog ensure generated artifacts always reflect actual module interfaces
+7. **Quality Assurance**: Reflection loop with multi-rubric automated validation ensures output meets production standards
 
 ### Key Achievements
 
@@ -809,6 +1085,7 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 - **Resilience**: Retry logic, exponential backoff, and health checks (liveness/readiness) ensure 99%+ success rate
 - **Scalability**: Handles 1000+ patterns and concurrent agent requests
 - **Integration**: Multi-channel publishing to SharePoint (docs) and GitHub (code) with async status tracking
+- **HA/DR Coverage**: Automated generation of HA/DR sections covering four DR strategies with per-phase summary tables, grounded in service-level documentation
 
 ### Production Readiness
 
@@ -823,7 +1100,9 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 | **SharePoint Integration**| ✅ Complete | 90% | Supports both ingestion and automated publishing with Mermaid diagram rendering via Kroki. |
 | **GitHub Integration** | ✅ Complete | 90% | Real-time module lookup (MCP + PyGithub) and automated code publishing (REST API). |
 | **AWS Integration** | ✅ Complete | 85% | Service Catalog product discovery via boto3 with in-memory caching. |
-| **Error Handling** | ✅ Complete | 90% | Retry logic, exponential backoff, and component-level error boundaries. |
+| **HA/DR Ingestion** | ✅ Complete | 85% | Service-level HA/DR pipeline with hierarchical chunking and structured metadata. Dedicated Vertex AI Search data store. |
+| **HA/DR Generation** | ✅ Complete | 80% | Generates four DR strategy sections per pattern with donor one-shot + service-level grounding. Non-blocking integration with orchestrator. |
+| **Error Handling** | ✅ Complete | 90% | Retry logic, exponential backoff, and component-level error boundaries. HA/DR generation wrapped in non-blocking try/except. |
 | **Monitoring** | ⚠️ Partial | 60% | Basic logging and agent metrics; needs OpenTelemetry/Dashboards. |
 | **Testing** | ⚠️ Partial | 70% | Unit tests exist; end-to-end integration tests needed. |
 
@@ -863,6 +1142,9 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 - Section generation: 8-12 seconds per section
 - Review: 4-6 seconds per draft
 - Full document (4 sections, 2 revisions avg): 90-120 seconds
+- HA/DR service retrieval: 2-4 seconds per service × strategy query
+- HA/DR section generation: 10-15 seconds per DR strategy (4 strategies total)
+- Full HA/DR generation (end-to-end): 60-90 seconds for a typical 5-service pattern
 
 **Resource Utilization**:
 - Ingestion Service: 2-4 GB RAM, 1-2 vCPU
@@ -882,27 +1164,28 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 
 ### Key Dependencies
 
-| Package | Purpose | Added in v2.0 |
-|---------|---------|---------------|
-| `FastAPI` / `uvicorn` | Agent HTTP servers | No |
-| `pydantic` | Request/response models | No |
-| `aiohttp` | Async A2A communication | No |
-| `google-cloud-aiplatform` | Vertex AI (Gemini LLM) | No |
-| `google-cloud-discoveryengine` | Vertex AI Search (RAG) | No |
-| `google-cloud-storage` | GCS (golden samples, images) | No |
-| `google-cloud-pubsub` | Pub/Sub (notifications) | No |
-| `sqlalchemy` / `pg8000` | CloudSQL (state management) | No |
-| `msal` | SharePoint authentication | No |
-| `streamlit` | Frontend UI | No |
-| `PyGithub` | GitHub API fallback for module discovery | **Yes** |
-| `boto3` | AWS Service Catalog client | **Yes** |
-| `python-hcl2` | Terraform HCL parsing | **Yes** |
-| `python-dotenv` | Environment variable management | **Yes** |
+| Package | Purpose | Added in |
+|---------|---------|----------|
+| `FastAPI` / `uvicorn` | Agent HTTP servers | v1.0 |
+| `pydantic` | Request/response models | v1.0 |
+| `aiohttp` | Async A2A communication | v1.0 |
+| `google-cloud-aiplatform` | Vertex AI (Gemini LLM) | v1.0 |
+| `google-cloud-discoveryengine` | Vertex AI Search (RAG + HA/DR data store) | v1.0 |
+| `google-cloud-storage` | GCS (golden samples, images, HA/DR diagrams) | v1.0 |
+| `google-cloud-pubsub` | Pub/Sub (notifications) | v1.0 |
+| `sqlalchemy` / `pg8000` | CloudSQL (state management) | v1.0 |
+| `msal` | SharePoint authentication | v1.0 |
+| `streamlit` | Frontend UI | v1.0 |
+| `beautifulsoup4` | HTML parsing (ingestion pipelines) | v1.0 |
+| `PyGithub` | GitHub API fallback for module discovery | **v2.0** |
+| `boto3` | AWS Service Catalog client | **v2.0** |
+| `python-hcl2` | Terraform HCL parsing | **v2.0** |
+| `python-dotenv` | Environment variable management | **v2.0** |
 
 ---
 
 **Document Control**  
-Last Updated: February 24, 2026  
+Last Updated: April 3, 2026  
 Review Cycle: Quarterly  
 Owner: EnGen Development Team  
 Classification: Internal Use

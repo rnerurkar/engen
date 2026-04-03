@@ -32,3 +32,7 @@ class Config:
     GCS_CONFIG_BUCKET = os.getenv("GCS_CONFIG_BUCKET", "engen-config")
     GCS_IAC_TEMPLATES_BUCKET = os.getenv("GCS_IAC_TEMPLATES_BUCKET", "engen-iac-templates")
     COMPONENT_MAPPING_FILE = os.getenv("COMPONENT_MAPPING_FILE", "component_mapping.json")
+
+    # Service HA/DR Configuration
+    SERVICE_HADR_DATA_STORE_ID = os.getenv("SERVICE_HADR_DS_ID", "service-hadr-datastore")
+    SERVICE_HADR_GCS_BUCKET = os.getenv("SERVICE_HADR_GCS_BUCKET", "engen-service-hadr-images")

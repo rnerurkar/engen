@@ -4,6 +4,8 @@ import asyncio
 import base64
 import json
 import logging
+import re
+from typing import Dict
 
 # Add path hacks to support imports from sibling services
 current_file_path = os.path.abspath(__file__)
@@ -21,6 +23,8 @@ from lib.a2a_client import A2AClient, A2AError
 from lib.sharepoint_publisher import SharePointPublisher, SharePointPageConfig
 from lib.github_publisher import GitHubMCPPublisher
 from lib.cloudsql_client import CloudSQLManager, logger as sql_logger
+from core.pattern_synthesis.service_hadr_retriever import ServiceHADRRetriever
+from core.pattern_synthesis.hadr_generator import HADRDocumentationGenerator
 from config import Config
 
 class OrchestratorAgent(ADKAgent):
@@ -51,6 +55,17 @@ class OrchestratorAgent(ADKAgent):
              db_user=os.environ.get("DB_USER", "postgres"),
              db_pass=os.environ.get("DB_PASS", "postgres"),
              db_name=os.environ.get("DB_NAME", "reviews_db")
+        )
+
+        # HA/DR Documentation Generation
+        self.hadr_retriever = ServiceHADRRetriever(
+            project_id=Config.PROJECT_ID,
+            location="global",
+            data_store_id=Config.SERVICE_HADR_DATA_STORE_ID,
+        )
+        self.hadr_generator = HADRDocumentationGenerator(
+            project_id=Config.PROJECT_ID,
+            location=Config.LOCATION,
         )
 
     async def handle(self, req: AgentRequest) -> AgentResponse:
@@ -124,6 +139,27 @@ class OrchestratorAgent(ADKAgent):
             review_resp = await self.client.call_agent(Config.REVIEWER_URL, "review_pattern", {"sections": generated_sections, "donor_context": donor_context})
             critique_feedback = review_resp.get("result", {})
             ai_approved = critique_feedback.get("approved", False)
+
+        # --- HA/DR SECTION GENERATION ---
+        self.logger.info("--- Step 3: GENERATING HA/DR SECTIONS ---")
+        try:
+            hadr_sections = self._generate_hadr_sections(
+                generated_sections=generated_sections or {},
+                donor_context=donor_context,
+            )
+            # Merge HA/DR sections into the generated sections
+            if hadr_sections:
+                if generated_sections is None:
+                    generated_sections = {}
+                generated_sections["HA/DR"] = self._format_hadr_sections(hadr_sections)
+        except Exception as e:
+            self.logger.error(f"HA/DR generation failed (non-blocking): {e}", exc_info=True)
+            # Non-blocking: we still return the pattern doc without HA/DR
+            if generated_sections is None:
+                generated_sections = {}
+            generated_sections["HA/DR"] = (
+                "*HA/DR section generation failed. Please complete manually.*"
+            )
 
         full_doc = "\n\n".join([f"# {k}\n{v}" for k, v in (generated_sections or {}).items()])
 
@@ -239,6 +275,137 @@ class OrchestratorAgent(ADKAgent):
             except Exception as e:
                 self.logger.error(f"Status check failed: {e}")
         return statuses
+
+    # ─── HA/DR Generation Helpers ────────────────────────────────────────
+
+    def _generate_hadr_sections(
+        self,
+        generated_sections: Dict,
+        donor_context: Dict,
+    ) -> Dict[str, str]:
+        """
+        Generates HA/DR documentation sections by:
+          1. Extracting service names from the generated doc sections
+          2. Retrieving per-service HA/DR docs from Vertex AI Search
+          3. Extracting the donor pattern's HA/DR sections as one-shot examples
+          4. Calling HADRDocumentationGenerator for each DR strategy
+        """
+        # 1. Build a simple text block from the generated sections to extract service names
+        doc_text = "\n".join(str(v) for v in generated_sections.values())
+
+        # Use the Generator Agent to extract service names (lightweight LLM call)
+        service_names = self._extract_service_names_from_doc(doc_text)
+        if not service_names:
+            self.logger.warning("No service names extracted — skipping HA/DR generation")
+            return {}
+
+        self.logger.info(f"Extracted service names for HA/DR: {service_names}")
+
+        # 2. Retrieve service-level HA/DR docs
+        service_hadr_docs = self.hadr_retriever.retrieve_all_services_hadr(
+            service_names=service_names,
+        )
+
+        # 3. Extract donor pattern HA/DR sections
+        donor_html = donor_context.get("html_content", "") if donor_context else ""
+        donor_hadr_sections = HADRDocumentationGenerator.extract_donor_hadr_sections(
+            donor_html
+        )
+
+        # 4. Build pattern context
+        pattern_context = {
+            "title": generated_sections.get("Executive Summary", "")[:200],
+            "solution_overview": generated_sections.get(
+                "Solution Architecture",
+                generated_sections.get("Solution", ""),
+            )[:2000],
+            "services": service_names,
+        }
+
+        # 5. Generate
+        hadr_sections = self.hadr_generator.generate_hadr_sections(
+            pattern_context=pattern_context,
+            donor_hadr_sections=donor_hadr_sections,
+            service_hadr_docs=service_hadr_docs,
+        )
+
+        return hadr_sections
+
+    def _extract_service_names_from_doc(self, doc_text: str) -> list:
+        """
+        Lightweight extraction of canonical service names from the pattern
+        documentation.  Falls back to regex-based extraction if the LLM
+        is not available.
+        """
+        from lib.component_sources import COMPONENT_TYPE_ALIASES
+
+        # Quick regex pass: look for known service keywords in the doc
+        doc_lower = doc_text.lower()
+        found_services = set()
+
+        # Build a reverse map: canonical_type → friendly display name
+        # We want to return recognisable names like "Amazon RDS", "AWS Lambda"
+        canonical_to_display = {
+            "s3_bucket": "Amazon S3",
+            "lambda_function": "AWS Lambda",
+            "api_gateway": "Amazon API Gateway",
+            "dynamodb_table": "Amazon DynamoDB",
+            "rds_instance": "Amazon RDS",
+            "ecs_service": "Amazon ECS",
+            "eks_cluster": "Amazon EKS",
+            "sqs_queue": "Amazon SQS",
+            "sns_topic": "Amazon SNS",
+            "vpc": "Amazon VPC",
+            "cloudfront": "Amazon CloudFront",
+            "load_balancer": "Elastic Load Balancer",
+            "elasticache": "Amazon ElastiCache",
+            "iam_role": "AWS IAM",
+            "waf": "AWS WAF",
+            "kms_key": "AWS KMS",
+            "secrets_manager": "AWS Secrets Manager",
+            "codepipeline": "AWS CodePipeline",
+            "ecr_repository": "Amazon ECR",
+            "step_function": "AWS Step Functions",
+        }
+
+        for alias, canonical in COMPONENT_TYPE_ALIASES.items():
+            # Match the alias as a whole word in the doc text
+            pattern = r'\b' + re.escape(alias.replace('_', ' ')) + r'\b'
+            if re.search(pattern, doc_lower):
+                display_name = canonical_to_display.get(canonical, canonical)
+                found_services.add(display_name)
+
+        # Also check for common full service names
+        common_names = [
+            "Amazon RDS", "Amazon S3", "AWS Lambda", "Amazon ECS",
+            "Amazon EKS", "Amazon DynamoDB", "Amazon SQS", "Amazon SNS",
+            "Amazon ElastiCache", "Amazon CloudFront", "Amazon API Gateway",
+            "Amazon VPC", "AWS WAF", "AWS KMS", "Amazon ECR",
+            "AWS Step Functions", "Cloud SQL", "Cloud Run", "Cloud Storage",
+            "Cloud Functions", "Cloud Pub/Sub", "Cloud CDN",
+        ]
+        for name in common_names:
+            if name.lower() in doc_lower:
+                found_services.add(name)
+
+        return list(found_services)
+
+    @staticmethod
+    def _format_hadr_sections(hadr_sections: Dict[str, str]) -> str:
+        """
+        Combine the four individual DR strategy sections into a single
+        Markdown block suitable for inclusion in the pattern document.
+        """
+        parts = ["## High Availability / Disaster Recovery\n"]
+        for strategy in HADRDocumentationGenerator.DR_STRATEGIES:
+            section_text = hadr_sections.get(strategy, "")
+            if section_text:
+                parts.append(section_text)
+            else:
+                parts.append(
+                    f"## {strategy}\n\n*Section not generated.*\n"
+                )
+        return "\n\n---\n\n".join(parts)
 
     async def run_workflow_loop(self, payload):
         """Legacy loop"""

@@ -82,10 +82,21 @@ def main():
     elif st.session_state.step == "DOC_REVIEW":
         st.subheader("📝 Review Documentation")
         data = st.session_state.doc_data
+        sections = data.get("sections", {})
         
-        # Display Docs
-        with st.expander("Show Generated Documentation", expanded=True):
-            st.markdown(data.get("full_doc", ""))
+        # Display main pattern sections (excluding HA/DR)
+        with st.expander("Pattern Documentation", expanded=True):
+            for key, val in sections.items():
+                if key != "HA/DR":
+                    st.markdown(f"# {key}\n{val}")
+
+        # Display HA/DR section separately with its own expander
+        hadr_content = sections.get("HA/DR", "")
+        if hadr_content:
+            with st.expander("🛡️ HA/DR Documentation", expanded=True):
+                st.markdown(hadr_content)
+        else:
+            st.info("No HA/DR sections were generated for this pattern.")
             
         col1, col2 = st.columns(2)
         with col1:
