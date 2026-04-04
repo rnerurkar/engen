@@ -44,34 +44,58 @@ GitHub's official MCP Server (published as `@modelcontextprotocol/server-github`
 
 ---
 
-## Setup Option 1: Local Development (Your Laptop)
+## Setup Option 1: Local Development (Running from VS Code Terminal)
 
-When you run agents locally (e.g., via `python -m google.adk web` or a simple Python script), the GitHub MCP Server runs as a **child process** on your machine, communicating with your agent over **stdio** (standard input/output pipes).
+When you run agents locally — typically by opening a **VS Code terminal** and running `python -m google.adk web` or a standalone Python script — the GitHub MCP Server runs as a **child process on your workstation**. It communicates with your agent over **stdio** (standard input/output pipes): your Python process spawns the MCP server as a subprocess, and the two exchange JSON messages through the subprocess's stdin/stdout.
+
+This is the simplest setup because everything runs on your machine. There's no cloud infrastructure involved; the only external call is from the MCP Server process to `github.com` over HTTPS.
 
 ### How It Works
 
 ```
-┌─────────────────────────────────────────────┐
-│  Your Laptop                                │
-│                                             │
-│  ┌───────────────┐    stdio    ┌─────────┐  │
-│  │  Python Agent  │◄──────────►│ GitHub  │  │
-│  │  (MCP Client)  │  (pipes)   │  MCP    │  │
-│  │               │            │ Server  │  │
-│  └───────────────┘            │ (Node)  │  │
-│                               └────┬────┘  │
-│                                    │       │
-└────────────────────────────────────┼───────┘
-                                     │ HTTPS
-                                     ▼
-                              GitHub API (github.com)
+┌────────────────────────────── VS Code ──────────────────────────────┐
+│                                                                     │
+│  VS Code Terminal (PowerShell)                                      │
+│  > python -m google.adk web                                        │
+│                                                                     │
+│  ┌─────────────────────────┐                                        │
+│  │  Python Process         │                                        │
+│  │  (Your Agent Code)      │                                        │
+│  │                         │     spawns subprocess                  │
+│  │  ADK MCPToolset or      │─────────────────────┐                  │
+│  │  manual MCP Client      │                     │                  │
+│  │                         │   stdio (pipes)      │                  │
+│  │  mcp_session.call_tool  │◄───────────────►┌───┴───────────┐     │
+│  │  ("search_code", ...)   │  JSON messages  │ npx process    │     │
+│  │                         │  over stdin/out │ running GitHub │     │
+│  └─────────────────────────┘                 │ MCP Server     │     │
+│                                              │ (Node.js)      │     │
+│                                              └───────┬───────┘     │
+│                                                      │             │
+└──────────────────────────────────────────────────────┼─────────────┘
+                                                       │ HTTPS
+                                                       ▼
+                                             GitHub API (github.com)
 ```
+
+**What happens step by step when you start the agent from VS Code terminal:**
+
+1. You open a PowerShell terminal in VS Code (Ctrl+`` ` ``), activate the venv, and run your agent.
+2. Your Python code (via ADK's `MCPToolset` or a manual `stdio_client`) tells the OS to spawn a new process: `npx -y @modelcontextprotocol/server-github`.
+3. `npx` downloads the GitHub MCP Server package (Node.js app) if not already cached, then starts it.
+4. The MCP Server process's stdin and stdout are connected to your Python process via OS pipes — they exchange JSON-RPC messages through these pipes.
+5. Your Python code sends an `initialize` message; the MCP Server responds with its list of available tools.
+6. When the agent decides it needs to search GitHub (e.g., find a Terraform module), it calls `session.call_tool("search_code", {...})`. This sends a JSON-RPC request through the pipe to the MCP Server.
+7. The MCP Server receives the request, makes an HTTPS call to `api.github.com` using the Personal Access Token you provided, and returns the result back through the pipe.
+8. Your Python code receives the result and continues.
+
+The MCP Server process stays alive for the duration of your agent's session and is automatically killed when the session ends.
 
 ### Step-by-Step Setup
 
 #### Prerequisites
 
-1. **Node.js** (v18 or later) — The GitHub MCP Server is a Node.js application.
+1. **Node.js** (v18 or later) — The GitHub MCP Server is a Node.js application that runs locally.
    ```powershell
    # Check if installed
    node --version
@@ -80,7 +104,7 @@ When you run agents locally (e.g., via `python -m google.adk web` or a simple Py
    winget install OpenJS.NodeJS.LTS
    ```
 
-2. **npx** — Comes bundled with Node.js. Used to run the MCP server without installing it globally.
+2. **npx** — Comes bundled with Node.js. Used to download and run the MCP server without installing it globally. The first time it runs, it downloads the package; subsequent runs use the cached version.
    ```powershell
    npx --version
    ```
@@ -93,17 +117,19 @@ When you run agents locally (e.g., via `python -m google.adk web` or a simple Py
 
 #### Configuration
 
-Set your GitHub token as an environment variable:
+Set your GitHub token as an environment variable **in the VS Code terminal** before starting the agent:
 
 ```powershell
-# PowerShell (current session)
+# PowerShell (current terminal session only — disappears when you close the terminal)
 $env:GITHUB_TOKEN = "ghp_your_token_here"
 
-# Or permanently via system environment variables
+# Or permanently (persists across all future terminals)
 [System.Environment]::SetEnvironmentVariable("GITHUB_TOKEN", "ghp_your_token_here", "User")
 ```
 
-#### Option A: Using Google ADK's Built-In MCP Support
+> **Tip:** If you set the variable permanently, you need to restart VS Code (or open a new terminal) for it to take effect.
+
+#### Option A: Using Google ADK's Built-In MCP Support (Recommended for Local Dev)
 
 If you're using Google's ADK framework (which EnGen is built on), you can wire the MCP Server directly into your agent definition. The ADK handles starting the server process and maintaining the session automatically.
 
@@ -137,16 +163,17 @@ agent = LlmAgent(
 )
 ```
 
-When the agent starts, ADK:
-1. Spawns the GitHub MCP Server as a child process (runs `npx -y @modelcontextprotocol/server-github`)
-2. Connects to it over stdio pipes
-3. Discovers all available tools (`search_code`, `get_file_contents`, etc.)
-4. Makes them available as callable functions in the agent's tool list
-5. When the agent decides it needs to search GitHub, it calls the tool, and ADK routes the request to the MCP Server transparently
+When you run this from VS Code terminal (`python -m google.adk web`), ADK:
+1. Spawns the GitHub MCP Server as a **child process** in the background (runs `npx -y @modelcontextprotocol/server-github`)
+2. Connects to it over **stdio pipes** (the same technique as piping commands in PowerShell, but with JSON messages)
+3. Sends an `initialize` handshake and discovers all available tools (`search_code`, `get_file_contents`, etc.)
+4. Wraps each MCP tool as a Python-callable function and adds them to the agent's tool list
+5. When the agent decides it needs to search GitHub, it calls the tool — ADK serializes the request as JSON, pipes it to the MCP Server, waits for the response, and deserializes it back
+6. The MCP Server process is automatically killed when `adk web` shuts down
 
 #### Option B: Manual MCP Session (Without ADK)
 
-If you're not using ADK (or need more control), you can create an MCP session manually:
+If you're running a standalone Python script from the VS Code terminal (not using `adk web`), you can create the MCP session manually. This is useful for testing or debugging the GitHub MCP Client in isolation:
 
 ```python
 from mcp import ClientSession, StdioServerParameters
@@ -197,7 +224,17 @@ This is simpler to set up but loses the benefits of MCP (standardization, tool d
 
 ## Setup Option 2: Remote Deployment (Vertex AI Agent Engine on GCP)
 
-When agents are deployed to **Vertex AI Agent Engine** (formerly called Reasoning Engine), they run inside a managed container on Google Cloud. The MCP setup is different because there's no "local laptop" to run a child process on.
+When agents are deployed to **Vertex AI Agent Engine** (formerly called Reasoning Engine), they run inside a managed container on Google Cloud. They connect to the **GitHub SaaS MCP Server** — a hosted service operated by GitHub itself, accessible over the internet via HTTPS. You do **not** need to run, deploy, or manage the MCP server yourself.
+
+### What Is the GitHub SaaS MCP Server?
+
+GitHub provides a **hosted, cloud-based MCP endpoint** as part of its platform. Instead of spawning a local Node.js process (like local development does), your agent connects to GitHub's server over the network using the **Streamable HTTP** transport protocol. This is the same infrastructure that powers MCP integrations in tools like GitHub Copilot, VS Code, and other MCP-enabled clients.
+
+Key characteristics:
+- **No self-hosting** — GitHub runs the server. You don't deploy anything to Cloud Run, and you don't bundle Node.js in your container.
+- **Always up to date** — GitHub maintains the server with the latest tool definitions and API coverage.
+- **OAuth-based authentication** — Uses a GitHub PAT (Personal Access Token) or a GitHub App for authentication, passed as a Bearer token in the HTTP request.
+- **Same tools** — The SaaS server exposes the same tools as the local server (`search_code`, `get_file_contents`, `push_files`, etc.).
 
 ### How It Works
 
@@ -216,164 +253,112 @@ When agents are deployed to **Vertex AI Agent Engine** (formerly called Reasonin
 │  │           │              │    │
 │  │     ┌─────┴──────┐      │    │
 │  │     │  MCP Client │      │    │
+│  │     │ (HTTP mode) │      │    │
 │  │     └─────┬──────┘      │    │
 │  └───────────┼──────────────┘    │
 │              │                   │
-│    ┌─────────┴──────────┐       │
-│    │  Option A: stdio   │       │
-│    │  (npx bundled in   │       │
-│    │   container image) │       │
-│    └─────────┬──────────┘       │
-│              │ OR               │
-│    ┌─────────┴──────────┐       │
-│    │  Option B: SSE/HTTP│       │
-│    │  (Hosted MCP Server│       │
-│    │   on Cloud Run)    │       │
-│    └─────────┬──────────┘       │
-└──────────────┼──────────────────┘
-               │ HTTPS
+└──────────────┼───────────────────┘
+               │ HTTPS (Streamable HTTP transport)
+               ▼
+      GitHub SaaS MCP Server
+      (Hosted by GitHub at api.githubcopilot.com
+       or github.com/mcp endpoint)
+               │
+               │ Internal
                ▼
          GitHub API (github.com)
 ```
 
-### Approach A: Bundle npx in the Container (Simpler)
+Notice the difference from local development:
+- **Local**: Your Python process spawns a Node.js subprocess on your machine, and they talk over stdin/stdout pipes.
+- **Remote**: Your Python process makes HTTPS requests to GitHub's hosted MCP endpoint. No subprocess, no Node.js, no local server.
 
-This is the most straightforward approach. You include Node.js and the GitHub MCP Server in your agent's container image, and use the same `StdioServerParameters` approach as local development.
+### Step-by-Step Setup
 
-#### Step 1 — Add Node.js to Your Agent's Container
+#### Step 1 — Store the GitHub Token in Secret Manager
 
-If deploying via Google ADK CLI (`adk deploy agent_engine`), you typically provide a `requirements.txt` and the ADK builds a container. To include Node.js, you need a custom Dockerfile:
+In Agent Engine, you never hardcode secrets. Store your GitHub PAT in **Google Secret Manager**:
 
-```dockerfile
-FROM python:3.11-slim
-
-# Install Node.js (for GitHub MCP Server)
-RUN apt-get update && apt-get install -y curl \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Pre-download the GitHub MCP Server so npx doesn't need to download it at runtime
-RUN npx -y @modelcontextprotocol/server-github --help || true
-
-# Copy agent code
-COPY . /app
-WORKDIR /app
-
-# Install Python dependencies
-RUN pip install -r requirements.txt
-
-CMD ["python", "-m", "google.adk.cli", "serve"]
-```
-
-#### Step 2 — Configure MCP in Your Agent Code
-
-The agent code is identical to the local setup — use `StdioServerParameters` with `npx`:
-
-```python
-github_mcp_server = StdioServerParameters(
-    command="npx",
-    args=["-y", "@modelcontextprotocol/server-github"],
-    env={"GITHUB_PERSONAL_ACCESS_TOKEN": os.environ["GITHUB_TOKEN"]}
-)
-```
-
-#### Step 3 — Provide the GitHub Token as a Secret
-
-In Agent Engine, you don't hardcode secrets. Instead, use **Google Secret Manager**:
-
-1. Store your GitHub PAT in Secret Manager:
-   ```bash
-   echo -n "ghp_your_token" | gcloud secrets create github-token --data-file=-
-   ```
-
-2. Grant the Agent Engine service account access:
-   ```bash
-   gcloud secrets add-iam-policy-binding github-token \
-     --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
-     --role="roles/secretmanager.secretAccessor"
-   ```
-
-3. In your agent code, read the secret at startup:
-   ```python
-   from google.cloud import secretmanager
-   
-   def get_github_token():
-       client = secretmanager.SecretManagerServiceClient()
-       name = f"projects/{PROJECT_ID}/secrets/github-token/versions/latest"
-       response = client.access_secret_version(request={"name": name})
-       return response.payload.data.decode("UTF-8")
-   ```
-
-### Approach B: Hosted MCP Server via SSE/HTTP (More Scalable)
-
-Instead of bundling the MCP Server inside every agent container, you can run it as a **separate service** (e.g., on Cloud Run) and connect to it over **HTTP** using **SSE (Server-Sent Events)** or the newer **Streamable HTTP** transport.
-
-#### Step 1 — Deploy the MCP Server to Cloud Run
-
-Create a simple `Dockerfile` for the GitHub MCP Server:
-
-```dockerfile
-FROM node:20-slim
-RUN npm install -g @modelcontextprotocol/server-github
-EXPOSE 8080
-CMD ["npx", "@modelcontextprotocol/server-github", "--transport", "sse", "--port", "8080"]
-```
-
-Deploy to Cloud Run:
 ```bash
-gcloud run deploy github-mcp-server \
-  --source . \
-  --region us-central1 \
-  --set-env-vars GITHUB_PERSONAL_ACCESS_TOKEN=ghp_your_token \
-  --allow-unauthenticated  # Or use IAM for auth
+# Create the secret
+echo -n "ghp_your_token" | gcloud secrets create github-token --data-file=-
+
+# Grant the Agent Engine service account access
+gcloud secrets add-iam-policy-binding github-token \
+  --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
 ```
 
-#### Step 2 — Connect Your Agent via SSE
-
-In your agent code, switch from `StdioServerParameters` to `SseServerParameters`:
+In your agent code, read the secret at startup:
 
 ```python
-from mcp.client.sse import SseServerParameters
+from google.cloud import secretmanager
 
-github_mcp_server = SseServerParameters(
-    url="https://github-mcp-server-XXXXX-uc.a.run.app/sse"
-)
+def get_github_token():
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{PROJECT_ID}/secrets/github-token/versions/latest"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data.decode("UTF-8")
 ```
 
-Or with the newer Streamable HTTP transport:
+#### Step 2 — Connect to the GitHub SaaS MCP Server
+
+Use the **Streamable HTTP** transport to connect to GitHub's hosted endpoint. In your agent code:
 
 ```python
+from google.adk.toolsets import MCPToolset
 from mcp.client.streamable_http import StreamableHttpParameters
 
+# Point to GitHub's SaaS MCP Server
 github_mcp_server = StreamableHttpParameters(
-    url="https://github-mcp-server-XXXXX-uc.a.run.app/mcp"
+    url="https://api.githubcopilot.com/mcp",  # GitHub's hosted MCP endpoint
+    headers={
+        "Authorization": f"Bearer {get_github_token()}"
+    }
+)
+
+# Create the toolset — ADK will connect over HTTPS and discover tools
+github_tools = MCPToolset(server_params=github_mcp_server)
+
+# Pass it to your agent
+agent = LlmAgent(
+    name="component_spec_agent",
+    model="gemini-2.0-flash",
+    tools=[github_tools],
+    # ... other config
 )
 ```
 
-**Advantage:** Multiple agent instances share one MCP Server. No need for Node.js in every container. The MCP Server can scale independently.
+When the agent starts on Agent Engine, ADK:
+1. Opens an HTTPS connection to `api.githubcopilot.com/mcp`
+2. Sends an `initialize` handshake with the Bearer token
+3. Discovers available tools (`search_code`, `get_file_contents`, etc.)
+4. Wraps each tool as a Python-callable function
+5. Tool calls are sent as HTTP POST requests; responses arrive as streamed HTTP responses
+6. The connection is reused across tool calls for performance
 
-**Disadvantage:** Network latency between agent and MCP Server. An extra service to manage.
+**No Node.js. No Docker customization. No extra Cloud Run service.** Just a Python HTTP client talking to GitHub's server.
 
-### Approach C: PyGithub Fallback (Simplest for Agent Engine)
+#### Step 3 — Wire It Into the Component Specification Agent
 
-If MCP complexity isn't worth it for your use case, you can deploy agents to Agent Engine **without MCP** and rely entirely on the PyGithub fallback. This is what EnGen currently does for maximum compatibility:
+The `ComponentSpecificationAgent` receives the MCP session from ADK and passes it through:
 
 ```python
-# In component_specification_agent.py
 class ComponentSpecificationAgent:
-    def __init__(self, mcp_session=None):
-        # If mcp_session is None, the GitHub client will
-        # automatically fall back to PyGithub REST API
+    def __init__(self, mcp_session):
         self.engine = ComponentSpecification(
             project_id=Config.PROJECT_ID,
-            mcp_session=mcp_session,  # None on Agent Engine
+            mcp_session=mcp_session,  # Active session to GitHub SaaS MCP
             github_org_repos=_get_github_repos(),
-            # ...
+            aws_region=os.getenv("AWS_REGION", "us-east-1"),
         )
 ```
 
-This requires only `GITHUB_TOKEN` in the environment — no Node.js, no MCP Server, no extra infrastructure.
+With a live MCP session, the `GitHubMCPTerraformClient` uses the MCP path (Tier 1) — calling `search_code` and `get_file_contents` through the SaaS server — before falling back to AWS Service Catalog (Tier 2).
+
+### What About the PyGithub Fallback?
+
+The system still supports a **PyGithub fallback** for maximum compatibility. If you pass `mcp_session=None`, the `GitHubMCPTerraformClient` skips MCP entirely and uses the PyGithub REST library directly. This can serve as an emergency fallback if the GitHub SaaS MCP Server is temporarily unavailable, though for production deployments on Agent Engine, the SaaS MCP Server is the recommended approach.
 
 ---
 
@@ -381,11 +366,10 @@ This requires only `GITHUB_TOKEN` in the environment — no Node.js, no MCP Serv
 
 | Scenario | Recommended Approach | Why |
 |----------|---------------------|-----|
-| **Local development** (quick testing) | Option C — PyGithub fallback | Zero setup; just set `GITHUB_TOKEN` |
-| **Local development** (full MCP experience) | Option A — stdio via `npx` | Easy; ADK manages the process lifecycle |
-| **Agent Engine** (small scale, simple) | Approach C — PyGithub fallback | No Node.js needed; minimal infrastructure |
-| **Agent Engine** (medium scale) | Approach A — Bundle npx in container | Same code as local; just add Node.js to Dockerfile |
-| **Agent Engine** (large scale, multi-agent) | Approach B — Hosted MCP on Cloud Run | Shared server; independent scaling; no Node.js in agent containers |
+| **Local development** (quick testing) | Option C — PyGithub fallback | Zero MCP setup; just set `GITHUB_TOKEN` |
+| **Local development** (full MCP experience) | Option A — stdio via `npx` in VS Code terminal | ADK manages the local subprocess lifecycle; no infra needed |
+| **Agent Engine** (production) | GitHub SaaS MCP Server (Streamable HTTP) | No self-hosting; always up to date; GitHub manages the server |
+| **Agent Engine** (emergency fallback) | PyGithub fallback (`mcp_session=None`) | Works if SaaS MCP is temporarily unavailable |
 
 ---
 
@@ -407,42 +391,50 @@ Internally:
 - If `mcp_session` is `None` → Falls back to PyGithub REST API
 - If PyGithub isn't installed either → Returns `None` (graceful degradation)
 
-The `ComponentSpecificationAgent` accepts an optional `mcp_session` in its constructor, which it passes through to the `GitHubMCPTerraformClient`. When deploying to Agent Engine, you either:
-- Pass the MCP session from the ADK's `MCPToolset` (Approaches A/B)
-- Pass `None` for the PyGithub fallback (Approach C)
+The `ComponentSpecificationAgent` accepts an optional `mcp_session` in its constructor, which it passes through to the `GitHubMCPTerraformClient`.
+
+- **Local (VS Code terminal)**: ADK's `MCPToolset` with `StdioServerParameters` spawns a local Node.js subprocess, creates an MCP session, and passes it through.
+- **Remote (Agent Engine)**: ADK's `MCPToolset` with `StreamableHttpParameters` connects to the GitHub SaaS MCP Server over HTTPS, creates an MCP session, and passes it through.
+- **Fallback (either environment)**: Pass `mcp_session=None` to skip MCP and use PyGithub REST API directly.
 
 ---
 
 ## Deployment Cheat Sheet
 
-### Local Development (Quick Start)
+### Local Development (VS Code Terminal)
 
 ```powershell
-# 1. Set your GitHub token
+# 1. Open a terminal in VS Code (Ctrl+`)
+
+# 2. Set your GitHub token (if not already set permanently)
 $env:GITHUB_TOKEN = "ghp_your_token_here"
 
-# 2. Activate the virtual environment
+# 3. Activate the virtual environment
 .\.venv\Scripts\Activate.ps1
 
-# 3. Run your agent
+# 4. Run your agent (ADK will spawn the GitHub MCP Server as a local subprocess)
 python -m google.adk web
+
+# That's it — ADK starts the MCP server via npx, connects over stdio pipes,
+# and your agent can call search_code, get_file_contents, etc.
 ```
 
-### Agent Engine Deployment
+### Agent Engine Deployment (Uses GitHub SaaS MCP Server)
 
 ```powershell
 # 1. Store the GitHub token in Secret Manager
 echo -n "ghp_your_token" | gcloud secrets create github-token --data-file=-
 
-# 2. Set environment variables for the agent
-# (These go in your Agent Engine configuration)
-# GITHUB_TOKEN = fetched from Secret Manager at startup
-# GITHUB_TERRAFORM_REPOS = "rnerurkar/engen-infrastructure"
-# AWS_REGION = "us-east-1"
+# 2. Grant Agent Engine access to the secret
+gcloud secrets add-iam-policy-binding github-token `
+  --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" `
+  --role="roles/secretmanager.secretAccessor"
 
-# 3. Deploy via ADK CLI
+# 3. Deploy via ADK CLI (no custom Dockerfile needed — no Node.js required)
 python deploy_agent.py
 ```
+
+The agent connects to GitHub's SaaS MCP Server over HTTPS at runtime — no local MCP server process, no Node.js, no Cloud Run service.
 
 The ADK CLI packages your agent code, builds a container, and deploys it to Agent Engine as a Reasoning Engine resource. The resource ID looks like:
 ```
@@ -458,3 +450,17 @@ vertexai.init(project="your-project", location="us-central1")
 agent = reasoning_engines.ReasoningEngine("projects/.../reasoningEngines/...")
 response = agent.query(input="Generate a pattern for a 3-tier web app")
 ```
+
+---
+
+## Key Difference: Local vs. Remote — Side by Side
+
+| Aspect | Local (VS Code Terminal) | Remote (Agent Engine) |
+|--------|------------------------|-----------------------|
+| **MCP Server** | Local Node.js subprocess (via `npx`) | GitHub SaaS MCP Server (hosted by GitHub) |
+| **Transport** | stdio (stdin/stdout pipes) | Streamable HTTP (HTTPS) |
+| **ADK Config** | `StdioServerParameters` | `StreamableHttpParameters` |
+| **Node.js required?** | Yes (for `npx`) | No |
+| **Network call** | MCP Server → `api.github.com` | Agent → `api.githubcopilot.com/mcp` → `api.github.com` |
+| **Auth** | `GITHUB_TOKEN` env var passed to MCP Server subprocess | Bearer token in HTTP header (from Secret Manager) |
+| **Who manages the MCP Server?** | You (it's a subprocess on your machine) | GitHub (SaaS — fully managed) |
