@@ -390,7 +390,69 @@ sequenceDiagram
     *   **Level 1 — DR Strategy**: Heading detection using regex patterns (`DR_STRATEGY_PATTERNS`) identifies the four DR strategies: Backup and Restore, Pilot Light On Demand, Pilot Light Cold Standby, and Warm Standby.
     *   **Level 2 — Lifecycle Phase**: Within each strategy section, heading detection using `LIFECYCLE_PHASE_PATTERNS` splits content into: Initial Provisioning, Failover, and Failback.
     *   **Level 3 — Word Window**: Each phase section is further split by a sliding word window (1500 words max, 200-word overlap) to stay within embedding model limits.
-5.  **Metadata Attachment**: Every chunk receives a `struct_data` dictionary containing: `service_name`, `service_description`, `service_type`, `dr_strategy`, `lifecycle_phase`, and `chunk_index`.
+
+    The resulting chunk tree for a single service document looks like this:
+
+    ```
+    Full Service HA/DR Document (e.g., Amazon RDS)
+    │
+    ├── _split_by_dr_strategy()          ← Level 1: splits into 4 DR strategy sections
+    │   │
+    │   ├── "Backup and Restore" section (full text)
+    │   │   │
+    │   │   ├── _split_by_lifecycle_phase()   ← Level 2: splits into 3 lifecycle sub-sections
+    │   │   │   │
+    │   │   │   ├── "Initial Provisioning" text
+    │   │   │   │   │
+    │   │   │   │   ├── _size_based_chunk()   ← Level 3: splits into N chunks of ~1500 words
+    │   │   │   │   │   ├── Chunk 0  ← stored as a Document in Vertex AI Search
+    │   │   │   │   │   ├── Chunk 1
+    │   │   │   │   │   └── Chunk 2
+    │   │   │   │
+    │   │   │   ├── "Failover" text
+    │   │   │   │   ├── Chunk 3
+    │   │   │   │   └── Chunk 4
+    │   │   │   │
+    │   │   │   └── "Failback" text
+    │   │   │       └── Chunk 5
+    │   │
+    │   ├── "Pilot Light On Demand" section
+    │   │   ├── "Initial Provisioning" → Chunk 6, 7
+    │   │   ├── "Failover" → Chunk 8
+    │   │   └── "Failback" → Chunk 9
+    │   │
+    │   ├── "Pilot Light Cold Standby" section
+    │   │   ├── "Initial Provisioning" → Chunk 10
+    │   │   ├── "Failover" → Chunk 11, 12
+    │   │   └── "Failback" → Chunk 13
+    │   │
+    │   └── "Warm Standby" section
+    │       ├── "Initial Provisioning" → Chunk 14, 15
+    │       ├── "Failover" → Chunk 16
+    │       └── "Failback" → Chunk 17
+    ```
+
+    Each leaf chunk is stored as a Document in the Vertex AI Search data store with a unique ID composed of `{service_name}_{chunk_index}`. The `chunk_index` provides global ordering across the entire service document, preserving the strategy → phase → position hierarchy.
+
+5.  **Metadata Attachment**: Every chunk receives a `struct_data` dictionary containing: `service_name`, `service_description`, `service_type`, `dr_strategy`, `lifecycle_phase`, and `chunk_index`. For example, a chunk from the "Failover" phase of the "Backup and Restore" strategy for Amazon RDS would be stored as:
+
+    ```json
+    {
+      "id": "Amazon_RDS_3",
+      "content": "During failover, the RDS Multi-AZ instance automatically promotes the standby replica in the DR region. DNS endpoint remains the same. The promotion typically completes within 60-120 seconds. Application connection strings do not need to change because...",
+      "struct_data": {
+        "service_name": "Amazon RDS",
+        "service_description": "Managed relational database service",
+        "service_type": "Database",
+        "dr_strategy": "Backup and Restore",
+        "lifecycle_phase": "Failover",
+        "chunk_index": 3
+      }
+    }
+    ```
+
+    This structure enables the `ServiceHADRRetriever` (Section 4.10) to issue targeted queries like *"retrieve all Failover chunks for Amazon RDS under the Warm Standby strategy"* using metadata-filtered hybrid search, returning only the most relevant passages without cross-contamination from other services or strategies.
+
 6.  **Indexing**: Each chunk is upserted as a Document in the HA/DR data store using the Discovery Engine `CreateDocumentRequest` API.
 
 #### 3.6.4 Data Store Schema
