@@ -12,8 +12,13 @@ Artefacts produced per diagram:
   - SVG  (embedable in HTML / SharePoint pages)
   - PNG  (fallback image via cairosvg)
   - draw.io XML  (stored on GCS so architects can edit in draw.io)
+
+Provides both sync (``generate_all_diagrams``) and async
+(``agenerate_all_diagrams``) entry-points.  The async variant
+parallelises all 12 diagram generations via ``asyncio.gather``.
 """
 
+import asyncio
 import io
 import json
 import logging
@@ -231,6 +236,107 @@ class HADRDiagramGenerator:
         fallbacks = sum(1 for a in bundle.all_artifacts() if a.is_fallback)
         logger.info(
             f"Generated {total} diagrams for '{pattern_name}' "
+            f"({fallbacks} fallbacks)"
+        )
+        return bundle
+
+    # ─── Async public API ────────────────────────────────────────────────
+
+    async def agenerate_all_diagrams(
+        self,
+        pattern_name: str,
+        services: List[str],
+        hadr_text_sections: Dict[str, str],
+        pattern_context: Dict[str, Any],
+        timeout_per_diagram: float = 180.0,
+        max_concurrent: int = 4,
+    ) -> PatternDiagramBundle:
+        """
+        Async version of ``generate_all_diagrams`` — generates up to 12
+        diagrams in parallel using ``asyncio.gather``.
+
+        Each diagram involves two Gemini calls (SVG + draw.io) and a local
+        SVG→PNG conversion.  All three are CPU/IO-bound and offloaded to
+        threads so the event loop stays free.
+
+        Args:
+            pattern_name:         Human-readable pattern title.
+            services:             List of canonical service names.
+            hadr_text_sections:   DR strategy → generated Markdown text.
+            pattern_context:      Pattern metadata.
+            timeout_per_diagram:  Max seconds per single diagram
+                                  (SVG + draw.io + PNG combined, default 180).
+            max_concurrent:       Concurrency cap to avoid Gemini quota
+                                  exhaustion (default 4 at a time).
+
+        Returns:
+            PatternDiagramBundle with up to 12 DiagramArtifact entries.
+        """
+        bundle = PatternDiagramBundle(pattern_name=pattern_name)
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _gen_one(strategy: str, phase: str, phase_text: str):
+            """Generate one diagram with concurrency limit and timeout."""
+            async with semaphore:
+                try:
+                    coro = asyncio.to_thread(
+                        self._generate_single_diagram,
+                        pattern_name, services, strategy,
+                        phase, phase_text, pattern_context,
+                    )
+                    artifact = await asyncio.wait_for(
+                        coro, timeout=timeout_per_diagram
+                    )
+                    return strategy, phase, artifact
+                except asyncio.TimeoutError:
+                    logger.error(
+                        f"Diagram generation timed-out for {strategy}/{phase}"
+                    )
+                    fallback = DiagramArtifact(
+                        dr_strategy=strategy,
+                        lifecycle_phase=phase,
+                        svg_content=self._fallback_svg(strategy, phase, services),
+                        drawio_xml=self._fallback_drawio(strategy, phase, services),
+                        is_fallback=True,
+                        description=phase_text,
+                    )
+                    fallback.png_bytes = self._svg_to_png(fallback.svg_content)
+                    return strategy, phase, fallback
+                except Exception as e:
+                    logger.error(
+                        f"Diagram generation failed for {strategy}/{phase}: {e}"
+                    )
+                    fallback = DiagramArtifact(
+                        dr_strategy=strategy,
+                        lifecycle_phase=phase,
+                        svg_content=self._fallback_svg(strategy, phase, services),
+                        drawio_xml=self._fallback_drawio(strategy, phase, services),
+                        is_fallback=True,
+                        description=phase_text,
+                    )
+                    fallback.png_bytes = self._svg_to_png(fallback.svg_content)
+                    return strategy, phase, fallback
+
+        # Build task list for all 12 combinations
+        tasks = []
+        for strategy in DR_STRATEGIES:
+            strategy_text = hadr_text_sections.get(strategy, "")
+            phase_texts = self._split_phases(strategy_text)
+            for phase in LIFECYCLE_PHASES:
+                phase_text = phase_texts.get(phase, "")
+                logger.info(f"Scheduling async diagram: {strategy} / {phase}")
+                tasks.append(_gen_one(strategy, phase, phase_text))
+
+        # Execute all (up to max_concurrent at a time)
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+
+        for strategy, phase, artifact in results:
+            bundle.diagrams[(strategy, phase)] = artifact
+
+        total = len(bundle.diagrams)
+        fallbacks = sum(1 for a in bundle.all_artifacts() if a.is_fallback)
+        logger.info(
+            f"Async generated {total} diagrams for '{pattern_name}' "
             f"({fallbacks} fallbacks)"
         )
         return bundle

@@ -11,8 +11,13 @@ GCS path structure:
 
 Provides signed URLs for time-limited access and public URLs for
 embedding in SharePoint pages.
+
+Both sync (``upload_diagram_bundle``) and async (``aupload_diagram_bundle``)
+entry-points are available.  The async variant parallelises the three
+per-diagram uploads via ``asyncio.gather``.
 """
 
+import asyncio
 import logging
 import re
 from typing import Dict, Optional, Tuple
@@ -126,6 +131,88 @@ class HADRDiagramStorage:
 
         logger.info(
             f"Uploaded diagram bundle: {prefix} "
+            f"(svg={bool(urls['svg_url'])}, "
+            f"drawio={bool(urls['drawio_url'])}, "
+            f"png={bool(urls['png_url'])})"
+        )
+        return urls
+
+    # ─── Async upload ────────────────────────────────────────────────────
+
+    async def aupload_diagram_bundle(
+        self,
+        pattern_name: str,
+        strategy: str,
+        phase: str,
+        svg_content: str,
+        drawio_xml: str,
+        png_bytes: bytes,
+        timeout: float = 60.0,
+    ) -> Dict[str, str]:
+        """
+        Async version of ``upload_diagram_bundle`` — uploads the three
+        artefacts (SVG, draw.io XML, PNG) **in parallel** via
+        ``asyncio.gather`` with per-upload timeout.
+
+        Returns:
+            Dict with ``svg_url``, ``drawio_url``, ``png_url``.
+        """
+        urls: Dict[str, str] = {
+            "svg_url": "",
+            "drawio_url": "",
+            "png_url": "",
+        }
+
+        if not self.bucket:
+            logger.error("GCS bucket not available — cannot upload diagrams")
+            return urls
+
+        prefix = self._build_prefix(pattern_name, strategy, phase)
+
+        async def _upload_svg():
+            if not svg_content:
+                return ""
+            return await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._upload_text, f"{prefix}.svg", svg_content, "svg"
+                ),
+                timeout=timeout,
+            )
+
+        async def _upload_drawio():
+            if not drawio_xml:
+                return ""
+            return await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._upload_text, f"{prefix}.drawio", drawio_xml, "drawio"
+                ),
+                timeout=timeout,
+            )
+
+        async def _upload_png():
+            if not png_bytes:
+                return ""
+            return await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._upload_bytes, f"{prefix}.png", png_bytes, "png"
+                ),
+                timeout=timeout,
+            )
+
+        results = await asyncio.gather(
+            _upload_svg(), _upload_drawio(), _upload_png(),
+            return_exceptions=True,
+        )
+
+        keys = ["svg_url", "drawio_url", "png_url"]
+        for key, result in zip(keys, results):
+            if isinstance(result, Exception):
+                logger.error(f"Async upload failed for {key} at {prefix}: {result}")
+            else:
+                urls[key] = result
+
+        logger.info(
+            f"Async uploaded diagram bundle: {prefix} "
             f"(svg={bool(urls['svg_url'])}, "
             f"drawio={bool(urls['drawio_url'])}, "
             f"png={bool(urls['png_url'])})"

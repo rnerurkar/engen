@@ -8,8 +8,13 @@ Generates the HA/DR sections of a pattern document using:
 
 Generates ONE DR strategy section at a time for prompt focus and easier
 retry on failure.
+
+Provides both sync (``generate_hadr_sections``) and async
+(``agenerate_hadr_sections``) entry-points so the caller can choose
+whether to parallelise across strategies.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -243,6 +248,102 @@ specific about state transitions as this accompanies a component diagram.)
                     f"## {strategy}\n\n"
                     f"*Generation failed ({e}). Please complete manually.*"
                 )
+
+        return generated_sections
+
+    # ─── Async generation entry-point ────────────────────────────────────
+
+    async def agenerate_hadr_sections(
+        self,
+        pattern_context: Dict[str, Any],
+        donor_hadr_sections: Dict[str, str],
+        service_hadr_docs: Dict[str, Dict[str, List[Dict[str, Any]]]],
+        timeout_per_strategy: float = 120.0,
+    ) -> Dict[str, str]:
+        """
+        Async version of ``generate_hadr_sections`` — generates all four
+        DR-strategy sections **in parallel** via ``asyncio.gather``.
+
+        Each Gemini ``generate_content`` call is offloaded to a thread so
+        the event loop is never blocked.
+
+        Args:
+            pattern_context:          Same as sync version.
+            donor_hadr_sections:      Same as sync version.
+            service_hadr_docs:        Same as sync version.
+            timeout_per_strategy:     Max seconds per strategy LLM call
+                                      (default 120 s).
+
+        Returns:
+            Dict mapping DR strategy name → generated Markdown section.
+        """
+        if not self.model:
+            logger.error("Vertex AI model not initialised — cannot generate HA/DR docs")
+            return {
+                s: f"## {s}\n\n*Model not available — section not generated.*"
+                for s in self.DR_STRATEGIES
+            }
+
+        # ── Build prompts (CPU-only, no I/O) ─────────────────────────────
+        strategy_prompts: Dict[str, str] = {}
+        for strategy in self.DR_STRATEGIES:
+            per_service_for_strategy: Dict[str, List[Dict[str, Any]]] = {}
+            for svc_name, strategy_map in service_hadr_docs.items():
+                chunks = strategy_map.get(strategy, [])
+                if chunks:
+                    per_service_for_strategy[svc_name] = chunks
+
+            donor_section = donor_hadr_sections.get(strategy, "")
+            if not donor_section:
+                logger.warning(
+                    f"No donor example for '{strategy}' — generating without one-shot."
+                )
+
+            strategy_prompts[strategy] = self._build_hadr_prompt(
+                dr_strategy=strategy,
+                donor_hadr_section=donor_section,
+                service_hadr_docs=per_service_for_strategy,
+                pattern_context=pattern_context,
+            )
+
+        # ── Fire all four LLM calls in parallel ─────────────────────────
+        async def _gen_one(strategy: str, prompt: str) -> str:
+            """Generate one strategy section with timeout."""
+            try:
+                coro = asyncio.to_thread(
+                    self.model.generate_content,
+                    prompt,
+                    generation_config=GenerationConfig(
+                        temperature=0.3,
+                        max_output_tokens=4096,
+                    ),
+                )
+                response = await asyncio.wait_for(coro, timeout=timeout_per_strategy)
+                logger.info(f"Generated {len(response.text)} chars for '{strategy}'")
+                return response.text.strip()
+            except asyncio.TimeoutError:
+                logger.error(f"HA/DR generation timed-out for '{strategy}'")
+                return (
+                    f"## {strategy}\n\n"
+                    f"*Generation timed out after {timeout_per_strategy}s. "
+                    f"Please complete manually.*"
+                )
+            except Exception as e:
+                logger.error(f"HA/DR generation failed for '{strategy}': {e}")
+                return (
+                    f"## {strategy}\n\n"
+                    f"*Generation failed ({e}). Please complete manually.*"
+                )
+
+        tasks = [
+            _gen_one(strategy, strategy_prompts[strategy])
+            for strategy in self.DR_STRATEGIES
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+
+        generated_sections: Dict[str, str] = {}
+        for strategy, text in zip(self.DR_STRATEGIES, results):
+            generated_sections[strategy] = text
 
         return generated_sections
 

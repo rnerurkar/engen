@@ -7,8 +7,13 @@ data store to provide grounding context for pattern-level HA/DR generation.
 Uses **hybrid retrieval**: structured metadata filter (exact service name)
 combined with vector/semantic search.  This prevents cross-contamination
 between services that share similar HA/DR vocabulary.
+
+All public methods have both sync and async variants.  The async methods use
+``asyncio.to_thread`` for I/O-bound Search SDK calls so the event loop
+remains unblocked.
 """
 
+import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 
@@ -223,6 +228,78 @@ class ServiceHADRRetriever:
         )
         logger.info(
             f"Retrieved {total_chunks} total HA/DR chunks "
+            f"across {len(service_names)} services"
+        )
+        return all_docs
+
+    # ─── Async variants ──────────────────────────────────────────────────
+
+    async def aretrieve_service_hadr_docs(
+        self,
+        service_name: str,
+        service_type: Optional[str] = None,
+        dr_strategy: Optional[str] = None,
+        top_k: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Async wrapper — offloads the blocking Search SDK call."""
+        return await asyncio.to_thread(
+            self.retrieve_service_hadr_docs,
+            service_name, service_type, dr_strategy, top_k,
+        )
+
+    async def aretrieve_all_services_hadr(
+        self,
+        service_names: List[str],
+        service_types: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+        """
+        Async bulk retrieval — launches all service × strategy searches
+        concurrently via ``asyncio.gather``.
+
+        For *N* services × 4 strategies this issues up to 4N concurrent
+        searches instead of 4N sequential ones, typically cutting wall-clock
+        time from minutes to seconds.
+        """
+        all_docs: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
+            svc: {} for svc in service_names
+        }
+
+        # Build a flat list of coroutines with metadata labels
+        tasks = []
+        task_labels = []
+
+        for svc_name in service_names:
+            svc_type = (service_types or {}).get(svc_name)
+            for strategy in self.DR_STRATEGIES:
+                tasks.append(
+                    self.aretrieve_service_hadr_docs(
+                        service_name=svc_name,
+                        service_type=svc_type,
+                        dr_strategy=strategy,
+                        top_k=5,
+                    )
+                )
+                task_labels.append((svc_name, strategy))
+
+        # Execute all in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for (svc_name, strategy), result in zip(task_labels, results):
+            if isinstance(result, Exception):
+                logger.error(
+                    f"Async retrieval failed for {svc_name}/{strategy}: {result}"
+                )
+                all_docs[svc_name][strategy] = []
+            else:
+                all_docs[svc_name][strategy] = result
+
+        total_chunks = sum(
+            len(chunks)
+            for svc_strategies in all_docs.values()
+            for chunks in svc_strategies.values()
+        )
+        logger.info(
+            f"Async retrieved {total_chunks} total HA/DR chunks "
             f"across {len(service_names)} services"
         )
         return all_docs
