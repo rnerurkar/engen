@@ -88,6 +88,113 @@ STATE_COLORS = {
     "Syncing":      "#9C27B0",  # purple
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# draw.io icon shape mapping  (AWS 4.0 + GCP shape libraries)
+#
+# When a service name matches a key (case-insensitive), the corresponding
+# draw.io `style` fragment is injected so the diagram renders the official
+# cloud-provider icon instead of a plain rectangle.
+#
+# Library references:
+#   AWS:  mxgraph.aws4.*   (built-in to draw.io ≥ 20.x)
+#   GCP:  mxgraph.gcp2.*   (built-in to draw.io ≥ 20.x)
+# ──────────────────────────────────────────────────────────────────────────────
+
+DRAWIO_SERVICE_ICONS: Dict[str, str] = {
+    # ── AWS Services ──────────────────────────────────────────────────────
+    # Compute
+    "AWS Lambda":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;",
+    "Amazon ECS":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ecs;",
+    "Amazon EKS":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.eks;",
+    "Amazon EC2":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;",
+    "AWS Fargate":             "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.fargate;",
+    "AWS Step Functions":      "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.step_functions;",
+    "AWS Batch":               "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.batch;",
+    # Database
+    "Amazon RDS":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;",
+    "Amazon DynamoDB":         "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;",
+    "Amazon Aurora":           "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.aurora;",
+    "Amazon ElastiCache":      "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elasticache;",
+    "Amazon Neptune":          "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.neptune;",
+    "Amazon Redshift":         "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.redshift;",
+    # Storage
+    "Amazon S3":               "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;",
+    "Amazon EFS":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_file_system;",
+    "Amazon EBS":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_block_store;",
+    # Networking
+    "Amazon VPC":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.vpc;",
+    "Amazon CloudFront":       "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudfront;",
+    "Amazon Route 53":         "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.route_53;",
+    "Elastic Load Balancer":   "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_load_balancing;",
+    "Amazon API Gateway":      "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;",
+    "AWS Global Accelerator":  "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.global_accelerator;",
+    # Messaging
+    "Amazon SQS":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sqs;",
+    "Amazon SNS":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sns;",
+    "Amazon EventBridge":      "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.eventbridge;",
+    "Amazon Kinesis":          "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.kinesis;",
+    # Security & Management
+    "AWS KMS":                 "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.key_management_service;",
+    "AWS Secrets Manager":     "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.secrets_manager;",
+    "AWS IAM":                 "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.identity_and_access_management;",
+    "AWS WAF":                 "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.waf;",
+    "AWS CloudWatch":          "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudwatch;",
+    "AWS CloudTrail":          "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudtrail;",
+    # CI/CD
+    "AWS CodePipeline":        "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.codepipeline;",
+    "Amazon ECR":              "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ecr;",
+
+    # ── GCP Services ─────────────────────────────────────────────────────
+    # Compute
+    "Cloud Run":               "shape=mxgraph.gcp2.cloud_run;",
+    "Cloud Functions":         "shape=mxgraph.gcp2.cloud_functions;",
+    "Compute Engine":          "shape=mxgraph.gcp2.compute_engine;",
+    "Google Kubernetes Engine": "shape=mxgraph.gcp2.google_kubernetes_engine;",
+    "GKE":                     "shape=mxgraph.gcp2.google_kubernetes_engine;",
+    "App Engine":              "shape=mxgraph.gcp2.app_engine;",
+    # Database
+    "Cloud SQL":               "shape=mxgraph.gcp2.cloud_sql;",
+    "Cloud Spanner":           "shape=mxgraph.gcp2.cloud_spanner;",
+    "Firestore":               "shape=mxgraph.gcp2.cloud_firestore;",
+    "Cloud Bigtable":          "shape=mxgraph.gcp2.cloud_bigtable;",
+    "BigQuery":                "shape=mxgraph.gcp2.bigquery;",
+    "Memorystore":             "shape=mxgraph.gcp2.cloud_memorystore;",
+    # Storage
+    "Cloud Storage":           "shape=mxgraph.gcp2.cloud_storage;",
+    "Persistent Disk":         "shape=mxgraph.gcp2.persistent_disk;",
+    "Filestore":               "shape=mxgraph.gcp2.filestore;",
+    # Networking
+    "Cloud CDN":               "shape=mxgraph.gcp2.cloud_cdn;",
+    "Cloud DNS":               "shape=mxgraph.gcp2.cloud_dns;",
+    "Cloud Load Balancing":    "shape=mxgraph.gcp2.cloud_load_balancing;",
+    "Cloud Armor":             "shape=mxgraph.gcp2.cloud_armor;",
+    "Cloud VPN":               "shape=mxgraph.gcp2.cloud_vpn;",
+    "Cloud Interconnect":      "shape=mxgraph.gcp2.cloud_interconnect;",
+    # Messaging
+    "Cloud Pub/Sub":           "shape=mxgraph.gcp2.cloud_pubsub;",
+    "Pub/Sub":                 "shape=mxgraph.gcp2.cloud_pubsub;",
+    "Cloud Tasks":             "shape=mxgraph.gcp2.cloud_tasks;",
+    "Eventarc":                "shape=mxgraph.gcp2.eventarc;",
+    # Security & Management
+    "Cloud KMS":               "shape=mxgraph.gcp2.cloud_key_management_service;",
+    "Secret Manager":          "shape=mxgraph.gcp2.secret_manager;",
+    "Cloud IAM":               "shape=mxgraph.gcp2.cloud_iam;",
+    "Cloud Monitoring":        "shape=mxgraph.gcp2.cloud_monitoring;",
+    "Cloud Logging":           "shape=mxgraph.gcp2.cloud_logging;",
+    # CI/CD
+    "Cloud Build":             "shape=mxgraph.gcp2.cloud_build;",
+    "Artifact Registry":       "shape=mxgraph.gcp2.artifact_registry;",
+    "Cloud Deploy":            "shape=mxgraph.gcp2.cloud_deploy;",
+}
+
+# Case-insensitive lookup helper
+_ICON_LOOKUP: Dict[str, str] = {k.lower(): v for k, v in DRAWIO_SERVICE_ICONS.items()}
+
+
+def get_drawio_icon_style(service_name: str) -> str:
+    """Return the draw.io icon style fragment for *service_name*, or empty string."""
+    return _ICON_LOOKUP.get(service_name.lower(), "")
+
 # One-shot SVG example for the LLM prompt
 SVG_ONE_SHOT_EXAMPLE = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
   <defs>
@@ -121,7 +228,7 @@ SVG_ONE_SHOT_EXAMPLE = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8
   <line x1="200" y1="125" x2="445" y2="125" stroke="#333" stroke-width="1.5" marker-end="url(#arrowhead)"/>
 </svg>"""
 
-# One-shot draw.io XML example
+# One-shot draw.io XML example (uses AWS icon shapes)
 DRAWIO_ONE_SHOT_EXAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="draw.io">
   <diagram name="Backup and Restore - Initial Provisioning" id="diag1">
@@ -133,17 +240,25 @@ DRAWIO_ONE_SHOT_EXAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
         <mxCell id="2" value="Primary Region" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
           <mxGeometry x="30" y="50" width="350" height="400" as="geometry"/>
         </mxCell>
-        <!-- Service: Amazon RDS (Active) -->
-        <mxCell id="3" value="Amazon RDS&#xa;[Active]" style="rounded=1;whiteSpace=wrap;fillColor=#4CAF50;fontColor=#ffffff;strokeColor=#388E3C;" vertex="1" parent="1">
-          <mxGeometry x="60" y="100" width="140" height="50" as="geometry"/>
+        <!-- Service: Amazon RDS (Active) — uses AWS RDS icon -->
+        <mxCell id="3" value="Amazon RDS&#xa;[Active]" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;whiteSpace=wrap;fillColor=#4CAF50;fontColor=#232F3E;strokeColor=#388E3C;fontStyle=1;fontSize=11;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;align=center;" vertex="1" parent="1">
+          <mxGeometry x="80" y="100" width="60" height="60" as="geometry"/>
+        </mxCell>
+        <!-- State badge for Primary RDS -->
+        <mxCell id="3b" value="Active" style="text;fontSize=10;fontStyle=2;fontColor=#388E3C;align=center;" vertex="1" parent="1">
+          <mxGeometry x="70" y="165" width="80" height="18" as="geometry"/>
         </mxCell>
         <!-- DR Region container -->
         <mxCell id="4" value="DR Region" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
           <mxGeometry x="420" y="50" width="350" height="400" as="geometry"/>
         </mxCell>
-        <!-- Service: Amazon RDS (Not-Deployed) -->
-        <mxCell id="5" value="Amazon RDS&#xa;[Not-Deployed]" style="rounded=1;whiteSpace=wrap;fillColor=#9E9E9E;fontColor=#ffffff;strokeColor=#757575;" vertex="1" parent="1">
-          <mxGeometry x="450" y="100" width="140" height="50" as="geometry"/>
+        <!-- Service: Amazon RDS (Not-Deployed) — uses AWS RDS icon -->
+        <mxCell id="5" value="Amazon RDS&#xa;[Not-Deployed]" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;whiteSpace=wrap;fillColor=#9E9E9E;fontColor=#232F3E;strokeColor=#757575;fontStyle=1;fontSize=11;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;align=center;opacity=50;" vertex="1" parent="1">
+          <mxGeometry x="470" y="100" width="60" height="60" as="geometry"/>
+        </mxCell>
+        <!-- State badge for DR RDS -->
+        <mxCell id="5b" value="Not-Deployed" style="text;fontSize=10;fontStyle=2;fontColor=#757575;align=center;" vertex="1" parent="1">
+          <mxGeometry x="455" y="165" width="90" height="18" as="geometry"/>
         </mxCell>
         <!-- Arrow -->
         <mxCell id="6" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="3" target="5" parent="1">
@@ -514,16 +629,30 @@ Services:
 # Colour Palette for Service States
 {json.dumps(STATE_COLORS, indent=2)}
 
+# Service Icon Shape Registry (draw.io built-in AWS 4.0 + GCP shape libraries)
+{json.dumps(DRAWIO_SERVICE_ICONS, indent=2)}
+
 # Layout Rules
 1. Two container shapes side-by-side: "Primary Region" (fillColor=#dae8fc)
    and "DR Region" (fillColor=#fff2cc).
-2. Inside each container, add a rounded-rectangle cell for each service.
-3. Colour each service cell with the appropriate state colour from the palette.
-4. Include the service name and state in the cell value, e.g.
-   "Amazon RDS&#10;[Active]" (use &#10; for newline in draw.io values).
-5. Add edge cells between Primary ↔ DR service pairs showing the
+2. Inside each container, add a cell for EVERY service in the pattern.
+3. **Use the official cloud-provider icon shape** from the registry above
+   for each service. Set the cell style to include the `shape=...;resIcon=...`
+   fragment from the registry. If a service is not in the registry, fall back
+   to a plain `rounded=1;whiteSpace=wrap;` rectangle.
+4. Set each icon cell size to width="60" height="60" so the icon renders.
+   Place the service name as a label below the icon using
+   `labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;align=center;`.
+5. Tint the icon's `fillColor` using the state colour from the palette.
+   For "Not-Deployed" or "Scaled-Down" states, also add `opacity=50;`.
+6. Add a small text cell below each icon showing the state label
+   (e.g., "Active", "Standby") in the matching state colour,
+   styled as `text;fontSize=10;fontStyle=2;` (italic).
+7. Include the service name and state in the cell value, e.g.
+   "Amazon RDS&#10;[Active]" (use &#10; for newline).
+8. Add edge cells between Primary ↔ DR service pairs showing the
    replication/failover mechanism as a label.
-6. Set the diagram name to "{dr_strategy} - {lifecycle_phase}".
+9. Set the diagram name to "{dr_strategy} - {lifecycle_phase}".
 
 # One-Shot Example
 {DRAWIO_ONE_SHOT_EXAMPLE}
@@ -780,21 +909,38 @@ Start with <?xml or <mxfile and end with </mxfile>.
     def _fallback_drawio(
         dr_strategy: str, lifecycle_phase: str, services: List[str]
     ) -> str:
-        """Generate a minimal placeholder draw.io XML."""
+        """Generate a minimal placeholder draw.io XML with cloud-provider icons."""
         cells = []
         cell_id = 10
         y_pos = 100
 
         for svc in services[:8]:
+            icon_style = get_drawio_icon_style(svc)
+            if icon_style:
+                # Use the official icon shape with grey tint for unknown state
+                style = (
+                    f"{icon_style}whiteSpace=wrap;fillColor=#BDBDBD;"
+                    f"fontColor=#232F3E;strokeColor=#757575;fontStyle=1;"
+                    f"fontSize=11;labelPosition=center;"
+                    f"verticalLabelPosition=bottom;verticalAlign=top;"
+                    f"align=center;opacity=50;"
+                )
+                width, height = 60, 60
+            else:
+                # Plain rectangle fallback for unrecognised services
+                style = (
+                    "rounded=1;whiteSpace=wrap;fillColor=#BDBDBD;"
+                    "fontColor=#ffffff;strokeColor=#757575;"
+                )
+                width, height = 160, 45
             cells.append(
                 f'        <mxCell id="{cell_id}" value="{svc}&#10;[Unknown]" '
-                f'style="rounded=1;whiteSpace=wrap;fillColor=#BDBDBD;fontColor=#ffffff;'
-                f'strokeColor=#757575;" vertex="1" parent="1">\n'
-                f'          <mxGeometry x="60" y="{y_pos}" width="160" height="45" as="geometry"/>\n'
+                f'style="{style}" vertex="1" parent="1">\n'
+                f'          <mxGeometry x="60" y="{y_pos}" width="{width}" height="{height}" as="geometry"/>\n'
                 f'        </mxCell>'
             )
             cell_id += 1
-            y_pos += 60
+            y_pos += 80 if icon_style else 60
 
         cells_str = "\n".join(cells)
 
@@ -806,11 +952,11 @@ Start with <?xml or <mxfile and end with </mxfile>.
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
         <mxCell id="2" value="Primary Region" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="30" y="50" width="350" height="{y_pos + 20}" as="geometry"/>
+          <mxGeometry x="30" y="50" width="350" height="{y_pos + 30}" as="geometry"/>
         </mxCell>
 {cells_str}
         <mxCell id="100" value="DR Region" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="420" y="50" width="350" height="{y_pos + 20}" as="geometry"/>
+          <mxGeometry x="420" y="50" width="350" height="{y_pos + 30}" as="geometry"/>
         </mxCell>
       </root>
     </mxGraphModel>

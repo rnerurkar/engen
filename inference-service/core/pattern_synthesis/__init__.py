@@ -11,6 +11,8 @@ from core.pattern_synthesis.hadr_diagram_generator import (
     HADRDiagramGenerator,
     DiagramArtifact,
     PatternDiagramBundle,
+    DRAWIO_SERVICE_ICONS,
+    get_drawio_icon_style,
 )
 from core.pattern_synthesis.hadr_diagram_storage import HADRDiagramStorage
 
@@ -20,5 +22,7 @@ __all__ = [
     "HADRDiagramGenerator",
     "DiagramArtifact",
     "PatternDiagramBundle",
+    "DRAWIO_SERVICE_ICONS",
+    "get_drawio_icon_style",
     "HADRDiagramStorage",
 ]
