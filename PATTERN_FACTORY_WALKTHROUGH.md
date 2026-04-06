@@ -1,4 +1,4 @@
-# The Pattern Factory Workflow — A Plain English Walkthrough (v2.2)
+# The Pattern Factory Workflow — A Plain English Walkthrough (v2.3)
 
 Think of Pattern Factory as an assembly line with **8 phases**. A user uploads an architecture diagram, and the system generates documentation (including HA/DR sections with visual diagrams) and deployable code for it — with human checkpoints along the way.
 
@@ -25,10 +25,12 @@ Think of Pattern Factory as an assembly line with **8 phases**. A user uploads a
 
 This step runs right after the documentation loop finishes. It's wrapped in a safety net — if anything here fails, the main document still gets delivered with a placeholder message saying "HA/DR section generation failed. Please complete manually." The main document is **never blocked** by HA/DR failures.
 
+Just like the Generator Agent, Retriever Agent, and Reviewer Agent, the HA/DR components are now proper **agents** — each running as its own HTTP service and accessed by the Orchestrator via **A2A (Agent-to-Agent) HTTP calls**. This keeps the architecture consistent: the Orchestrator never directly imports HA/DR code; it delegates everything over the network.
+
 8. The Orchestrator scans the draft documentation and picks out all the cloud service names it can find (e.g., "Amazon RDS", "AWS Lambda", "Cloud Run"). It does this by matching words against a dictionary of 40+ known service aliases and a curated list of common AWS and GCP service names.
-9. For each service found, the **Service HA/DR Retriever** searches a dedicated HA/DR knowledge base (a separate Vertex AI Search data store) to pull back reference documentation about how that service behaves during disasters. It searches for every combination of *service × DR strategy* (e.g., "How does Amazon RDS behave during a Warm Standby failover?"). All of these searches — typically 16 to 32 queries — run **in parallel at the same time** rather than one-by-one, which is much faster.
-10. The Orchestrator also grabs the donor pattern's existing HA/DR sections to use as a stylistic template (a "one-shot example") so the new content matches the company's standard format.
-11. The **HA/DR Documentation Generator** then writes four separate HA/DR sections — one per DR strategy (Backup and Restore, Pilot Light On Demand, Pilot Light Cold Standby, Warm Standby). All four sections are generated **in parallel** (each with a 2-minute timeout) rather than sequentially. Each section includes sub-sections for Initial Provisioning, Failover, and Failback, with summary tables showing each service's state (Active, Standby, Scaled-Down, or Not-Deployed).
+9. For each service found, the Orchestrator calls the **HA/DR Retriever Agent** (port 9006) via A2A HTTP. Inside that agent, the `ServiceHADRRetriever` searches a dedicated HA/DR knowledge base (a separate Vertex AI Search data store) to pull back reference documentation about how that service behaves during disasters. It searches for every combination of *service × DR strategy* (e.g., "How does Amazon RDS behave during a Warm Standby failover?"). All of these searches — typically 16 to 32 queries — run **in parallel at the same time** rather than one-by-one, which is much faster.
+10. The Orchestrator also calls the **HA/DR Generator Agent** (port 9007) via A2A HTTP to extract the donor pattern's existing HA/DR sections. This is used as a stylistic template (a "one-shot example") so the new content matches the company's standard format.
+11. The Orchestrator then calls the **HA/DR Generator Agent** again (same port 9007) to write four separate HA/DR sections — one per DR strategy (Backup and Restore, Pilot Light On Demand, Pilot Light Cold Standby, Warm Standby). Inside the agent, all four sections are generated **in parallel** (each with a 2-minute timeout) rather than sequentially. Each section includes sub-sections for Initial Provisioning, Failover, and Failback, with summary tables showing each service's state (Active, Standby, Scaled-Down, or Not-Deployed).
 
 ---
 
@@ -36,14 +38,14 @@ This step runs right after the documentation loop finishes. It's wrapped in a sa
 
 This step also runs with the same safety net as Phase 2b — if diagrams fail, the text documentation still gets delivered.
 
-12. The **HA/DR Diagram Generator** creates component diagrams for every combination of DR strategy × lifecycle phase: 4 strategies × 3 phases = **12 diagrams** total. Each diagram shows the services in the pattern and their state (color-coded) under that specific scenario.
-13. For each diagram, the generator makes **two AI calls** to Gemini 1.5 Pro:
+12. The Orchestrator makes a single A2A HTTP call to the **HA/DR Diagram Generator Agent** (port 9008). This agent handles both diagram generation and cloud storage upload internally. Inside the agent, the `HADRDiagramGenerator` creates component diagrams for every combination of DR strategy × lifecycle phase: 4 strategies × 3 phases = **12 diagrams** total. Each diagram shows the services in the pattern and their state (color-coded) under that specific scenario.
+13. For each diagram, the agent makes **two AI calls** to Gemini 1.5 Pro:
     - One to generate an **SVG** image (embeddable in web pages).
     - One to generate a **draw.io XML** file (editable by architects in the draw.io tool). The draw.io diagrams use **official AWS and GCP icon shapes** from a built-in registry of 40+ cloud services — so when you open them in draw.io, you see the actual AWS Lambda icon or Cloud SQL icon instead of plain rectangles.
 14. Each SVG is also locally converted to a **PNG** fallback image (using `svglib` + `reportlab` on Windows, or `cairosvg` on Linux).
 15. All 12 diagram generations run **in parallel**, but capped at 4 at a time (to avoid hitting Gemini's rate limits). Each diagram gets a 3-minute timeout — if it takes too long, a simpler fallback diagram is created automatically without AI.
-16. The **HA/DR Diagram Storage** component uploads all three files per diagram (SVG, draw.io XML, PNG) to a **GCS bucket**, organized by pattern name, strategy, and phase — e.g., `patterns/my-pattern/hadr-diagrams/warm-standby/failover.svg`. All uploads run in parallel with a 1-minute timeout each.
-17. The resulting diagram URLs are embedded directly into the HA/DR markdown sections, so the final documentation includes inline images and download links for the editable draw.io files.
+16. Still inside the same agent, the `HADRDiagramStorage` component uploads all three files per diagram (SVG, draw.io XML, PNG) to a **GCS bucket**, organized by pattern name, strategy, and phase — e.g., `patterns/my-pattern/hadr-diagrams/warm-standby/failover.svg`. All uploads run in parallel with a 1-minute timeout each.
+17. The agent returns the diagram URLs back to the Orchestrator. Since JSON can't handle Python tuple keys like `("Warm Standby", "Failover")`, the agent uses string keys like `"Warm Standby|Failover"` — the Orchestrator splits them back into tuples. The resulting diagram URLs are embedded directly into the HA/DR markdown sections, so the final documentation includes inline images and download links for the editable draw.io files.
 
 ---
 
