@@ -80,6 +80,7 @@ class HADRDocumentationGenerator:
         """
         # Build per-service reference blocks
         svc_ref_blocks: List[str] = []
+        svc_diagram_blocks: List[str] = []
         for svc_name, chunks in service_hadr_docs.items():
             chunk_texts = "\n".join(
                 c.get("content", "") for c in chunks if c.get("content")
@@ -88,11 +89,38 @@ class HADRDocumentationGenerator:
                 svc_ref_blocks.append(
                     f"### Service: {svc_name}\n{chunk_texts}"
                 )
+
+            # Collect diagram descriptions from chunks for this service
+            diagrams_for_svc: List[str] = []
+            for c in chunks:
+                for desc in c.get("diagram_descriptions", []):
+                    if desc and desc not in diagrams_for_svc:
+                        diagrams_for_svc.append(desc)
+            if diagrams_for_svc:
+                svc_diagram_blocks.append(
+                    f"### Service: {svc_name}\n"
+                    + "\n".join(
+                        f"- Diagram: {d}" for d in diagrams_for_svc
+                    )
+                )
+
         service_references = (
             "\n\n".join(svc_ref_blocks)
             if svc_ref_blocks
             else "(No service-level references available)"
         )
+
+        service_diagram_section = ""
+        if svc_diagram_blocks:
+            service_diagram_section = (
+                "\n# Service-Level HA/DR Diagram Descriptions\n"
+                "The following are AI-generated descriptions of the reference\n"
+                "HA/DR architecture diagrams from the service-level documentation.\n"
+                "Use these as VISUAL CONTEXT when writing the narrative — they show\n"
+                "what the architecture looks like at each lifecycle phase. Your text\n"
+                "should be consistent with these diagram descriptions.\n\n"
+                + "\n\n".join(svc_diagram_blocks)
+            )
 
         pattern_summary = json.dumps(pattern_context, indent=2)
 
@@ -139,6 +167,7 @@ Initial Provisioning, Failover, and Failback.
 
 # Service-Level HA/DR References
 {service_references}
+{service_diagram_section}
 
 # Output Format
 Write in clean Markdown. Use these exact sub-headings:

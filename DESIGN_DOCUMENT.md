@@ -447,7 +447,7 @@ sequenceDiagram
 
     Each leaf chunk is stored as a Document in the Vertex AI Search data store with a unique ID composed of `{service_name}_{chunk_index}`. The `chunk_index` provides global ordering across the entire service document, preserving the strategy → phase → position hierarchy.
 
-5.  **Metadata Attachment**: Every chunk receives a `struct_data` dictionary containing: `service_name`, `service_description`, `service_type`, `dr_strategy`, `lifecycle_phase`, and `chunk_index`. For example, a chunk from the "Failover" phase of the "Backup and Restore" strategy for Amazon RDS would be stored as:
+5.  **Metadata Attachment**: Every chunk receives a `struct_data` dictionary containing: `service_name`, `service_description`, `service_type`, `dr_strategy`, `lifecycle_phase`, `chunk_index`, `diagram_gcs_urls`, and `diagram_descriptions`. For example, a chunk from the "Failover" phase of the "Backup and Restore" strategy for Amazon RDS would be stored as:
 
     ```json
     {
@@ -459,12 +459,16 @@ sequenceDiagram
         "service_type": "Database",
         "dr_strategy": "Backup and Restore",
         "lifecycle_phase": "Failover",
-        "chunk_index": 3
+        "chunk_index": 3,
+        "diagram_gcs_urls": ["gs://engen-service-hadr-images/services/Amazon_RDS/hadr-diagrams/diagram_3.png"],
+        "diagram_descriptions": ["A Multi-AZ RDS deployment showing the primary instance in us-east-1a with synchronous replication to the standby in us-east-1b. During failover, Route 53 health checks detect the primary failure and DNS is updated to point at the standby, which is promoted to primary within 60-120 seconds."]
       }
     }
     ```
 
-    This structure enables the `ServiceHADRRetriever` (Section 4.10) to issue targeted queries like *"retrieve all Failover chunks for Amazon RDS under the Warm Standby strategy"* using metadata-filtered hybrid search, returning only the most relevant passages without cross-contamination from other services or strategies.
+    The `diagram_gcs_urls` and `diagram_descriptions` fields link the chunk to the original HA/DR architecture diagrams that appeared in the same section of the SharePoint page. During ingestion, each `<img>` tag is processed by Gemini Vision to produce a text description; the original image is stored on GCS. At retrieval time, these fields are returned alongside the chunk text so that downstream generators can use the diagram descriptions as **visual one-shot context** when producing new HA/DR text and diagrams.
+
+    This structure enables the `ServiceHADRRetriever` (Section 4.10) to issue targeted queries like *"retrieve all Failover chunks for Amazon RDS under the Warm Standby strategy"* using metadata-filtered hybrid search, returning only the most relevant passages — and their associated diagram references — without cross-contamination from other services or strategies.
 
 6.  **Indexing**: Each chunk is upserted as a Document in the HA/DR data store using the Discovery Engine `CreateDocumentRequest` API.
 
@@ -478,6 +482,8 @@ sequenceDiagram
 | `dr_strategy` | String | `"Warm Standby"` | Strategy-scoped retrieval |
 | `lifecycle_phase` | String | `"Failover"` | Phase-level precision |
 | `chunk_index` | Integer | `3` | Ordering within a document |
+| `diagram_gcs_urls` | List[String] | `["gs://…/diagram_3.png"]` | GCS paths to original HA/DR diagrams that appeared in this chunk's source section |
+| `diagram_descriptions` | List[String] | `["A Multi-AZ RDS deployment…"]` | AI-generated text descriptions of those diagrams (produced by Gemini Vision during ingestion) |
 
 #### 3.6.5 Configuration
 

@@ -310,6 +310,7 @@ class HADRDiagramGenerator:
         services: List[str],
         hadr_text_sections: Dict[str, str],
         pattern_context: Dict[str, Any],
+        service_diagram_descriptions: Optional[Dict[str, Dict[str, List[str]]]] = None,
     ) -> PatternDiagramBundle:
         """
         Generate diagrams for every DR-strategy × lifecycle-phase combination.
@@ -320,6 +321,11 @@ class HADRDiagramGenerator:
             hadr_text_sections: Output of HADRDocumentationGenerator — maps
                                 DR strategy → generated Markdown text.
             pattern_context:    Pattern metadata (title, solution overview, etc.)
+            service_diagram_descriptions:
+                Optional dict of service_name → dr_strategy → [descriptions]
+                extracted from ingested service-level HA/DR diagrams.  These
+                are injected into the prompt as reference architecture context
+                so the LLM can produce more accurate new diagrams.
 
         Returns:
             PatternDiagramBundle with up to 12 DiagramArtifact entries.
@@ -330,6 +336,11 @@ class HADRDiagramGenerator:
             strategy_text = hadr_text_sections.get(strategy, "")
             # Split the strategy text into per-phase sections
             phase_texts = self._split_phases(strategy_text)
+
+            # Collect per-service diagram descriptions for this strategy
+            strategy_diag_context = self._build_diagram_context(
+                service_diagram_descriptions, strategy
+            )
 
             for phase in LIFECYCLE_PHASES:
                 phase_text = phase_texts.get(phase, "")
@@ -344,6 +355,7 @@ class HADRDiagramGenerator:
                     lifecycle_phase=phase,
                     phase_description=phase_text,
                     pattern_context=pattern_context,
+                    reference_diagram_descriptions=strategy_diag_context,
                 )
                 bundle.diagrams[(strategy, phase)] = artifact
 
@@ -355,6 +367,36 @@ class HADRDiagramGenerator:
         )
         return bundle
 
+    @staticmethod
+    def _build_diagram_context(
+        service_diagram_descriptions: Optional[Dict[str, Dict[str, List[str]]]],
+        strategy: str,
+    ) -> str:
+        """
+        Build a prompt-ready text block summarising the reference service-level
+        HA/DR diagram descriptions for a single DR strategy.
+
+        Returns an empty string if no descriptions are available.
+        """
+        if not service_diagram_descriptions:
+            return ""
+        lines: List[str] = []
+        for svc_name, strategy_map in service_diagram_descriptions.items():
+            descs = strategy_map.get(strategy, [])
+            for d in descs:
+                if d:
+                    lines.append(f"  - {svc_name}: {d}")
+        if not lines:
+            return ""
+        return (
+            "# Reference Service-Level HA/DR Diagrams (from ingested docs)\n"
+            "These describe the EXISTING architecture diagrams from the\n"
+            "service-level HA/DR documentation. Use them as visual inspiration\n"
+            "for the component layout, replication arrows, and state labels\n"
+            "in the NEW diagram you are generating.\n"
+            + "\n".join(lines)
+        )
+
     # ─── Async public API ────────────────────────────────────────────────
 
     async def agenerate_all_diagrams(
@@ -363,6 +405,7 @@ class HADRDiagramGenerator:
         services: List[str],
         hadr_text_sections: Dict[str, str],
         pattern_context: Dict[str, Any],
+        service_diagram_descriptions: Optional[Dict[str, Dict[str, List[str]]]] = None,
         timeout_per_diagram: float = 180.0,
         max_concurrent: int = 4,
     ) -> PatternDiagramBundle:
@@ -379,6 +422,9 @@ class HADRDiagramGenerator:
             services:             List of canonical service names.
             hadr_text_sections:   DR strategy → generated Markdown text.
             pattern_context:      Pattern metadata.
+            service_diagram_descriptions:
+                Optional dict of service_name → dr_strategy → [descriptions]
+                from ingested service-level HA/DR diagrams.
             timeout_per_diagram:  Max seconds per single diagram
                                   (SVG + draw.io + PNG combined, default 180).
             max_concurrent:       Concurrency cap to avoid Gemini quota
@@ -390,7 +436,10 @@ class HADRDiagramGenerator:
         bundle = PatternDiagramBundle(pattern_name=pattern_name)
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def _gen_one(strategy: str, phase: str, phase_text: str):
+        async def _gen_one(
+            strategy: str, phase: str, phase_text: str,
+            diag_context: str = "",
+        ):
             """Generate one diagram with concurrency limit and timeout."""
             async with semaphore:
                 try:
@@ -398,6 +447,7 @@ class HADRDiagramGenerator:
                         self._generate_single_diagram,
                         pattern_name, services, strategy,
                         phase, phase_text, pattern_context,
+                        diag_context,
                     )
                     artifact = await asyncio.wait_for(
                         coro, timeout=timeout_per_diagram
@@ -437,10 +487,13 @@ class HADRDiagramGenerator:
         for strategy in DR_STRATEGIES:
             strategy_text = hadr_text_sections.get(strategy, "")
             phase_texts = self._split_phases(strategy_text)
+            ref_diag_context = self._build_diagram_context(
+                service_diagram_descriptions, strategy
+            )
             for phase in LIFECYCLE_PHASES:
                 phase_text = phase_texts.get(phase, "")
                 logger.info(f"Scheduling async diagram: {strategy} / {phase}")
-                tasks.append(_gen_one(strategy, phase, phase_text))
+                tasks.append(_gen_one(strategy, phase, phase_text, ref_diag_context))
 
         # Execute all (up to max_concurrent at a time)
         results = await asyncio.gather(*tasks, return_exceptions=False)
@@ -466,6 +519,7 @@ class HADRDiagramGenerator:
         lifecycle_phase: str,
         phase_description: str,
         pattern_context: Dict[str, Any],
+        reference_diagram_descriptions: str = "",
     ) -> DiagramArtifact:
         """Generate SVG + draw.io XML for one (strategy, phase) pair."""
         artifact = DiagramArtifact(
@@ -499,6 +553,7 @@ class HADRDiagramGenerator:
                 pattern_name, services, dr_strategy,
                 lifecycle_phase, phase_description, pattern_context,
                 retry_hint="Previous SVG was malformed. Ensure valid XML with xmlns and viewBox.",
+                reference_diagram_descriptions=reference_diagram_descriptions,
             )
             valid_svg, svg_content = self._validate_and_fix_svg(svg_content)
             if not valid_svg:
@@ -534,10 +589,23 @@ class HADRDiagramGenerator:
         phase_description: str,
         pattern_context: Dict[str, Any],
         retry_hint: str = "",
+        reference_diagram_descriptions: str = "",
     ) -> str:
         """Ask Gemini to produce an SVG component diagram."""
         services_list = "\n".join(f"  - {s}" for s in services)
         state_guide = self._state_guide(dr_strategy, lifecycle_phase)
+
+        ref_diag_section = ""
+        if reference_diagram_descriptions:
+            ref_diag_section = f"""
+{reference_diagram_descriptions}
+
+Use the above reference diagram descriptions to guide your layout: which
+services appear in which region, how replication arrows flow, and which
+components are active vs. standby.  The NEW diagram should reflect the new
+pattern's services but follow the same architectural patterns shown in the
+references.
+"""
 
         prompt = f"""
 Generate a clean, professional SVG component diagram for the following HA/DR scenario.
@@ -555,7 +623,7 @@ Services:
 
 # State Guide
 {state_guide}
-
+{ref_diag_section}
 # Colour Palette for Service States
 {json.dumps(STATE_COLORS, indent=2)}
 
@@ -604,10 +672,21 @@ Start with <svg and end with </svg>.
         lifecycle_phase: str,
         phase_description: str,
         pattern_context: Dict[str, Any],
+        reference_diagram_descriptions: str = "",
     ) -> str:
         """Ask Gemini to produce draw.io-compatible XML."""
         services_list = "\n".join(f"  - {s}" for s in services)
         state_guide = self._state_guide(dr_strategy, lifecycle_phase)
+
+        ref_diag_section = ""
+        if reference_diagram_descriptions:
+            ref_diag_section = f"""
+{reference_diagram_descriptions}
+
+Use the above reference diagram descriptions to guide your layout: which
+services appear in which region, how replication arrows flow, and which
+components are active vs. standby.
+"""
 
         prompt = f"""
 Generate a draw.io XML file (mxfile format) for the following HA/DR component diagram.
@@ -625,7 +704,7 @@ Services:
 
 # State Guide
 {state_guide}
-
+{ref_diag_section}
 # Colour Palette for Service States
 {json.dumps(STATE_COLORS, indent=2)}
 

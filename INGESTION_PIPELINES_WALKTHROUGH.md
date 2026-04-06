@@ -90,8 +90,29 @@ Think of ingestion as "stocking the shelves" — you do it ahead of time so that
    - `dr_strategy` (e.g., "Warm Standby")
    - `lifecycle_phase` (e.g., "Failover")
    - `chunk_index` (e.g., 3)
+   - `diagram_gcs_urls` — a list of GCS paths to the original HA/DR diagram images that appeared in the same section as this chunk (e.g., `["gs://engen-service-hadr-images/services/Amazon_RDS/hadr-diagrams/diagram_3.png"]`)
+   - `diagram_descriptions` — a list of AI-generated text descriptions of those diagrams, produced by Gemini Vision during Step 3 above (e.g., `["A Multi-AZ RDS deployment showing primary in us-east-1a with synchronous replication to standby in us-east-1b. During failover, Route 53 health checks detect failure and DNS is updated..."]`)
 
-   **Why this matters:** At inference time, the HA/DR Retriever can issue a very precise query like *"give me all Failover chunks for Amazon RDS under the Warm Standby strategy"* using metadata filters, instead of hoping the search engine picks the right chunks on its own.
+   **Why this matters:** At inference time, the HA/DR Retriever can issue a very precise query like *"give me all Failover chunks for Amazon RDS under the Warm Standby strategy"* using metadata filters, instead of hoping the search engine picks the right chunks on its own. The `diagram_gcs_urls` and `diagram_descriptions` fields ensure that when a chunk is retrieved, the **original reference diagrams travel with it** — so downstream generators (both the text generator and the diagram generator) can use them as **visual one-shot context** when producing new HA/DR sections and architecture diagrams for a different pattern.
+
+   Here's what a single chunk looks like as stored in Vertex AI Search:
+
+   ```json
+   {
+     "id": "Amazon_RDS_3",
+     "content": "During failover, the RDS Multi-AZ instance automatically promotes the standby replica in the DR region. DNS endpoint remains the same. The promotion typically completes within 60-120 seconds...",
+     "struct_data": {
+       "service_name": "Amazon RDS",
+       "service_description": "Managed relational database service",
+       "service_type": "Database",
+       "dr_strategy": "Backup and Restore",
+       "lifecycle_phase": "Failover",
+       "chunk_index": 3,
+       "diagram_gcs_urls": ["gs://engen-service-hadr-images/services/Amazon_RDS/hadr-diagrams/diagram_3.png"],
+       "diagram_descriptions": ["A Multi-AZ RDS deployment showing primary in us-east-1a with synchronous replication to standby in us-east-1b..."]
+     }
+   }
+   ```
 
 6. **Index each chunk.** Every chunk is uploaded as its own document to the `service-hadr-datastore` with a unique ID: `{service_name}_{chunk_index}`.
 

@@ -155,8 +155,8 @@ class ServiceHADRIngestionPipeline:
             return
 
         # 2. Extract text and handle images
-        plain_text, image_descriptions = self._extract_text_and_process_images(
-            raw_html, svc_name
+        plain_text, image_descriptions, diagram_records = (
+            self._extract_text_and_process_images(raw_html, svc_name)
         )
 
         # 3. Prepend diagram descriptions into the text
@@ -165,7 +165,7 @@ class ServiceHADRIngestionPipeline:
             plain_text = desc_block + plain_text
 
         # 4. Chunk by DR strategy → lifecycle phase → size
-        chunks = self._chunk_document(plain_text, svc_meta)
+        chunks = self._chunk_document(plain_text, svc_meta, diagram_records)
 
         # 5. Index chunks in Vertex AI Search
         self._index_chunks(chunks)
@@ -178,14 +178,24 @@ class ServiceHADRIngestionPipeline:
 
     def _extract_text_and_process_images(
         self, html_content: str, service_name: str
-    ) -> Tuple[str, List[str]]:
+    ) -> Tuple[str, List[str], List[Dict[str, Any]]]:
         """
         Extracts plain text from HTML.  For any <img> found, downloads it,
         generates an LLM description, stores the image in GCS, and replaces
         the image in the text with the description.
+
+        Returns:
+            plain_text:       The full text content with diagrams replaced.
+            descriptions:     List of summary strings for each diagram.
+            diagram_records:  List of dicts, each with ``gcs_url``,
+                              ``description``, and ``diagram_index`` so the
+                              chunker can attach them to the correct chunks.
         """
         soup = BeautifulSoup(html_content, "html.parser")
         descriptions: List[str] = []
+        diagram_records: List[Dict[str, Any]] = []
+
+        safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", service_name)
 
         for idx, img_tag in enumerate(soup.find_all("img")):
             original_src = img_tag.get("src")
@@ -209,21 +219,32 @@ class ServiceHADRIngestionPipeline:
             )
 
             # Upload image to GCS
-            safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", service_name)
             gcs_path = f"services/{safe_name}/hadr-diagrams/diagram_{idx}.png"
+            gcs_url = ""
             try:
                 blob = self.bucket.blob(gcs_path)
                 blob.upload_from_string(image_bytes, content_type="image/png")
+                gcs_url = f"gs://{self.bucket.name}/{gcs_path}"
             except Exception as e:
                 logger.warning(f"GCS upload failed for {gcs_path}: {e}")
 
-            # Replace <img> tag with description text
+            # Record diagram metadata for later attachment to chunks
+            diagram_records.append({
+                "diagram_index": idx,
+                "gcs_url": gcs_url,
+                "description": description,
+            })
+
+            # Replace <img> tag with a marked paragraph so we can trace
+            # which diagram ended up in which section during chunking.
+            # The marker tag carries a data attribute with the diagram index.
             replacement = soup.new_tag("p")
-            replacement.string = f"[DIAGRAM: {description}]"
+            replacement["data-diagram-idx"] = str(idx)
+            replacement.string = f"[DIAGRAM {idx}: {description}]"
             img_tag.replace_with(replacement)
 
         plain_text = soup.get_text(separator="\n", strip=True)
-        return plain_text, descriptions
+        return plain_text, descriptions, diagram_records
 
     def _describe_diagram(self, image_bytes: bytes, alt_text: str) -> str:
         """Use Gemini Vision to describe an HA/DR diagram."""
@@ -250,6 +271,7 @@ class ServiceHADRIngestionPipeline:
         self,
         content: str,
         svc_meta: Dict[str, str],
+        diagram_records: Optional[List[Dict[str, Any]]] = None,
         max_chunk_words: int = 1500,
         overlap_words: int = 200,
     ) -> List[Dict[str, Any]]:
@@ -260,10 +282,21 @@ class ServiceHADRIngestionPipeline:
           3. By word-count window
 
         Each chunk carries full structured metadata so retrieval can filter
-        precisely.
+        precisely.  If *diagram_records* is supplied, any diagrams whose
+        ``[DIAGRAM N: …]`` marker text appears inside a chunk's text are
+        attached to that chunk's ``struct_data`` as ``diagram_gcs_urls``
+        and ``diagram_descriptions``.
         """
         chunks: List[Dict[str, Any]] = []
         chunk_idx = 0
+
+        # Build a quick lookup from marker text prefix → diagram record
+        # The marker format inserted by _extract_text_and_process_images is:
+        #   [DIAGRAM <idx>: <description>]
+        _diagram_lookup = {}
+        for rec in (diagram_records or []):
+            marker_prefix = f"[DIAGRAM {rec['diagram_index']}:"
+            _diagram_lookup[marker_prefix] = rec
 
         strategy_sections = self._split_by_heading(
             content, DR_STRATEGY_PATTERNS
@@ -278,32 +311,52 @@ class ServiceHADRIngestionPipeline:
                 for text_chunk in self._window_chunk(
                     phase_text, max_chunk_words, overlap_words
                 ):
+                    # Determine which diagrams fall inside this chunk
+                    chunk_diagram_urls: List[str] = []
+                    chunk_diagram_descs: List[str] = []
+                    for marker_prefix, rec in _diagram_lookup.items():
+                        if marker_prefix in text_chunk:
+                            if rec.get("gcs_url"):
+                                chunk_diagram_urls.append(rec["gcs_url"])
+                            if rec.get("description"):
+                                chunk_diagram_descs.append(rec["description"])
+
                     doc_id = (
                         re.sub(r"[^a-zA-Z0-9_-]", "_", svc_meta["service_name"])
                         + f"_{chunk_idx}"
                     )
+
+                    struct_data = {
+                        "service_name": svc_meta["service_name"],
+                        "service_description": svc_meta.get(
+                            "service_description", ""
+                        ),
+                        "service_type": svc_meta.get(
+                            "service_type", ""
+                        ),
+                        "dr_strategy": strategy,
+                        "lifecycle_phase": phase,
+                        "chunk_index": chunk_idx,
+                        "diagram_gcs_urls": chunk_diagram_urls,
+                        "diagram_descriptions": chunk_diagram_descs,
+                    }
+
                     chunks.append(
                         {
                             "id": doc_id,
                             "content": text_chunk,
-                            "struct_data": {
-                                "service_name": svc_meta["service_name"],
-                                "service_description": svc_meta.get(
-                                    "service_description", ""
-                                ),
-                                "service_type": svc_meta.get(
-                                    "service_type", ""
-                                ),
-                                "dr_strategy": strategy,
-                                "lifecycle_phase": phase,
-                                "chunk_index": chunk_idx,
-                            },
+                            "struct_data": struct_data,
                         }
                     )
                     chunk_idx += 1
 
+        total_diags = sum(
+            len(c["struct_data"].get("diagram_gcs_urls", []))
+            for c in chunks
+        )
         logger.info(
-            f"Chunked '{svc_meta['service_name']}' into {len(chunks)} chunks"
+            f"Chunked '{svc_meta['service_name']}' into {len(chunks)} chunks "
+            f"({total_diags} diagram references attached)"
         )
         return chunks
 

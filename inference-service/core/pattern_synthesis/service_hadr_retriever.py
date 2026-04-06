@@ -156,6 +156,26 @@ class ServiceHADRRetriever:
                         for snip in derived.get("snippets", []):
                             content += dict(snip).get("snippet", "") + "\n"
 
+                # Extract diagram metadata stored during ingestion
+                diagram_gcs_urls = struct_data.get(
+                    "diagram_gcs_urls", []
+                )
+                diagram_descriptions = struct_data.get(
+                    "diagram_descriptions", []
+                )
+                # Normalise: Vertex Search may return RepeatedComposite;
+                # convert to plain Python lists.
+                if not isinstance(diagram_gcs_urls, list):
+                    try:
+                        diagram_gcs_urls = list(diagram_gcs_urls)
+                    except (TypeError, ValueError):
+                        diagram_gcs_urls = []
+                if not isinstance(diagram_descriptions, list):
+                    try:
+                        diagram_descriptions = list(diagram_descriptions)
+                    except (TypeError, ValueError):
+                        diagram_descriptions = []
+
                 results.append(
                     {
                         "service_name": struct_data.get(
@@ -169,6 +189,8 @@ class ServiceHADRRetriever:
                         "content": content.strip()
                         or struct_data.get("content", ""),
                         "document_id": doc.id,
+                        "diagram_gcs_urls": diagram_gcs_urls,
+                        "diagram_descriptions": diagram_descriptions,
                     }
                 )
 
