@@ -23,15 +23,10 @@ from lib.a2a_client import A2AClient, A2AError
 from lib.sharepoint_publisher import SharePointPublisher, SharePointPageConfig
 from lib.github_publisher import GitHubMCPPublisher
 from lib.cloudsql_client import CloudSQLManager, logger as sql_logger
-from core.pattern_synthesis.service_hadr_retriever import ServiceHADRRetriever
-from core.pattern_synthesis.hadr_generator import HADRDocumentationGenerator
 from core.pattern_synthesis.hadr_diagram_generator import (
-    HADRDiagramGenerator,
-    PatternDiagramBundle,
     DR_STRATEGIES,
     LIFECYCLE_PHASES,
 )
-from core.pattern_synthesis.hadr_diagram_storage import HADRDiagramStorage
 from config import Config
 
 class OrchestratorAgent(ADKAgent):
@@ -64,26 +59,7 @@ class OrchestratorAgent(ADKAgent):
              db_name=os.environ.get("DB_NAME", "reviews_db")
         )
 
-        # HA/DR Documentation Generation
-        self.hadr_retriever = ServiceHADRRetriever(
-            project_id=Config.PROJECT_ID,
-            location="global",
-            data_store_id=Config.SERVICE_HADR_DATA_STORE_ID,
-        )
-        self.hadr_generator = HADRDocumentationGenerator(
-            project_id=Config.PROJECT_ID,
-            location=Config.LOCATION,
-        )
-
-        # HA/DR Diagram Generation & Storage
-        self.hadr_diagram_generator = HADRDiagramGenerator(
-            project_id=Config.PROJECT_ID,
-            location=Config.LOCATION,
-        )
-        self.hadr_diagram_storage = HADRDiagramStorage(
-            bucket_name=Config.HADR_DIAGRAM_GCS_BUCKET,
-            project_id=Config.PROJECT_ID,
-        )
+        # HA/DR agents are now accessed via A2A calls (no direct instantiation)
 
     async def handle(self, req: AgentRequest) -> AgentResponse:
         self.logger.info(f"Received request: {req.task}")
@@ -318,7 +294,7 @@ class OrchestratorAgent(ADKAgent):
                 self.logger.error(f"Status check failed: {e}")
         return statuses
 
-    # ─── HA/DR Generation Helpers ────────────────────────────────────────
+    # ─── HA/DR Generation Helpers (A2A Delegation) ────────────────────────
 
     async def _agenerate_hadr_sections(
         self,
@@ -326,16 +302,14 @@ class OrchestratorAgent(ADKAgent):
         donor_context: Dict,
     ) -> Dict[str, str]:
         """
-        Async version — generates HA/DR documentation sections by:
-          1. Extracting service names from the generated doc sections
-          2. Retrieving per-service HA/DR docs from Vertex AI Search (parallel)
-          3. Extracting the donor pattern's HA/DR sections as one-shot examples
-          4. Calling HADRDocumentationGenerator for all DR strategies (parallel)
-
-        Returns the generated sections dict AND the extracted service_names
-        as a tuple so the caller can reuse them for diagram generation.
+        Delegates HA/DR documentation generation to the three HA/DR agents
+        via A2A calls:
+          1. Extracts service names locally (CPU-only, fast)
+          2. Calls HADRRetrieverAgent to retrieve per-service HA/DR docs
+          3. Calls HADRGeneratorAgent to extract donor HA/DR sections
+          4. Calls HADRGeneratorAgent to generate all 4 DR strategy sections
         """
-        # 1. Extract service names (CPU-only, fast)
+        # 1. Extract service names (CPU-only, fast — stays local)
         doc_text = "\n".join(str(v) for v in generated_sections.values())
         service_names = self._extract_service_names_from_doc(doc_text)
         if not service_names:
@@ -344,15 +318,25 @@ class OrchestratorAgent(ADKAgent):
 
         self.logger.info(f"Extracted service names for HA/DR: {service_names}")
 
-        # 2. Retrieve service-level HA/DR docs (async — all N×4 searches in parallel)
-        service_hadr_docs = await self.hadr_retriever.aretrieve_all_services_hadr(
-            service_names=service_names,
+        # 2. Retrieve service-level HA/DR docs via HADRRetrieverAgent
+        retriever_resp = await self.client.call_agent(
+            Config.HADR_RETRIEVER_URL,
+            "retrieve_all_services_hadr",
+            {"service_names": service_names},
+        )
+        service_hadr_docs = retriever_resp.get("result", {}).get(
+            "service_hadr_docs", {}
         )
 
-        # 3. Extract donor pattern HA/DR sections (CPU-only)
+        # 3. Extract donor pattern HA/DR sections via HADRGeneratorAgent
         donor_html = donor_context.get("html_content", "") if donor_context else ""
-        donor_hadr_sections = HADRDocumentationGenerator.extract_donor_hadr_sections(
-            donor_html
+        extract_resp = await self.client.call_agent(
+            Config.HADR_GENERATOR_URL,
+            "extract_donor_hadr_sections",
+            {"donor_html_content": donor_html},
+        )
+        donor_hadr_sections = extract_resp.get("result", {}).get(
+            "donor_hadr_sections", {}
         )
 
         # 4. Build pattern context
@@ -365,12 +349,17 @@ class OrchestratorAgent(ADKAgent):
             "services": service_names,
         }
 
-        # 5. Generate all 4 strategies in parallel (async)
-        hadr_sections = await self.hadr_generator.agenerate_hadr_sections(
-            pattern_context=pattern_context,
-            donor_hadr_sections=donor_hadr_sections,
-            service_hadr_docs=service_hadr_docs,
+        # 5. Generate all 4 strategies in parallel via HADRGeneratorAgent
+        gen_resp = await self.client.call_agent(
+            Config.HADR_GENERATOR_URL,
+            "generate_hadr_sections",
+            {
+                "pattern_context": pattern_context,
+                "donor_hadr_sections": donor_hadr_sections,
+                "service_hadr_docs": service_hadr_docs,
+            },
         )
+        hadr_sections = gen_resp.get("result", {}).get("hadr_sections", {})
 
         return hadr_sections
 
@@ -440,9 +429,8 @@ class OrchestratorAgent(ADKAgent):
         hadr_sections: Dict[str, str],
     ) -> Dict:
         """
-        Async version — generates component diagrams for every DR strategy ×
-        lifecycle phase combination (up to 12 diagrams in parallel), uploads
-        each bundle to GCS in parallel, and returns a URL map.
+        Delegates diagram generation + GCS upload to the
+        HADRDiagramGeneratorAgent via a single A2A call.
 
         Returns:
             Dict keyed by (strategy, phase) tuples → dict with svg_url,
@@ -460,42 +448,30 @@ class OrchestratorAgent(ADKAgent):
             "services": service_names,
         }
 
-        # Generate all 12 diagrams in parallel (async, semaphore-limited)
-        bundle = await self.hadr_diagram_generator.agenerate_all_diagrams(
-            pattern_name=pattern_title,
-            services=service_names,
-            hadr_text_sections=hadr_sections,
-            pattern_context=pattern_context,
+        # Single A2A call to HADRDiagramGeneratorAgent
+        resp = await self.client.call_agent(
+            Config.HADR_DIAGRAM_GENERATOR_URL,
+            "generate_and_store_hadr_diagrams",
+            {
+                "pattern_title": pattern_title,
+                "services": service_names,
+                "hadr_text_sections": hadr_sections,
+                "pattern_context": pattern_context,
+            },
         )
-
-        # Upload all diagram bundles in parallel (async)
-        async def _upload_one(strategy, phase, artifact):
-            try:
-                urls = await self.hadr_diagram_storage.aupload_diagram_bundle(
-                    pattern_name=pattern_title,
-                    strategy=strategy,
-                    phase=phase,
-                    svg_content=artifact.svg_content,
-                    drawio_xml=artifact.drawio_xml,
-                    png_bytes=artifact.png_bytes,
-                )
-                return (strategy, phase), urls
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to upload diagram {strategy}/{phase}: {e}"
-                )
-                return (strategy, phase), {}
-
-        upload_tasks = [
-            _upload_one(strategy, phase, artifact)
-            for (strategy, phase), artifact in bundle.diagrams.items()
-        ]
-        upload_results = await asyncio.gather(*upload_tasks, return_exceptions=False)
-
-        url_map = {key: urls for key, urls in upload_results}
+        # The agent returns string keys "Strategy|Phase" — convert to tuples
+        raw_map = resp.get("result", {}).get("diagram_urls", {})
+        url_map = {}
+        for key, urls in raw_map.items():
+            if "|" in key:
+                strategy, phase = key.split("|", 1)
+                url_map[(strategy, phase)] = urls
+            else:
+                url_map[key] = urls
 
         self.logger.info(
-            f"Async stored {len(url_map)} diagram bundles on GCS for '{pattern_title}'"
+            f"Received {len(url_map)} diagram bundles from "
+            f"HADRDiagramGeneratorAgent for '{pattern_title}'"
         )
         return url_map
 
@@ -514,7 +490,7 @@ class OrchestratorAgent(ADKAgent):
 
         parts = ["## High Availability / Disaster Recovery\n"]
 
-        for strategy in HADRDocumentationGenerator.DR_STRATEGIES:
+        for strategy in DR_STRATEGIES:
             section_text = hadr_sections.get(strategy, "")
             if not section_text:
                 parts.append(
