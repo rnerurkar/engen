@@ -196,6 +196,67 @@ class SharePointClient:
         logging.info(f"Fetched {len(patterns)} patterns total")
         return patterns
 
+    def fetch_service_hadr_list(self):
+        """
+        Retrieves the catalog of services for HA/DR ingestion from a
+        dedicated SharePoint List.
+
+        This mirrors ``fetch_pattern_list()`` but targets the HA/DR
+        Service Catalog list (``SP_HADR_LIST_ID``).  Each list item
+        maps to a service whose HA/DR documentation page will be
+        fetched and ingested.
+
+        Expected SharePoint List columns:
+            - ServiceName  (Single-line text)  – e.g. "Amazon RDS"
+            - ServiceDescription (Single-line text) – e.g. "Managed relational DB service"
+            - ServiceType  (Choice: Compute|Storage|Database|Network)
+            - HADRPageLink (Hyperlink) – URL to the service's HA/DR SharePoint page
+
+        Returns:
+            list[dict]: Each dict contains ``service_name``,
+            ``service_description``, ``service_type``, and ``page_url``.
+        """
+        url = (
+            f"https://graph.microsoft.com/v1.0/sites/{self.cfg.SP_SITE_ID}"
+            f"/lists/{self.cfg.SP_HADR_LIST_ID}/items?expand=fields"
+        )
+        services = []
+
+        logging.info("Starting HA/DR service catalog fetch from SharePoint List...")
+
+        while url:
+            response = self._get_with_retry(url)
+            data = response.json()
+
+            for item in data.get("value", []):
+                fields = item.get("fields", {})
+
+                # Hyperlink columns store {"Url": "...", "Description": "..."}
+                page_link = fields.get("HADRPageLink", {})
+                page_url = (
+                    page_link.get("Url")
+                    if isinstance(page_link, dict)
+                    else page_link
+                )
+
+                services.append({
+                    "service_name": fields.get("ServiceName", fields.get("Title", "")),
+                    "service_description": fields.get("ServiceDescription", ""),
+                    "service_type": fields.get("ServiceType", ""),
+                    "page_url": page_url,
+                })
+
+            # Follow OData pagination
+            url = data.get("@odata.nextLink")
+            if url:
+                logging.info(
+                    f"Fetching next page of HA/DR services... "
+                    f"(total so far: {len(services)})"
+                )
+
+        logging.info(f"Fetched {len(services)} HA/DR services total")
+        return services
+
     def fetch_page_html(self, page_url):
         """
         Retrieves the actual HTML content of a SharePoint "Modern Page".

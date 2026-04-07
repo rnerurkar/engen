@@ -119,9 +119,14 @@ class ServiceHADRIngestionPipeline:
 
     # ─── Public API ──────────────────────────────────────────────────────
 
-    def run_ingestion(self, service_list: List[Dict[str, Any]]):
+    def run_ingestion(self, service_list: Optional[List[Dict[str, Any]]] = None):
         """
         Main entry-point: ingests all services in *service_list*.
+
+        If *service_list* is not provided the pipeline reads the service
+        catalog directly from the SharePoint List identified by
+        ``SP_HADR_LIST_ID`` — mirroring how the pattern ingestion pipeline
+        fetches its list via ``fetch_pattern_list()``.
 
         Each entry must contain at a minimum::
 
@@ -132,6 +137,13 @@ class ServiceHADRIngestionPipeline:
                 "page_url": "https://sharepoint.com/sites/.../SitePages/rds-hadr.aspx"
             }
         """
+        if service_list is None:
+            logger.info(
+                "No service list supplied — fetching from SharePoint List "
+                "(SP_HADR_LIST_ID)..."
+            )
+            service_list = self.sp_client.fetch_service_hadr_list()
+
         logger.info(
             f"Starting service HA/DR ingestion for {len(service_list)} services"
         )
@@ -477,17 +489,10 @@ if __name__ == "__main__":
             ),
         )
 
-        # The service list would come from a SharePoint list or a JSON file.
-        # For now we load from an env-referenced JSON file on GCS or local disk.
-        svc_list_path = os.getenv("SERVICE_HADR_LIST", "service_catalog.json")
-        if os.path.isfile(svc_list_path):
-            with open(svc_list_path, "r", encoding="utf-8") as f:
-                service_list = json.load(f)
-        else:
-            logger.error(f"Service list not found at {svc_list_path}")
-            sys.exit(1)
-
-        pipeline.run_ingestion(service_list)
+        # Fetch the service list from the SharePoint List (same pattern
+        # as vertex_search_pipeline.py → sp_client.fetch_pattern_list()).
+        # No local JSON file needed.
+        pipeline.run_ingestion()
 
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}", exc_info=True)

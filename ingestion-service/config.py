@@ -23,7 +23,8 @@ class Config:
         'AZURE_CLIENT_ID',
         'AZURE_CLIENT_SECRET',
         'SP_SITE_ID',
-        'SP_LIST_ID'
+        'SP_LIST_ID',
+        'SP_HADR_LIST_ID'
     ]
     
     def __init__(self):
@@ -46,6 +47,7 @@ class Config:
         self.AZURE_CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
         self.SP_SITE_ID = os.getenv("SP_SITE_ID")
         self.SP_LIST_ID = os.getenv("SP_LIST_ID")
+        self.SP_HADR_LIST_ID = os.getenv("SP_HADR_LIST_ID")
         self.SP_PAGES_LIBRARY = os.getenv("SP_PAGES_LIBRARY", "SitePages")
         
         # Validate configuration

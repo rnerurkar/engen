@@ -64,7 +64,7 @@ Think of ingestion as "stocking the shelves" — you do it ahead of time so that
 
 ### How It Works — Step by Step
 
-1. **Read the service list.** The pipeline loads a JSON file (`service_catalog.json`) that lists every cloud service the company uses. Each entry has the service name (e.g., "Amazon RDS"), a description, a category (Compute, Storage, Database, Network), and a SharePoint page URL.
+1. **Read the service list from SharePoint.** The pipeline calls `fetch_service_hadr_list()` on the SharePoint Client — exactly the same pattern used by Pipeline 1's `fetch_pattern_list()`. This reads a **dedicated SharePoint List** (identified by the `SP_HADR_LIST_ID` environment variable) whose columns include `ServiceName`, `ServiceDescription`, `ServiceType` (Compute, Storage, Database, Network), and `HADRPageLink` (a hyperlink to the service’s HA/DR page). Pagination is handled automatically. No local JSON file is needed.
 
 2. **Fetch the HTML page for each service.** Same mechanism as Pipeline 1 — uses the SharePoint Client to get the raw HTML.
 

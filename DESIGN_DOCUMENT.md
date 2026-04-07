@@ -354,7 +354,8 @@ sequenceDiagram
     participant GCS as Cloud Storage
     participant ES as Vertex AI Search<br/>(HA/DR Data Store)
 
-    Pipeline->>Pipeline: Load service_catalog.json
+    Pipeline->>SP: fetch_service_hadr_list()
+    SP-->>Pipeline: service_list[] (from SP_HADR_LIST_ID)
 
     loop For each service
         Pipeline->>SP: fetch_page_html(service.page_url)
@@ -391,7 +392,7 @@ sequenceDiagram
 
 #### 3.6.3 End-to-End Flow Description
 
-1.  **Service Discovery**: The pipeline reads a service list from a JSON file (`service_catalog.json`). Each entry specifies the `service_name`, `service_description`, `service_type`, and `page_url` for the service's HA/DR documentation in SharePoint.
+1.  **Service Discovery**: The pipeline reads the service catalog from a **dedicated SharePoint List** (`SP_HADR_LIST_ID`) via the `SharePointClient.fetch_service_hadr_list()` method — mirroring how the pattern ingestion pipeline fetches its catalog via `fetch_pattern_list()`. Each list item provides the `service_name` (from the `ServiceName` column), `service_description` (`ServiceDescription`), `service_type` (`ServiceType` — Compute | Storage | Database | Network), and `page_url` (from the `HADRPageLink` hyperlink column) pointing to the service’s HA/DR documentation page in SharePoint. OData pagination is handled automatically.
 2.  **HTML Extraction**: For each service, the pipeline fetches the raw HTML body from the SharePoint page URL.
 3.  **HA/DR Diagram Processing**: Unlike the pattern pipeline (which targets the first two diagrams), this pipeline processes **all** `<img>` tags in the document:
     *   Downloads the image from SharePoint.
@@ -490,7 +491,7 @@ sequenceDiagram
 |---------|--------|---------|
 | HA/DR Data Store ID | `SERVICE_HADR_DS_ID` env var | `service-hadr-datastore` |
 | HA/DR GCS Bucket | `SERVICE_HADR_GCS_BUCKET` env var | `engen-service-hadr-images` |
-| Service List | `SERVICE_HADR_LIST` env var | `service_catalog.json` (local file) |
+| HA/DR Service List | `SP_HADR_LIST_ID` env var | SharePoint List ID (required) |
 
 ---
 
