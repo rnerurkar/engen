@@ -1,7 +1,7 @@
 # EnGen: Architecture Pattern Documentation System
 
-**Document Version:** 2.3  
-**Date:** April 4, 2026  
+**Document Version:** 2.4  
+**Date:** April 13, 2026  
 **Author:** EnGen Development Team  
 **Status:** Production Ready
 
@@ -33,7 +33,7 @@ This diagram represents the concrete implementation of the EnGen system, detaili
 ```mermaid
 graph TB
     subgraph ClientLayer["Client Layer"]
-        UI[Streamlit App]
+        UI[React SPA<br/>Vite + Chevron Wizard]
     end
 
     subgraph Serving["SERVING PLANE (Agent Swarm)"]
@@ -85,6 +85,7 @@ graph TB
     
     subgraph State["State Management"]
         DB[(CloudSQL<br/>Job Status)]
+        WFS[(CloudSQL<br/>Workflow State)]
     end
 
     subgraph Ingestion["INGESTION PLANE (Managed Pipelines)"]
@@ -109,6 +110,8 @@ graph TB
 
     UI --> Orch
     UI -.->|Poll via Orch| DB
+    UI -.->|Resume via Orch| WFS
+    Orch -->|Save Phase| WFS
     Orch -->|Fire & Forget| PubDocs
     Orch -->|Fire & Forget| PubCode
     CompSpec -->|Real-Time Lookup| GitHubMCP
@@ -121,14 +124,14 @@ graph TB
 
 | Agent Name | Role | Primary Responsibility |
 |------------|------|------------------------|
-| **OrchestratorAgent** | Controller | Manages the end-to-end workflow via phase-based endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`). Coordinates A2A calls, retries, triggers async publishing, and orchestrates HA/DR section generation after the content generation loop. |
+| **OrchestratorAgent** | Controller | Manages the end-to-end workflow via task-based BFF endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`, `resume_workflow`, `list_workflows`). Coordinates A2A calls, retries, triggers async publishing, orchestrates HA/DR section generation after the content generation loop, and persists workflow state to CloudSQL via `WorkflowStateManager` at every phase transition for resumable sessions. |
 | **GeneratorAgent** | Creator | Multimodal agent that uses Gemini Vision to analyze diagrams and Gemini Pro to draft documentation. |
 | **RetrievalAgent** | Librarian | Performs hybrid search (semantic + keyword) in Vertex AI to find relevant "Donor Pattern" documents. |
 | **ReviewerAgent** | Critic | Evaluates generated text against diverse quality rubrics and provides specific feedback for refinement. |
 | **ComponentSpecificationAgent** | Architect | Performs **real-time** lookups against GitHub repositories (via MCP Server or PyGithub fallback) and AWS Service Catalog to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. |
 | **ArtifactGenerationAgent** | Engineer | Synthesizes IaC and Boilerplate using "Golden Sample" templates fetched from GCS. |
 | **ArtifactValidationAgent** | QA | Validates generated code against a 6-point rubric: Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, and Best Practices. |
-| **HumanVerifierAgent** | Gatekeeper | Provides governance gates with CloudSQL persistence and Pub/Sub notifications. Currently operates in **simulated auto-approval** mode; actual user approval is handled via the Streamlit UI calling orchestrator endpoints directly. |
+| **HumanVerifierAgent** | Gatekeeper | Provides governance gates with CloudSQL persistence and Pub/Sub notifications. Currently operates in **simulated auto-approval** mode; actual user approval is handled via the React SPA calling orchestrator endpoints directly. |
 | **HADRRetrieverAgent** | HA/DR Librarian | Performs **hybrid retrieval** (metadata filter + vector search) against a dedicated `service-hadr-datastore` in Vertex AI Search to fetch service-level HA/DR documentation chunks, scoped by service name, DR strategy, and lifecycle phase. Accessed by the Orchestrator via **A2A HTTP** on port 9006. Tasks: `retrieve_service_hadr` (single service), `retrieve_all_services_hadr` (bulk). Wraps the `ServiceHADRRetriever` core logic. |
 | **HADRGeneratorAgent** | HA/DR Writer | Generates pattern-level HA/DR documentation by synthesizing service-level HA/DR references with the donor pattern's HA/DR sections as one-shot structural examples, producing one DR strategy section at a time via Gemini 1.5 Pro. Accessed by the Orchestrator via **A2A HTTP** on port 9007. Tasks: `generate_hadr_sections` (all 4 DR strategies, async parallel), `extract_donor_hadr_sections` (parse donor HTML). Wraps the `HADRDocumentationGenerator` core logic. |
 | **HADRDiagramGeneratorAgent** | HA/DR Visualiser & Storage | Generates SVG component diagrams, draw.io XML files (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`), and PNG fallback images for every DR strategy × lifecycle phase combination (4 × 3 = 12 diagrams per pattern), then uploads all artefacts (SVG, draw.io XML, PNG) to a dedicated GCS bucket and returns public URLs. Accessed by the Orchestrator via **A2A HTTP** on port 9008. Task: `generate_and_store_hadr_diagrams`. Wraps both the `HADRDiagramGenerator` and `HADRDiagramStorage` core logic. Uses `asyncio.gather` with `Semaphore(4)` concurrency control, 180 s per-diagram timeout, and 60 s per-upload timeout. |
@@ -154,6 +157,8 @@ The Ingestion Plane handles the end-to-end processing of both unstructured conte
 > **Note (v2.2):** HA/DR diagram generation has been added, producing SVG + draw.io XML (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`) + PNG for every DR strategy × lifecycle phase combination. All HA/DR operations now use async parallelism (`asyncio.gather` with `Semaphore`, `wait_for` timeouts, and `to_thread` offloading) for production-grade performance (see Section 4.9).
 
 > **Note (v2.3):** HA/DR components have been refactored from direct imports in the Orchestrator into proper **agent wrappers** (`HADRRetrieverAgent`, `HADRGeneratorAgent`, `HADRDiagramGeneratorAgent`) following the established Agent → Core logic → A2A HTTP delegation pattern. The Orchestrator no longer directly instantiates any HA/DR core classes; all HA/DR operations are now accessed via A2A HTTP calls on ports 9006–9008 (see Section 4.9). `HADRDiagramStorage` has been encapsulated inside `HADRDiagramGeneratorAgent`, and JSON tuple-key serialisation uses `"Strategy|Phase"` string keys.
+
+> **Note (v2.4):** The Streamlit front-end has been replaced by a **React 18 + Vite single-page application (SPA)** with a chevron-style 5-step wizard (Section 4.10). A **3-layer resumable workflow state persistence** strategy has been implemented: CloudSQL `workflow_state` table (backend), Orchestrator `resume_workflow` / `list_workflows` tasks (API), and browser `localStorage` pointer (frontend). Users can close the browser and resume from the last completed phase. The `WorkflowStateManager` class (`lib/workflow_state.py`) handles all CRUD operations on the `workflow_state` table.
 
 ### 3.2 End-to-End Sequence Diagram
 
@@ -504,7 +509,7 @@ The Serving Plane uses a multi-agent system to analyze architecture diagrams, re
 1.  **Specialization**: Each agent has a single, well-defined responsibility (e.g., Retrieval, Generation, Review, Artifact Creation).
 2.  **Agent-to-Agent Communication (A2A)**: Standardized HTTP-based protocol with retry, timeout, and exponential backoff via `A2AClient`.
 3.  **Reflection Loop**: Iterative refinement (Generate -> Review -> Generate) until quality threshold met (max 3 iterations).
-4.  **Human-in-the-Loop**: User approval is collected via Streamlit UI buttons that call orchestrator endpoints directly (`approve_docs`, `approve_code`). The `HumanVerifierAgent` provides an additional governance layer with Pub/Sub notifications, currently operating in simulated auto-approval mode.
+4.  **Human-in-the-Loop**: User approval is collected via the React SPA wizard (chevron stepper) which calls orchestrator task endpoints directly (`approve_docs`, `approve_code`). The `HumanVerifierAgent` provides an additional governance layer with Pub/Sub notifications, currently operating in simulated auto-approval mode.
 5.  **Artifact Generation**: Automated creation of deployable code based on authoritative interfaces ("Golden Samples") from GCS.
 6.  **Real-Time Schema Grounding**: Component specifications are grounded in live infrastructure schemas fetched at inference time from GitHub (via MCP or PyGithub) and AWS Service Catalog, replacing the previous offline Vertex AI Search catalog approach.
 7.  **Phase-Based Orchestration**: The workflow is split into discrete phases (`phase1_generate_docs`, `phase2_generate_code`) with explicit approval gates between them.
@@ -533,7 +538,7 @@ The system consists of the following agents, orchestrating a complex workflow:
 
 ```mermaid
 sequenceDiagram
-    participant Client as Streamlit App
+    participant Client as React SPA
     participant Orch as Orchestrator Agent
     participant Vision as Vision Agent
     participant Ret as Retrieval Agent
@@ -547,7 +552,7 @@ sequenceDiagram
     participant DB as CloudSQL
     participant Async as Async Workers
 
-    Client->>Orch: POST /invoke {task: "phase1_generate_docs", image, title}
+    Client->>Orch: POST /invoke {task: "phase1_generate_docs", image, title, user_id}
     
     Note over Orch,Ret: Step 1: Context
     Orch->>Vision: analyze(image)
@@ -579,8 +584,9 @@ sequenceDiagram
     Orch->>Orch: Embed diagram URLs in HA/DR sections
 
     Note over Orch,Verifier: Step 3: User Approval (Pattern)
-    Orch-->>Client: Return sections + full_doc
-    Client->>Orch: POST /invoke {task: "approve_docs"}
+    Orch-->>Client: Return sections + full_doc + workflow_id
+    Client->>Client: Store workflow_id in localStorage
+    Client->>Orch: POST /invoke {task: "approve_docs", workflow_id}
     
     par Async Publishing (Docs)
         Orch->>Async: publish_docs_async(review_id="PID-1")
@@ -658,8 +664,8 @@ sequenceDiagram
 15. **URL Embedding**: The returned diagram URLs are embedded into the HA/DR markdown sections so that the rendered documentation contains inline SVG references and links to the editable draw.io files.
 
 #### Phase 3: Governance (Point 1) & Async Doc Publishing
-16. **Pattern Verification**: The Orchestrator returns the generated documentation — including HA/DR sections with embedded diagram URLs — to the Streamlit client. The user reviews the pattern sections and the HA/DR content (with inline diagrams) in separate expanders, then clicks "Approve" in the UI.
-17. **Approval**: The Streamlit app calls the `approve_docs` endpoint. The Orchestrator updates CloudSQL and receives a `review_id`.
+16. **Pattern Verification**: The Orchestrator returns the generated documentation — including HA/DR sections with embedded diagram URLs — to the React SPA. The user reviews the pattern sections and the HA/DR content (with inline diagrams) in collapsible expander panels, then clicks "Approve & Continue" in the chevron wizard.
+17. **Approval**: The React SPA calls the `approve_docs` task (passing the `workflow_id`). The Orchestrator updates CloudSQL review status, persists the workflow state to `CODE_GEN` via `WorkflowStateManager`, and receives a `review_id`.
 18. **Async Publishing**: It immediately spawns a background task to publish the documentation to SharePoint, using the `review_id` to track progress in CloudSQL. The workflow *does not wait* for this to finish but proceeds to artifact generation.
 
 #### Phase 4: Pattern Synthesis (Holistic Generation)
@@ -675,13 +681,13 @@ sequenceDiagram
     *   **Retry**: The generator attempts to fix the specific issues (max 3 retries).
 
 #### Phase 5: Governance (Point 2) & Async Code Publishing
-24. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review (or approved directly via the Streamlit UI).
-25. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub via the REST API (direct push to the configured branch).
+24. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review (or approved directly via the React SPA wizard).
+25. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub via the REST API (direct push to the configured branch). The workflow state is persisted to `PUBLISH` via `WorkflowStateManager`.
 26. **Immediate Return**: The Orchestrator returns a `processing` status to the client, along with the review IDs needed to track the background tasks.
 
 #### Phase 6: Client Polling
-27. **Status Check**: The client application (Streamlit) polls the orchestrator's `get_publish_status` endpoint every 3 seconds using the returned IDs.
-28. **Completion**: Once the background tasks update the DB status to `COMPLETED`, the orchestrator relays the final URLs for the SharePoint page and GitHub commit back to the client.
+27. **Status Check**: The React SPA's `PublishStep` component polls the orchestrator's `get_publish_status` task every 3 seconds using the returned IDs and `workflow_id`.
+28. **Completion**: Once the background tasks update the DB status to `COMPLETED`, the orchestrator marks the workflow state as `COMPLETED`, deactivates the `workflow_state` row, and relays the final URLs for the SharePoint page and GitHub commit back to the client. The SPA clears `localStorage("engen_workflow_id")`.
 
 
 ### 4.5 Response Assembly
@@ -740,14 +746,14 @@ This workflow implements a "Pattern Synthesis" approach. Instead of generating i
 
 | Component | Responsibility |
 |-----------|----------------|
-| **OrchestratorAgent** | The central state machine that drives the workflow. It manages the lifecycle of the request, handles retries for validation failures, and coordinates the **async handover** to publishers. Exposes phase-based endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`). |
+| **OrchestratorAgent** | The central state machine that drives the workflow. It manages the lifecycle of the request, handles retries for validation failures, coordinates the **async handover** to publishers, and persists workflow state to CloudSQL via `WorkflowStateManager` at every phase transition for resumable sessions. Exposes task-based endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`, `resume_workflow`, `list_workflows`). |
 | **CloudSQLManager** | **State Store**. It acts as the single source of truth for the status of both human reviews and async publishing tasks. It allows the frontend to poll for completion without blocking the agent. |
 | **ComponentSpecification** | **Analyzer**. It parses the high-level design documentation and performs **real-time lookups** against GitHub repositories (via `GitHubMCPTerraformClient`) and AWS Service Catalog (via `ServiceCatalogClient`) to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. |
 | **GitHubMCPTerraformClient** | **Tier 1 Schema Source**. Searches configured GitHub repos for Terraform modules using the MCP Server protocol (with PyGithub REST API fallback). Parses `variables.tf` and `outputs.tf` using `python-hcl2`. Returns `TerraformModuleSpec` dataclasses. |
 | **ServiceCatalogClient** | **Tier 2 Schema Source** (Fallback). Queries AWS Service Catalog via `boto3` for CloudFormation products, extracts provisioning parameters and constraints. Returns `ServiceCatalogProductSpec` dataclasses. Caches results in-memory. |
 | **ArtifactGenerator** | **Synthesizer**. It fetches **"Golden Sample" IaC templates** from a GCS bucket to benchmark the generated code against organizational best practices. It then generates a holistic "Artifact Bundle" (IaC + Boilerplate) in a single consistent pass. |
 | **ArtifactValidator** | **Quality Gate**. It inspects the generated Artifact Bundle against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices Adherence (Medium). Scores 0-100 with PASS/NEEDS_REVISION verdicts. |
-| **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. Currently operates in simulated auto-approval mode; user approval is handled via Streamlit UI. |
+| **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. Currently operates in simulated auto-approval mode; user approval is handled via the React SPA wizard. |
 | **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub) as a background task using direct REST API Git tree manipulation. |
 | **SharePointPublisher** | **Docs Publisher**. Updates the enterprise knowledge base with the design documentation as a background task. Converts Markdown to SharePoint modern page canvas layout with web parts, rendering Mermaid diagrams via Kroki. |
 
@@ -758,12 +764,13 @@ The following diagram illustrates the structural relationships and information f
 ```mermaid
 graph TD
     subgraph "Client Layer"
-        UI[Streamlit App]
+        UI[React SPA]
     end
 
     subgraph "Orchestration Layer"
         Orch[Orchestrator Agent]
         DB[(CloudSQL<br/>State Store)]
+        WFS[(CloudSQL<br/>Workflow State)]
     end
 
     subgraph "Pattern Synthesis Core"
@@ -792,8 +799,10 @@ graph TD
     %% Data Flow
     UI -->|Start| Orch
     UI -.->|Poll Status via Orch| DB
+    UI -.->|Resume via Orch| WFS
 
     Orch -->|Update State| DB
+    Orch -->|Save Phase| WFS
     Orch -->|Trigger Async| PubDocs
     Orch -->|Trigger Async| PubCode
 
@@ -825,7 +834,7 @@ This sequence diagram details the lifecycle of a request from approved documenta
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Client as Streamlit App
+    participant Client as React SPA
     participant Orch as Orchestrator Agent
     participant Spec as Component Spec Agent
     participant GitMCP as GitHub MCP Client
@@ -905,7 +914,7 @@ sequenceDiagram
 
 **Step-by-Step Explanation:**
 
-1.  **Request Pattern Approval**: The `OrchestratorAgent` sends the generated markdown documentation to the `HumanVerifierAgent` for review (or the user approves directly via the Streamlit UI).
+1.  **Request Pattern Approval**: The `OrchestratorAgent` sends the generated markdown documentation to the `HumanVerifierAgent` for review (or the user approves directly via the React SPA wizard).
 2.  **Pattern Approved**: The human expert approves the content. The Verifier returns `APPROVED` status and a unique review ID (`PID-1`).
 3.  **Trigger Async Publish (Docs)**: The Orchestrator immediately spawns a background task (`asyncio.create_task`) to publish the docs, passing `PID-1`.
 4.  **Docs Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `PID-1` to `IN_PROGRESS`.
@@ -921,13 +930,13 @@ sequenceDiagram
 14. **Return Artifacts**: The generator produces a complete bundle containing Terraform and application code, strictly following the Golden Sample patterns.
 15. **Validate Artifacts**: The Orchestrator sends the bundle to the `ArtifactValidationAgent` for automated quality checks against a 6-point rubric (Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, Best Practices). Returns a score (0-100) and PASS/NEEDS_REVISION status.
 16. **Return Validation Result**: If FAIL, the loop repeats with critique feedback (max 3 retries).
-17. **Request Artifact Approval**: Once validated, the Orchestrator sends the code bundle to the `HumanVerifierAgent` for final sign-off (or the user approves via Streamlit UI).
+17. **Request Artifact Approval**: Once validated, the Orchestrator sends the code bundle to the `HumanVerifierAgent` for final sign-off (or the user approves via the React SPA wizard).
 18. **Artifact Approved**: The human expert approves the code. The Verifier returns `APPROVED` status and a unique review ID (`AID-2`).
 19. **Trigger Async Publish (Code)**: The Orchestrator immediately spawns a background task to publish the code, passing `AID-2`.
 20. **Code Status: IN_PROGRESS**: The background worker updates the `CloudSQLManager` setting the status of `AID-2` to `IN_PROGRESS`.
 21. **Code Status: COMPLETED**: After successfully pushing to GitHub via REST API (Git tree manipulation), the worker updates the status to `COMPLETED` and saves the Commit URL.
 22. **Return Immediate Response**: *Concurrently* with steps 19-21, the Orchestrator returns a response to the Client with `status: processing` and both IDs (`PID-1`, `AID-2`).
-23. **Poll Status**: The Client (`Streamlit App`) polls the Orchestrator's `get_publish_status` endpoint, which queries `CloudSQLManager` using the provided IDs.
+23. **Poll Status**: The React SPA's `PublishStep` component polls the Orchestrator's `get_publish_status` task, which queries `CloudSQLManager` using the provided IDs.
 24. **Return Status**: The Orchestrator returns the current status (e.g., Docs=COMPLETED, Code=IN_PROGRESS) and any available URLs.
 
 ### 4.9 HA/DR Documentation & Diagram Generation Workflow
@@ -1189,91 +1198,199 @@ sequenceDiagram
 | Text Generation Timeout (per strategy) | Hardcoded in `agenerate_hadr_sections` | `120` seconds |
 | Upload Timeout (per artefact) | Hardcoded in `aupload_diagram_bundle` | `60` seconds |
 
-## 4.10 Client-Side Design: Streamlit App
+## 4.10 Client-Side Design: React SPA (Pattern Factory UI)
 
-The Streamlit application serves as the interactive frontend for the EnGen system, implementing a stateful "Wizard" interface that guides the user through the multi-stage artifact generation process. Unlike a simple request-response interface, the app uses **`st.session_state`** as a client-side state machine to handle the Human-in-the-Loop (HITL) requirements for both documentation and code verification.
+The Pattern Factory UI is a **React 18 + Vite** single-page application that replaced the earlier Streamlit prototype. It implements a stateful 5-step chevron wizard that guides the user through the multi-stage artifact generation process. Unlike a traditional request-response interface, the app uses **React `useState`** as a client-side state machine to handle the Human-in-the-Loop (HITL) requirements for both documentation and code verification. Workflow state is persisted to **CloudSQL** via the `WorkflowStateManager` so users can close the browser and resume later.
 
 ### 4.10.1 State Management Architecture
 
-To support the asynchronous and multi-step nature of the workflow, the application preserves context (generated artifacts, review IDs, status) across re-runs.
+To support the asynchronous, multi-step, and resumable nature of the workflow, the application preserves context across React re-renders and browser sessions.
 
 **Key State Variables:**
-- `step`: Tracks the current workflow phase (`INPUT` -> `DOC_REVIEW` -> `CODE_GEN` -> `CODE_REVIEW` -> `PUBLISH`).
-- `doc_data`: Stores the generated documentation response (sections, full markdown) for display.
-- `doc_review_id`: The ID returned by the Orchestrator after document approval, used to track SharePoint publishing.
-- `code_data`: Stores the generated artifact bundle (IaC templates, boilerplate code) for display.
-- `code_review_id`: The ID returned after code approval, used to track GitHub publishing.
+- `step`: Tracks the current workflow phase (`INPUT` → `DOC_REVIEW` → `CODE_GEN` → `CODE_REVIEW` → `PUBLISH`).
+- `docData`: Stores the generated documentation response (sections, full markdown, review_id) for display.
+- `codeData`: Stores the generated artifact bundle (IaC templates, boilerplate code, review_id) for display.
+- `error`: Latest error message (string or null).
+- `workflowId`: UUID returned by the Orchestrator on workflow creation. Persisted to `localStorage("engen_workflow_id")` so the SPA can resume on page reload.
+- `resuming`: Boolean flag, true while the resume-on-load flow is in progress (shows a Spinner).
+
+**3-Layer Persistence Strategy:**
+
+| Layer | Technology | Stored Data | Purpose |
+|---|---|---|---|
+| **Backend** | CloudSQL `workflow_state` table | Full workflow snapshot (JSONB columns for doc_data, code_data, hadr_sections, hadr_diagram_uris) | Source of truth — survives browser clears, device switches |
+| **API** | Orchestrator `resume_workflow` / `list_workflows` tasks | N/A (pass-through) | Exposes persistence to the frontend |
+| **Frontend** | `localStorage("engen_workflow_id")` | UUID string only | Lightweight pointer — triggers resume on page load |
+
+**Workflow Lifecycle:**
+1. **New workflow** — `InputStep` calls `phase1_generate_docs` with `user_id`; the Orchestrator creates a row in `workflow_state` and returns a `workflow_id`. The SPA stores it in `workflowId` state + `localStorage`.
+2. **Phase transitions** — Each subsequent API call includes `workflow_id`. The Orchestrator calls `WorkflowStateManager.save_state()` at every transition (DOC_REVIEW → CODE_GEN → CODE_REVIEW → PUBLISH → COMPLETED).
+3. **Resume-on-load** — A `useEffect` on mount checks `localStorage` for `engen_workflow_id`. If found, it calls `resume_workflow` which loads the full snapshot from CloudSQL and restores `step`, `docData`, and `codeData`.
+4. **Completion** — `PublishStep` calls `onComplete()` which clears `localStorage("engen_workflow_id")`.
+5. **Reset** — `handleReset()` clears all in-memory state and removes the localStorage key.
 
 ### 4.10.2 Workflow Integration Phases
 
-The application interacts with specific Orchestrator endpoints that correspond to the workflow lifecycle:
+The application interacts with specific Orchestrator tasks that correspond to the workflow lifecycle:
+
+**0. Resume (Automatic on Page Load)**
+   - **System Action**: `useEffect` reads `localStorage("engen_workflow_id")`.
+   - **API Call**: `POST /invoke` with task `resume_workflow`, payload `{ workflow_id }`.
+   - **System**: Orchestrator loads the full workflow snapshot from CloudSQL `workflow_state` table, maps `current_phase` to SPA step.
+   - **Result**: Returns `{ found, step, doc_data, code_data }`. If found, the SPA restores state and jumps to the saved step. If not found, localStorage is cleared and the user starts fresh.
 
 **1. Phase 1: Input & Document Generation**
    - **User Action**: Uploads an architecture diagram image and enters a title/prompt.
-   - **API Call**: `POST /invoke` with task `phase1_generate_docs`
-   - **System**: Orchestrator invokes Generator (Vision analysis), Retriever (donor lookup), Generator+Reviewer loop (content refinement, max 3 iterations), HA/DR Retriever Agent and HA/DR Generator Agent via A2A HTTP (async parallel), and HA/DR Diagram Generator Agent via A2A HTTP (async parallel with icon shapes and GCS upload).
-   - **Result**: Returns sections (including HA/DR with embedded diagram URLs) and full markdown content. App transitions to `DOC_REVIEW`.
+   - **API Call**: `POST /invoke` with task `phase1_generate_docs`, payload includes `user_id` and optional `workflow_id`.
+   - **System**: Orchestrator creates a `workflow_state` row, invokes Generator (Vision analysis), Retriever (donor lookup), Generator+Reviewer loop (content refinement, max 3 iterations), HA/DR agents via A2A HTTP (async parallel), and HA/DR Diagram Generator Agent via A2A HTTP. Saves state to `DOC_REVIEW` phase.
+   - **Result**: Returns sections (including HA/DR with embedded diagram URLs), full markdown content, and `workflow_id`. App stores `workflow_id` in localStorage and transitions to `DOC_REVIEW`.
 
 **2. Phase 2: Document Human Review**
-   - **User Action**: Reviews rendered Markdown in the UI. Pattern documentation sections are shown in one expander; HA/DR sections are shown in a separate "🛡️ HA/DR Documentation" expander. Clicks "Approve".
-   - **API Call**: `POST /invoke` with task `approve_docs`
-   - **System**: Orchestrator updates CloudSQL review status, triggers async SharePoint publishing via background task.
+   - **User Action**: Reviews rendered Markdown in collapsible expander panels. Pattern documentation and HA/DR sections are shown in separate panels. Clicks "Approve & Continue."
+   - **API Call**: `POST /invoke` with task `approve_docs`, payload includes `workflow_id`.
+   - **System**: Orchestrator updates CloudSQL review status, persists workflow state to `CODE_GEN` via `WorkflowStateManager`, triggers async SharePoint publishing via background task.
    - **Result**: Returns `doc_review_id`. App transitions to `CODE_GEN`.
 
 **3. Phase 3: Code Generation & Validation**
-   - **System Action**: Automatically triggers code generation.
-   - **API Call**: `POST /invoke` with task `phase2_generate_code`
-   - **System**: Orchestrator calls ComponentSpecificationAgent (real-time GitHub MCP + AWS Service Catalog lookups) → ArtifactGenerationAgent (Golden Sample injection) → ArtifactValidationAgent (6-point rubric, max 3 retries).
-   - **Result**: Returns artifact bundle layout. App transitions to `CODE_REVIEW`.
+   - **System Action**: Automatically triggers code generation on step mount.
+   - **API Call**: `POST /invoke` with task `phase2_generate_code`, payload includes `workflow_id`.
+   - **System**: Orchestrator calls ComponentSpecificationAgent (real-time GitHub MCP + AWS Service Catalog lookups) → ArtifactGenerationAgent (Golden Sample injection) → ArtifactValidationAgent (6-point rubric, max 3 retries). Saves state to `CODE_REVIEW`.
+   - **Result**: Returns artifact bundle layout and `workflow_id`. App transitions to `CODE_REVIEW`.
 
 **4. Phase 4: Code Human Review**
-   - **User Action**: Reviews file structure and code. Clicks "Approve & Publish".
-   - **API Call**: `POST /invoke` with task `approve_code`
-   - **System**: Orchestrator updates CloudSQL, triggers async GitHub publishing via REST API.
+   - **User Action**: Reviews file structure and code. Clicks "Approve & Publish."
+   - **API Call**: `POST /invoke` with task `approve_code`, payload includes `workflow_id`.
+   - **System**: Orchestrator updates CloudSQL, persists workflow state to `PUBLISH`, triggers async GitHub publishing via REST API.
    - **Result**: Returns `code_review_id`. App transitions to `PUBLISH`.
 
 **5. Phase 5: Async Status Polling**
-   - **System Action**: UI enters a polling loop.
-   - **API Call**: `POST /invoke` with task `get_publish_status` (polls every 3 seconds)
+   - **System Action**: `PublishStep` component enters a polling loop.
+   - **API Call**: `POST /invoke` with task `get_publish_status` (polls every 3 seconds), payload includes `workflow_id`.
    - **Display**: Shows real-time progress for "Documentation Publishing (SharePoint)" and "Code Publishing (GitHub)".
-   - **Termination**: Loop ends when both statuses are `COMPLETED` or `FAILED`.
+   - **Termination**: Loop ends when both statuses are `COMPLETED` or `FAILED`. On completion, Orchestrator marks workflow as `COMPLETED` and deactivates the `workflow_state` row. `PublishStep` calls `onComplete()` to clear localStorage.
 
 ### 4.10.3 Integration Diagram
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant Streamlit
+    participant SPA as React SPA
     participant Orch as Orchestrator API (/invoke)
     participant DB as CloudSQL
+    participant WFS as CloudSQL (workflow_state)
 
-    User->>Streamlit: 1. Upload Diagram + Enter Title
-    Streamlit->>Orch: POST /invoke {task: "phase1_generate_docs"}
-    Orch-->>Streamlit: Return Sections + Markdown
-    Streamlit-->>User: Display Docs for Review
+    Note over SPA,WFS: Phase 0: Resume Check (on page load)
+    SPA->>SPA: Read localStorage("engen_workflow_id")
+    alt Saved workflow_id exists
+        SPA->>Orch: POST /invoke {task: "resume_workflow", workflow_id}
+        Orch->>WFS: Load workflow snapshot
+        WFS-->>Orch: {phase, doc_data, code_data}
+        Orch-->>SPA: {found: true, step, doc_data, code_data}
+        SPA-->>User: Restore wizard at saved step
+    else No saved workflow_id
+        SPA-->>User: Show INPUT step
+    end
 
-    User->>Streamlit: 2. Approve Docs
-    Streamlit->>Orch: POST /invoke {task: "approve_docs"}
+    User->>SPA: 1. Upload Diagram + Enter Title
+    SPA->>Orch: POST /invoke {task: "phase1_generate_docs", user_id}
+    Orch->>WFS: Create workflow_state row
+    WFS-->>Orch: workflow_id
+    Orch-->>SPA: Return Sections + Markdown + workflow_id
+    SPA->>SPA: Store workflow_id in localStorage
+    SPA-->>User: Display Docs for Review
+
+    User->>SPA: 2. Approve Docs
+    SPA->>Orch: POST /invoke {task: "approve_docs", workflow_id}
     Orch->>DB: Create DOC_TASK (In Progress)
-    Orch-->>Streamlit: Return doc_review_id
+    Orch->>WFS: Save state (phase=CODE_GEN)
+    Orch-->>SPA: Return doc_review_id
     
-    Streamlit->>Orch: 3. POST /invoke {task: "phase2_generate_code"}
-    Orch-->>Streamlit: Return Artifact Bundle
-    Streamlit-->>User: Display Code Structure for Review
+    SPA->>Orch: 3. POST /invoke {task: "phase2_generate_code", workflow_id}
+    Orch->>WFS: Save state (phase=CODE_REVIEW, code_data)
+    Orch-->>SPA: Return Artifact Bundle
+    SPA-->>User: Display Code Structure for Review
 
-    User->>Streamlit: 4. Approve Code
-    Streamlit->>Orch: POST /invoke {task: "approve_code"}
+    User->>SPA: 4. Approve Code
+    SPA->>Orch: POST /invoke {task: "approve_code", workflow_id}
     Orch->>DB: Create CODE_TASK (In Progress)
-    Orch-->>Streamlit: Return code_review_id
+    Orch->>WFS: Save state (phase=PUBLISH)
+    Orch-->>SPA: Return code_review_id
 
     loop Every 3 Seconds
-        Streamlit->>Orch: POST /invoke {task: "get_publish_status"}
+        SPA->>Orch: POST /invoke {task: "get_publish_status", workflow_id}
         Orch->>DB: Check Task Status
         DB-->>Orch: {doc: COMPLETED, code: IN_PROGRESS}
-        Orch-->>Streamlit: Status Update
-        Streamlit-->>User: Update Progress Display
+        Orch-->>SPA: Status Update
+        SPA-->>User: Update Progress Display
     end
+    
+    Note over SPA,WFS: On both COMPLETED:
+    Orch->>WFS: Save state (COMPLETED) + deactivate
+    SPA->>SPA: Clear localStorage("engen_workflow_id")
 ```
+
+### 4.10.4 Project Structure
+
+```
+engen-ui/
+├── index.html                  # HTML shell (Vite entry)
+├── package.json                # Dependencies & scripts
+├── vite.config.js              # Vite config + dev proxy
+├── .env                        # Dev environment vars
+├── .env.production             # Prod overrides
+├── .gitignore
+├── Dockerfile                  # Multi-stage build (node → nginx)
+├── nginx.conf                  # Production nginx (SPA + API proxy)
+├── cloudbuild.yaml             # Cloud Build → Artifact Registry → Cloud Run
+└── src/
+    ├── main.jsx                # ReactDOM entry
+    ├── App.jsx                 # Root component — wizard state machine + resume-on-load
+    ├── index.css               # Global styles (CSS custom properties)
+    ├── api/
+    │   └── orchestrator.js     # fetch wrapper — callOrchestrator(task, payload)
+    ├── components/
+    │   ├── Collapsible.jsx     # Expander / accordion panel
+    │   ├── ProgressBar.jsx     # Chevron stepper (active/completed/inactive states)
+    │   ├── Sidebar.jsx         # Process controls (Reset)
+    │   └── Spinner.jsx         # Inline loading indicator
+    └── steps/
+        ├── InputStep.jsx       # Step 1 — pattern name + diagram upload (passes user_id, workflow_id)
+        ├── DocReviewStep.jsx   # Step 2 — review & approve docs (passes workflow_id)
+        ├── CodeGenStep.jsx     # Step 3 — auto-trigger code generation (passes workflow_id)
+        ├── CodeReviewStep.jsx  # Step 4 — review & approve artifacts (passes workflow_id)
+        └── PublishStep.jsx     # Step 5 — poll publish status (passes workflow_id, calls onComplete)
+```
+
+### 4.10.5 CloudSQL Workflow State Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS workflow_state (
+    workflow_id     VARCHAR(36) PRIMARY KEY,
+    created_by      VARCHAR(255),
+    pattern_title   VARCHAR(500),
+    current_phase   VARCHAR(50),           -- INPUT, DOC_REVIEW, CODE_GEN, CODE_REVIEW, PUBLISH, COMPLETED
+    image_base64    TEXT,
+    doc_data        JSONB,                 -- sections, full_doc, review_id, hadr, diagrams
+    hadr_sections   JSONB,
+    hadr_diagram_uris JSONB,
+    code_data       JSONB,                 -- artifacts, spec, review_id
+    doc_review_id   VARCHAR(255),
+    code_review_id  VARCHAR(255),
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_updated    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active       BOOLEAN DEFAULT TRUE
+);
+```
+
+### 4.10.6 Key Components
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| **WorkflowStateManager** | `lib/workflow_state.py` | CRUD for `workflow_state` table — `create_workflow()`, `save_state()`, `load_state()`, `list_active_workflows()`, `deactivate_workflow()` |
+| **App.jsx** | `engen-ui/src/App.jsx` | Root wizard state machine — resume-on-load `useEffect`, `workflowId` state, localStorage read/write, prop drilling to step components |
+| **ProgressBar.jsx** | `engen-ui/src/components/ProgressBar.jsx` | Chevron-style stepper — active step blue, completed green, inactive dimmed 50% |
+| **Step Components** | `engen-ui/src/steps/*.jsx` | Self-contained step UIs — each accepts `workflowId` prop and includes `workflow_id` in orchestrator payloads |
+| **orchestrator.js** | `engen-ui/src/api/orchestrator.js` | `callOrchestrator(task, payload)` fetch wrapper; `fileToBase64(file)` utility |
 
 ---
 
@@ -1290,6 +1407,8 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 7. **Async Parallelism**: Production-grade performance via `asyncio.gather` with concurrency controls (`Semaphore`), per-operation timeouts, and thread offloading for all HA/DR operations
 8. **Real-Time Schema Grounding**: Live infrastructure lookups via GitHub MCP and AWS Service Catalog ensure generated artifacts always reflect actual module interfaces
 9. **Quality Assurance**: Reflection loop with multi-rubric automated validation ensures output meets production standards
+10. **React SPA**: Modern React 18 + Vite single-page application with chevron-style wizard, replacing the Streamlit prototype
+11. **Resumable Workflows**: 3-layer state persistence (CloudSQL `workflow_state` table + Orchestrator API + browser `localStorage`) allows users to close the browser and resume from the last completed phase
 
 ### Key Achievements
 
@@ -1303,6 +1422,8 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 - **HA/DR Coverage**: Automated generation of HA/DR sections covering four DR strategies with per-phase summary tables, grounded in service-level documentation
 - **HA/DR Diagrams**: 12 visual component diagrams per pattern (SVG + draw.io with official AWS/GCP icons + PNG) stored on GCS
 - **Async Performance**: All HA/DR operations (retrieval, text generation, diagram generation, upload) execute in parallel via `asyncio.gather` with `Semaphore`, `wait_for` timeouts, and `to_thread` offloading
+- **Modern SPA**: React 18 + Vite front-end with chevron stepper, collapsible panels, and production build (nginx → Cloud Run)
+- **Session Resilience**: CloudSQL `workflow_state` persistence ensures no work is lost when users close the browser or switch devices
 
 ### Production Readiness
 
@@ -1311,7 +1432,9 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 | **Ingestion Service** | ✅ Complete | 90% | Streamlined linear definition; leverages Vertex AI Search for pattern documents. |
 | **Component Catalog** | ✅ Refactored | 85% | Migrated from offline pipeline to real-time GitHub MCP + AWS Service Catalog lookups. Legacy pipeline preserved. |
 | **Inference Service** | ✅ Complete | 90% | Phase-based orchestrator with A2A communication, async publishing, and CloudSQL state management. |
-| **Streamlit App** | ✅ Complete | 85% | Implements stateful HITL workflow with async status polling via orchestrator. |
+| **Streamlit App** | ✅ Replaced | — | Superseded by React SPA (v2.4). Legacy `streamlit_app.py` preserved for reference. |
+| **React SPA** | ✅ Complete | 90% | React 18 + Vite single-page application with chevron wizard, collapsible panels, Vite dev proxy, nginx prod proxy, Cloud Run deployment. |
+| **Workflow Persistence** | ✅ Complete | 85% | 3-layer resumable workflow: CloudSQL `workflow_state` table (JSONB), Orchestrator `resume_workflow` / `list_workflows` tasks, browser `localStorage` pointer. `WorkflowStateManager` in `lib/workflow_state.py`. |
 | **Pattern Synthesis** | ✅ Complete | 85% | Generates IaC/Code; validates against 6-point rubric with GCS golden samples. |
 | **GCP Integration** | ✅ Complete | 95% | Vertex AI, CloudSQL, GCS, and Pub/Sub fully integrated. |
 | **SharePoint Integration**| ✅ Complete | 90% | Supports both ingestion and automated publishing with Mermaid diagram rendering via Kroki. |
@@ -1398,7 +1521,9 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 | `google-cloud-pubsub` | Pub/Sub (notifications) | v1.0 |
 | `sqlalchemy` / `pg8000` | CloudSQL (state management) | v1.0 |
 | `msal` | SharePoint authentication | v1.0 |
-| `streamlit` | Frontend UI | v1.0 |
+| `streamlit` | Frontend UI (legacy — replaced by React SPA) | v1.0 |
+| `react` | Frontend SPA framework (React 18) | **v2.4** |
+| `vite` | Frontend build tool and dev server | **v2.4** |
 | `beautifulsoup4` | HTML parsing (ingestion pipelines) | v1.0 |
 | `PyGithub` | GitHub API fallback for module discovery | **v2.0** |
 | `boto3` | AWS Service Catalog client | **v2.0** |
@@ -1412,7 +1537,7 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 ---
 
 **Document Control**  
-Last Updated: April 4, 2026  
+Last Updated: April 13, 2026  
 Review Cycle: Quarterly  
 Owner: EnGen Development Team  
 Classification: Internal Use
