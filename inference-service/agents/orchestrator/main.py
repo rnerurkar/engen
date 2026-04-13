@@ -5,6 +5,7 @@ import base64
 import json
 import logging
 import re
+import uuid
 from typing import Dict, Optional
 
 # Add path hacks to support imports from sibling services
@@ -23,6 +24,7 @@ from lib.a2a_client import A2AClient, A2AError
 from lib.sharepoint_publisher import SharePointPublisher, SharePointPageConfig
 from lib.github_publisher import GitHubMCPPublisher
 from lib.cloudsql_client import CloudSQLManager, logger as sql_logger
+from lib.workflow_state import WorkflowStateManager
 from core.pattern_synthesis.hadr_diagram_generator import (
     DR_STRATEGIES,
     LIFECYCLE_PHASES,
@@ -59,6 +61,14 @@ class OrchestratorAgent(ADKAgent):
              db_name=os.environ.get("DB_NAME", "reviews_db")
         )
 
+        # Workflow State Manager (for resumable sessions)
+        self.workflow_state: Optional[WorkflowStateManager] = None
+        if self.db and self.db.engine:
+            self.workflow_state = WorkflowStateManager(self.db.engine)
+            self.logger.info("WorkflowStateManager initialized — resumable workflows enabled")
+        else:
+            self.logger.warning("WorkflowStateManager NOT available — no DB engine")
+
         # HA/DR agents are now accessed via A2A calls (no direct instantiation)
 
     async def handle(self, req: AgentRequest) -> AgentResponse:
@@ -85,6 +95,14 @@ class OrchestratorAgent(ADKAgent):
                 result = await self.check_publish_status(req.payload)
                 return AgentResponse(status=TaskStatus.COMPLETED, result=result, agent_name=self.name)
 
+            elif req.task == "resume_workflow":
+                result = await self.resume_workflow(req.payload)
+                return AgentResponse(status=TaskStatus.COMPLETED, result=result, agent_name=self.name)
+
+            elif req.task == "list_workflows":
+                result = await self.list_workflows(req.payload)
+                return AgentResponse(status=TaskStatus.COMPLETED, result=result, agent_name=self.name)
+
             elif req.task == "start_workflow": # Legacy full loop
                 result = await self.run_workflow_loop(req.payload)
                 return AgentResponse(status=TaskStatus.COMPLETED, result=result, agent_name=self.name)
@@ -99,7 +117,18 @@ class OrchestratorAgent(ADKAgent):
         """Phase 1: Analyze -> Retrieve -> Generate Docs. Returns content for review."""
         title = payload.get("title")
         image_b64 = payload.get("image_base64")
+        user_id = payload.get("user_id", "anonymous")
         if not title or not image_b64: raise ValueError("Missing title or image_base64")
+
+        # Create workflow record for resumable sessions
+        workflow_id = payload.get("workflow_id") or str(uuid.uuid4())
+        if self.workflow_state:
+            self.workflow_state.create_workflow(
+                workflow_id=workflow_id,
+                pattern_title=title,
+                created_by=user_id,
+                image_base64=image_b64,
+            )
 
         # 0. ANALYZE
         self.logger.info("--- Step 0: ANALYZING Diagram ---")
@@ -182,18 +211,31 @@ class OrchestratorAgent(ADKAgent):
         full_doc = "\n\n".join([f"# {k}\n{v}" for k, v in (generated_sections or {}).items()])
 
         # Create PENDING review record
-        import uuid
         review_id = str(uuid.uuid4())
         
         if self.db:
              self.db.create_review_record(review_id, title, "PATTERN", generated_sections, full_doc)
 
-        return {
+        result = {
+            "workflow_id": workflow_id,
             "review_id": review_id,
+            "title": title,
             "sections": generated_sections,
             "full_doc": full_doc,
             "donor_context": donor_context
         }
+
+        # ── Persist state → DOC_REVIEW ──
+        if self.workflow_state:
+            self.workflow_state.save_state(
+                workflow_id=workflow_id,
+                current_phase="DOC_REVIEW",
+                doc_data=result,
+                hadr_sections=hadr_sections,
+                doc_review_id=review_id,
+            )
+
+        return result
 
     async def approve_phase1_docs(self, payload):
         """Phase 1 Approve: Publishing Pattern Documentation (Fire and Forget)"""
@@ -201,19 +243,28 @@ class OrchestratorAgent(ADKAgent):
         title = payload.get("title")
         sections = payload.get("sections")
         donor_context = payload.get("donor_context")
+        workflow_id = payload.get("workflow_id")
         
         if self.db:
-             self.db.update_review_status(review_id, "APPROVED", "Approved via Streamlit")
+             self.db.update_review_status(review_id, "APPROVED", "Approved via UI")
+
+        # ── Persist state → CODE_GEN ──
+        if self.workflow_state and workflow_id:
+            self.workflow_state.save_state(
+                workflow_id=workflow_id,
+                current_phase="CODE_GEN",
+            )
 
         self.logger.info("--- Async Task: Publishing Pattern Documentation ---")
         asyncio.create_task(
              self._async_publish_docs(review_id, title, sections, donor_context)
         )
-        return {"status": "publishing_started", "review_id": review_id}
+        return {"status": "publishing_started", "review_id": review_id, "workflow_id": workflow_id}
 
     async def run_phase2_code(self, payload):
         """Phase 2: Component Spec -> Artifact Gen -> Validation. Returns artifacts for review."""
         full_doc = payload.get("full_doc")
+        workflow_id = payload.get("workflow_id")
         
         # 4. GENERATE ARTIFACTS
         self.logger.info("--- Step 4: GENERATING ARTIFACTS ---")
@@ -245,37 +296,54 @@ class OrchestratorAgent(ADKAgent):
             else:
                 validation_feedback = val_result.get("feedback")
         
-        import uuid
         review_id = str(uuid.uuid4())
         if self.db:
-             # Use a distinct record for artifacts
-             # Tricky: we pass 'artifacts' (dict) to create_review_record
              self.db.create_review_record(review_id, "Artifacts for " + str(len(artifacts)), "ARTIFACT", artifacts, "N/A")
 
-        return {
+        result = {
+            "workflow_id": workflow_id,
             "review_id": review_id,
             "artifacts": artifacts,
             "spec": full_spec
         }
 
+        # ── Persist state → CODE_REVIEW ──
+        if self.workflow_state and workflow_id:
+            self.workflow_state.save_state(
+                workflow_id=workflow_id,
+                current_phase="CODE_REVIEW",
+                code_data=result,
+                code_review_id=review_id,
+            )
+
+        return result
+
     async def approve_phase2_code(self, payload):
         """Phase 2 Approve: Publish Code"""
         review_id = payload.get("review_id")
-        # artifacts passed from client or we fetch from DB? Client passing is easier for now to avoid DB fetching logic
         artifacts = payload.get("artifacts") 
         title = payload.get("title")
+        workflow_id = payload.get("workflow_id")
         
         if self.db:
-             self.db.update_review_status(review_id, "APPROVED", "Approved via Streamlit")
+             self.db.update_review_status(review_id, "APPROVED", "Approved via UI")
+
+        # ── Persist state → PUBLISH ──
+        if self.workflow_state and workflow_id:
+            self.workflow_state.save_state(
+                workflow_id=workflow_id,
+                current_phase="PUBLISH",
+            )
 
         self.logger.info("--- Async Task: Publishing Code ---")
         asyncio.create_task(
             self._async_publish_code(review_id, artifacts, title)
         )
-        return {"status": "publishing_started", "review_id": review_id}
+        return {"status": "publishing_started", "review_id": review_id, "workflow_id": workflow_id}
     
     async def check_publish_status(self, payload):
         review_ids = payload.get("review_ids", [])
+        workflow_id = payload.get("workflow_id")
         statuses = {}
         if self.db and self.db.engine:
             try:
@@ -292,7 +360,94 @@ class OrchestratorAgent(ADKAgent):
                         }
             except Exception as e:
                 self.logger.error(f"Status check failed: {e}")
+
+        # Mark workflow completed when both publishes are done
+        if workflow_id and self.workflow_state and statuses:
+            all_done = all(
+                (s.get("doc_status") or "").upper() in ("COMPLETED", "DONE", "PUBLISHED")
+                and (s.get("code_status") or "").upper() in ("COMPLETED", "DONE", "PUBLISHED")
+                for s in statuses.values()
+            )
+            if all_done:
+                self.workflow_state.save_state(workflow_id, "COMPLETED")
+                self.workflow_state.deactivate_workflow(workflow_id)
+                self.logger.info(f"Workflow {workflow_id} completed and deactivated")
+
         return statuses
+
+    # ─── Resume / List Workflows ──────────────────────────────────────────
+
+    async def resume_workflow(self, payload):
+        """
+        Resume a previously started workflow.
+
+        Accepts either:
+          - { workflow_id: "abc-123" }        → load that specific workflow
+          - { user_id: "user@corp.com" }      → load the most recent active workflow
+        """
+        workflow_id = payload.get("workflow_id")
+        user_id = payload.get("user_id")
+
+        if not self.workflow_state:
+            return {"error": "Workflow state persistence not available"}
+
+        # If no workflow_id given, find the user's most recent active workflow
+        if not workflow_id and user_id:
+            active = self.workflow_state.list_active_workflows(user_id, limit=1)
+            if not active:
+                return {"found": False, "message": "No active workflows found"}
+            workflow_id = active[0]["workflow_id"]
+
+        if not workflow_id:
+            return {"found": False, "message": "Provide workflow_id or user_id"}
+
+        state = self.workflow_state.load_state(workflow_id)
+        if not state:
+            return {"found": False, "message": f"Workflow {workflow_id} not found or inactive"}
+
+        self.logger.info(
+            f"Resuming workflow {workflow_id} at phase '{state['current_phase']}'"
+        )
+
+        # Map backend phase → frontend step name
+        phase_to_step = {
+            "INPUT": "INPUT",
+            "DOC_REVIEW": "DOC_REVIEW",
+            "CODE_GEN": "CODE_GEN",
+            "CODE_REVIEW": "CODE_REVIEW",
+            "PUBLISH": "PUBLISH",
+            "COMPLETED": "PUBLISH",
+        }
+
+        return {
+            "found": True,
+            "workflow_id": state["workflow_id"],
+            "step": phase_to_step.get(state["current_phase"], "INPUT"),
+            "pattern_title": state.get("pattern_title"),
+            "doc_data": state.get("doc_data"),
+            "code_data": state.get("code_data"),
+            "hadr_sections": state.get("hadr_sections"),
+            "hadr_diagram_uris": state.get("hadr_diagram_uris"),
+            "doc_review_id": state.get("doc_review_id"),
+            "code_review_id": state.get("code_review_id"),
+            "last_updated": state.get("last_updated"),
+        }
+
+    async def list_workflows(self, payload):
+        """List active workflows for a user (for resume picker UI)."""
+        user_id = payload.get("user_id", "anonymous")
+
+        if not self.workflow_state:
+            return {"workflows": []}
+
+        workflows = self.workflow_state.list_active_workflows(user_id, limit=10)
+
+        # Serialize timestamps for JSON
+        for w in workflows:
+            if w.get("last_updated"):
+                w["last_updated"] = w["last_updated"].isoformat()
+
+        return {"workflows": workflows}
 
     # ─── HA/DR Generation Helpers (A2A Delegation) ────────────────────────
 

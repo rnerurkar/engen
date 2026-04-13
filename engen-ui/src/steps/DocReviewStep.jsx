@@ -12,7 +12,7 @@ import { callOrchestrator } from "../api/orchestrator";
  *   onApprove()       – called after docs are approved
  *   onError(msg)      – called on failure
  */
-export default function DocReviewStep({ docData, onApprove, onError }) {
+export default function DocReviewStep({ docData, onApprove, onError, workflowId }) {
   const [loading, setLoading] = useState(false);
 
   const sections = docData?.sections || {};
@@ -26,6 +26,7 @@ export default function DocReviewStep({ docData, onApprove, onError }) {
         title: docData.title,
         sections: docData.sections,
         donor_context: docData.donor_context,
+        workflow_id: workflowId || docData.workflow_id,
       });
       onApprove();
     } catch (err) {

@@ -9,7 +9,7 @@ import Spinner from "../components/Spinner";
  *   docData   – contains review_id for docs
  *   codeData  – contains review_id for code
  */
-export default function PublishStep({ docData, codeData }) {
+export default function PublishStep({ docData, codeData, workflowId, onComplete }) {
   const [docStatus, setDocStatus] = useState(null);
   const [codeStatus, setCodeStatus] = useState(null);
   const [polling, setPolling] = useState(true);
@@ -26,6 +26,7 @@ export default function PublishStep({ docData, codeData }) {
         try {
           const statusMap = await callOrchestrator("get_publish_status", {
             review_ids: rids,
+            workflow_id: workflowId,
           });
 
           if (!cancelled && statusMap) {
@@ -40,6 +41,8 @@ export default function PublishStep({ docData, codeData }) {
               ["DONE", "PUBLISHED", "COMPLETE"].includes(cs.toUpperCase())
             ) {
               setPolling(false);
+              // Workflow is done — clear localStorage reference
+              if (onComplete) onComplete();
               return;
             }
           }

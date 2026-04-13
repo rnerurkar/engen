@@ -9,7 +9,7 @@ import Spinner from "../components/Spinner";
  *   onComplete(docData) – called with the orchestrator result
  *   onError(msg)        – called on failure
  */
-export default function InputStep({ onComplete, onError }) {
+export default function InputStep({ onComplete, onError, workflowId }) {
   const [title, setTitle] = useState("");
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -31,9 +31,11 @@ export default function InputStep({ onComplete, onError }) {
       const result = await callOrchestrator("phase1_generate_docs", {
         title,
         image_base64: imgBase64,
+        workflow_id: workflowId || undefined,
+        user_id: localStorage.getItem("engen_user_id") || "anonymous",
       });
       if (result) {
-        result.title = title; // preserve title in state
+        result.title = result.title || title;
         onComplete(result);
       } else {
         onError("Orchestrator returned an empty result.");

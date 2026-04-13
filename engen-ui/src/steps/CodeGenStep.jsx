@@ -10,7 +10,7 @@ import { callOrchestrator } from "../api/orchestrator";
  *   onComplete(codeData)– called with orchestrator result
  *   onError(msg)        – called on failure
  */
-export default function CodeGenStep({ docData, onComplete, onError }) {
+export default function CodeGenStep({ docData, onComplete, onError, workflowId }) {
   const triggered = useRef(false);
 
   useEffect(() => {
@@ -21,6 +21,7 @@ export default function CodeGenStep({ docData, onComplete, onError }) {
       try {
         const result = await callOrchestrator("phase2_generate_code", {
           full_doc: docData.full_doc,
+          workflow_id: workflowId || docData.workflow_id,
         });
         if (result) {
           onComplete(result);

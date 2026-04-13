@@ -11,7 +11,7 @@ import Spinner from "../components/Spinner";
  *   onApprove()    – called after code is approved
  *   onError(msg)   – called on failure
  */
-export default function CodeReviewStep({ codeData, docData, onApprove, onError }) {
+export default function CodeReviewStep({ codeData, docData, onApprove, onError, workflowId }) {
   const [loading, setLoading] = useState(false);
   const artifacts = codeData?.artifacts || {};
 
@@ -22,6 +22,7 @@ export default function CodeReviewStep({ codeData, docData, onApprove, onError }
         review_id: codeData.review_id,
         artifacts,
         title: docData.title,
+        workflow_id: workflowId || codeData.workflow_id,
       });
       onApprove();
     } catch (err) {
