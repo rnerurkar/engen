@@ -96,7 +96,7 @@ export default function App() {
       <Sidebar onReset={handleReset} />
 
       <main className="main-content">
-        <h1>🏗️ EnGen: One-Shot Pattern Generator</h1>
+        <h1>🏗️ Pattern Factory: One-Shot Pattern Generator</h1>
         <ProgressBar currentStep={step} />
 
         {error && (

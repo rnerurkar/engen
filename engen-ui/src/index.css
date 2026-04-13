@@ -112,41 +112,140 @@ body {
   color: inherit;
 }
 
-/* ── Progress bar ──────────────────────────────────────── */
-.progress-container {
-  margin-bottom: 1.5rem;
-}
-
-.progress-track {
-  height: 6px;
-  background: var(--clr-border);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: var(--clr-primary);
-  transition: width 0.4s ease;
-}
-
-.progress-labels {
+/* ── Chevron stepper ────────────────────────────────────── */
+.chevron-container {
   display: flex;
-  justify-content: space-between;
-  margin-top: 0.35rem;
-  font-size: 0.75rem;
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+  border-radius: var(--radius);
+}
+
+.chevron {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1.2rem 0.7rem 2rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  position: relative;
+  transition: background 0.3s ease, color 0.3s ease, opacity 0.3s ease;
+  white-space: nowrap;
+}
+
+/* Chevron arrow (right-pointing triangle) */
+.chevron::after {
+  content: "";
+  position: absolute;
+  right: -14px;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-top: 22px solid transparent;
+  border-bottom: 22px solid transparent;
+  border-left: 14px solid currentBorderColor;
+  z-index: 2;
+  transition: border-left-color 0.3s ease;
+}
+
+/* Notch (left-pointing cutout) — skip on first item */
+.chevron::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-top: 22px solid transparent;
+  border-bottom: 22px solid transparent;
+  border-left: 14px solid var(--clr-bg);
+  z-index: 1;
+}
+
+.chevron:first-child {
+  padding-left: 1.2rem;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.chevron:first-child::before {
+  display: none;
+}
+
+.chevron:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.chevron:last-child::after {
+  display: none;
+}
+
+/* ── State: inactive ─────────────────────────────────── */
+.chevron--inactive {
+  background: #e8eaed;
+  color: var(--clr-text-muted);
+  opacity: 0.5;
+}
+
+.chevron--inactive::after {
+  border-left-color: #e8eaed;
+}
+
+/* ── State: active (current step) ────────────────────── */
+.chevron--active {
+  background: var(--clr-primary);
+  color: #fff;
+  opacity: 1;
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(26, 115, 232, 0.35);
+}
+
+.chevron--active::after {
+  border-left-color: var(--clr-primary);
+}
+
+/* ── State: completed ────────────────────────────────── */
+.chevron--completed {
+  background: #c8e6c9;
+  color: #1b5e20;
+  opacity: 0.85;
+}
+
+.chevron--completed::after {
+  border-left-color: #c8e6c9;
+}
+
+/* Step number badge */
+.chevron-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.chevron--active .chevron-number {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.chevron--completed .chevron-number {
+  background: var(--clr-success);
+  color: #fff;
+}
+
+.chevron--inactive .chevron-number {
+  background: var(--clr-border);
   color: var(--clr-text-muted);
 }
 
-.progress-label.active {
-  color: var(--clr-primary);
-  font-weight: 600;
-}
-
-.progress-caption {
-  margin-top: 0.25rem;
-  font-size: 0.8rem;
-  color: var(--clr-text-muted);
+.chevron-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Boxes ─────────────────────────────────────────────── */

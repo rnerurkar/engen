@@ -1,6 +1,6 @@
-# EnGen UI — SPA Design & Deployment Guide
+# Pattern Factory UI — SPA Design & Deployment Guide
 
-> **Version 1.0** — React 18 + Vite conversion of the Streamlit front-end.
+> **Version 1.1** — React 18 + Vite conversion of the Streamlit front-end.
 
 ---
 
@@ -24,8 +24,8 @@
 │                   Browser (SPA)                  │
 │  React 18 + Vite                                 │
 │  ┌──────────┐ ┌──────────┐ ┌──────────────────┐  │
-│  │ Sidebar  │ │ Progress │ │  Step Components  │  │
-│  │ (Reset)  │ │   Bar    │ │ Input ▸ DocReview │  │
+│  │ Sidebar  │ │ Chevron  │ │  Step Components  │  │
+│  │ (Reset)  │ │ Stepper  │ │ Input ▸ DocReview │  │
 │  │          │ │          │ │ CodeGen ▸ CodeRev │  │
 │  │          │ │          │ │ ▸ Publish         │  │
 │  └──────────┘ └──────────┘ └──────────────────┘  │
@@ -68,7 +68,7 @@ engen-ui/
     │   └── orchestrator.js     # fetch wrapper — callOrchestrator(task, payload)
     ├── components/
     │   ├── Collapsible.jsx     # Expander / accordion panel
-    │   ├── ProgressBar.jsx     # Horizontal stepper bar
+    │   ├── ProgressBar.jsx     # Chevron stepper (active / completed / inactive states)
     │   ├── Sidebar.jsx         # Process controls (Reset)
     │   └── Spinner.jsx         # Inline loading indicator
     └── steps/
@@ -88,7 +88,7 @@ engen-ui/
 | `st.session_state.step` | `useState("INPUT")` in App | `App.jsx` |
 | `st.session_state.doc_data` | `useState(null)` — `docData` | `App.jsx` |
 | `st.session_state.code_data` | `useState(null)` — `codeData` | `App.jsx` |
-| `st.progress(idx/5)` | `<ProgressBar currentStep={step} />` | `ProgressBar.jsx` |
+| `st.progress(idx/5)` | `<ProgressBar currentStep={step} />` (chevron stepper) | `ProgressBar.jsx` |
 | `st.sidebar` + Reset button | `<Sidebar onReset={…} />` | `Sidebar.jsx` |
 | `st.expander(…)` | `<Collapsible title={…}>` | `Collapsible.jsx` |
 | `st.spinner(…)` | `<Spinner message={…} />` | `Spinner.jsx` |
@@ -108,7 +108,7 @@ engen-ui/
 
 | Component | Purpose | Props |
 |---|---|---|
-| **ProgressBar** | Shows current position in the 6-label stepper | `currentStep` |
+| **ProgressBar** | Chevron stepper — active step highlighted in blue, completed in green, inactive dimmed at 50% opacity | `currentStep` |
 | **Sidebar** | Left panel with "Reset Workflow" button | `onReset` |
 | **Collapsible** | Expandable/collapsible content panel | `title`, `defaultOpen`, `children` |
 | **Spinner** | CSS spinner + message | `message` |
