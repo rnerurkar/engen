@@ -1,6 +1,6 @@
 # Pattern Factory UI — SPA Design & Deployment Guide
 
-> **Version 1.1** — React 18 + Vite conversion of the Streamlit front-end.
+> **Version 1.2** — React 18 + Vite conversion of the Streamlit front-end.
 
 ---
 
@@ -12,6 +12,7 @@
 4. [Component Design](#4-component-design)
 5. [State Management](#5-state-management)
 6. [API Client Layer](#6-api-client-layer)
+   - [6.1 BFF API Task Inventory](#61-bff-api-task-inventory)
 7. [Deployment Option 1 — Local Development (VSCode Terminal)](#7-deployment-option-1--local-development-vscode-terminal)
 8. [Deployment Option 2 — GCP Cloud Run](#8-deployment-option-2--gcp-cloud-run)
 
@@ -162,6 +163,45 @@ export function fileToBase64(file) { … }
 |---|---|---|
 | Local dev | `/api` (default) | Vite proxy → `http://localhost:9000` |
 | Production | Full URL or `/api` behind nginx | nginx proxy → Orchestrator service |
+
+### 6.1 BFF API Task Inventory
+
+All BFF APIs are exposed by a **single agent** — the **OrchestratorAgent** (port 9000). The React SPA communicates exclusively with the Orchestrator via `POST /invoke` with different `task` values. The Orchestrator then delegates to downstream agents via A2A.
+
+| # | Task Name | Triggered By | SPA Step Transition | Purpose |
+|---|-----------|-------------|---------------------|---------|
+| 1 | `phase1_generate_docs` | "Start Analysis" button | `INPUT` → `DOC_REVIEW` | Upload diagram + title → returns generated doc sections, HA/DR text, HA/DR diagram URIs, `workflow_id` |
+| 2 | `approve_docs` | "Approve & Continue" button | `DOC_REVIEW` → `CODE_GEN` | Saves approval in CloudSQL, fires-and-forgets SharePoint publish, advances workflow state |
+| 3 | `phase2_generate_code` | Auto-triggered on step mount | `CODE_GEN` → `CODE_REVIEW` | Runs component spec → artifact gen → validation loop, returns artifacts + spec |
+| 4 | `approve_code` | "Approve & Publish" button | `CODE_REVIEW` → `PUBLISH` | Saves approval, fires-and-forgets GitHub publish, advances workflow state |
+| 5 | `get_publish_status` | 3-second polling interval | `PUBLISH` | Returns doc/code publish status per `review_id`, marks workflow `COMPLETED` when both done |
+| 6 | `resume_workflow` | `useEffect` on App mount | Any (resume) | Loads persisted workflow state from CloudSQL, returns step + all accumulated data |
+| 7 | `list_workflows` | Resume picker UI (future) | Pre-INPUT | Lists up to 10 active workflows for a user |
+| 8 | `start_workflow` | Legacy / unused | — | Legacy loop entry point (returns error directing to phase-based flow) |
+
+```
+SPA                          Orchestrator (port 9000)              Downstream Agents
+ │                                │                                     │
+ ├─ POST /invoke ────────────────►│                                     │
+ │  { "task": "phase1_...",       │                                     │
+ │    "payload": { title, b64 }}  │── A2A ──► GeneratorAgent (9002)     │
+ │                                │── A2A ──► RetrieverAgent (9001)     │
+ │                                │── A2A ──► ReviewerAgent (9003)      │
+ │                                │── A2A ──► HADRRetrieverAgent (9006) │
+ │                                │── A2A ──► HADRGeneratorAgent (9007) │
+ │                                │── A2A ──► HADRDiagramGenAgent (9008)│
+ │◄─ { status, result: {         │                                     │
+ │     workflow_id, sections,     │                                     │
+ │     full_doc, hadr_... }}      │                                     │
+ │                                │                                     │
+ ├─ POST /invoke ────────────────►│                                     │
+ │  { "task": "resume_workflow",  │── SQL ──► CloudSQL workflow_state   │
+ │    "payload": { workflow_id }} │                                     │
+ │◄─ { found, step, doc_data,    │                                     │
+ │     code_data, ... }           │                                     │
+```
+
+**Why a single BFF endpoint?** The Orchestrator acts as a facade — the SPA never communicates directly with the 7 downstream agents (ports 9001–9008). This provides a single CORS origin, a single auth boundary, task-based routing without REST resource design, centralized workflow state ownership, and deployment simplicity (one public-facing Cloud Run service).
 
 ---
 
