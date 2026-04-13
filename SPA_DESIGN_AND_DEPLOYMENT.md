@@ -1,6 +1,6 @@
 # Pattern Factory UI — SPA Design & Deployment Guide
 
-> **Version 1.2** — React 18 + Vite conversion of the Streamlit front-end.
+> **Version 1.3** — React 18 + Vite conversion of the Streamlit front-end, with resumable workflow state persistence.
 
 ---
 
@@ -15,6 +15,7 @@
    - [6.1 BFF API Task Inventory](#61-bff-api-task-inventory)
 7. [Deployment Option 1 — Local Development (VSCode Terminal)](#7-deployment-option-1--local-development-vscode-terminal)
 8. [Deployment Option 2 — GCP Cloud Run](#8-deployment-option-2--gcp-cloud-run)
+9. [Resumable Workflow — State Persistence](#9-resumable-workflow--state-persistence)
 
 ---
 
@@ -31,6 +32,7 @@
 │  │          │ │          │ │ ▸ Publish         │  │
 │  └──────────┘ └──────────┘ └──────────────────┘  │
 │        │              fetch("/api/invoke")        │
+│        │     localStorage: engen_workflow_id      │
 └────────┼─────────────────────────────────────────┘
          │  Vite proxy (dev) / nginx proxy (prod)
          ▼
@@ -40,11 +42,14 @@
 │  ┌─────────┐ ┌───────────┐ ┌──────────────────┐  │
 │  │Retriever│ │ Generator │ │ Publisher agents  │  │
 │  └─────────┘ └───────────┘ └──────────────────┘  │
+│  ┌──────────────────────────────────────────────┐ │
+│  │  WorkflowStateManager (CloudSQL)             │ │
+│  │  workflow_state table — JSONB per phase      │ │
+│  └──────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────┘
 ```
 
-The SPA communicates with the **same Orchestrator Agent** as the Streamlit app.
-No backend code changes are required.
+The SPA communicates with the **same Orchestrator Agent** as the Streamlit app. Workflow state is persisted in CloudSQL so users can close the browser and resume later.
 
 ---
 
@@ -86,9 +91,9 @@ engen-ui/
 
 | Streamlit Concept | React Equivalent | File |
 |---|---|---|
-| `st.session_state.step` | `useState("INPUT")` in App | `App.jsx` |
-| `st.session_state.doc_data` | `useState(null)` — `docData` | `App.jsx` |
-| `st.session_state.code_data` | `useState(null)` — `codeData` | `App.jsx` |
+| `st.session_state.step` | `useState("INPUT")` in App + `localStorage` resume | `App.jsx` |
+| `st.session_state.doc_data` | `useState(null)` — `docData` (persisted to CloudSQL) | `App.jsx` |
+| `st.session_state.code_data` | `useState(null)` — `codeData` (persisted to CloudSQL) | `App.jsx` |
 | `st.progress(idx/5)` | `<ProgressBar currentStep={step} />` (chevron stepper) | `ProgressBar.jsx` |
 | `st.sidebar` + Reset button | `<Sidebar onReset={…} />` | `Sidebar.jsx` |
 | `st.expander(…)` | `<Collapsible title={…}>` | `Collapsible.jsx` |
@@ -116,15 +121,15 @@ engen-ui/
 
 ### 4.2 Step Components
 
-Each step component is **self-contained**: it owns its local UI state (loading flags, form fields) and communicates with the parent `App` via callback props.
+Each step component is **self-contained**: it owns its local UI state (loading flags, form fields) and communicates with the parent `App` via callback props. Every step receives a `workflowId` prop and includes it in its Orchestrator API call so the backend can persist phase transitions.
 
-| Step | Triggers | Outputs |
-|---|---|---|
-| **InputStep** | User clicks "Start Analysis" | Calls `onComplete(docData)` |
-| **DocReviewStep** | User clicks "Approve & Publish" | Calls `onApprove()` |
-| **CodeGenStep** | Auto-fires on mount (`useEffect`) | Calls `onComplete(codeData)` |
-| **CodeReviewStep** | User clicks "Approve & Publish" | Calls `onApprove()` |
-| **PublishStep** | Auto-polls on mount | Renders status cards |
+| Step | Props | Triggers | Outputs |
+|---|---|---|---|
+| **InputStep** | `onComplete`, `onError`, `workflowId` | User clicks "Start Analysis" | Calls `onComplete(docData)` |
+| **DocReviewStep** | `docData`, `onApprove`, `onError`, `workflowId` | User clicks "Approve & Continue" | Calls `onApprove()` |
+| **CodeGenStep** | `docData`, `onComplete`, `onError`, `workflowId` | Auto-fires on mount (`useEffect`) | Calls `onComplete(codeData)` |
+| **CodeReviewStep** | `codeData`, `docData`, `onApprove`, `onError`, `workflowId` | User clicks "Approve & Publish" | Calls `onApprove()` |
+| **PublishStep** | `docData`, `codeData`, `workflowId`, `onComplete` | Auto-polls on mount | Renders status cards; calls `onComplete()` when done |
 
 ---
 
@@ -134,14 +139,26 @@ The app uses **React `useState`** — no external state library is needed becaus
 
 ```
 App (root)
- ├── step      : "INPUT" | "DOC_REVIEW" | "CODE_GEN" | "CODE_REVIEW" | "PUBLISH"
- ├── docData   : object | null   (result of phase1_generate_docs)
- ├── codeData  : object | null   (result of phase2_generate_code)
- └── error     : string | null   (latest error message)
+ ├── step        : "INPUT" | "DOC_REVIEW" | "CODE_GEN" | "CODE_REVIEW" | "PUBLISH"
+ ├── docData     : object | null   (result of phase1_generate_docs)
+ ├── codeData    : object | null   (result of phase2_generate_code)
+ ├── error       : string | null   (latest error message)
+ ├── workflowId  : string | null   (UUID from Orchestrator — persisted in localStorage)
+ └── resuming    : boolean         (true while resume-on-load is in progress)
 ```
 
+### 5.1 Workflow Lifecycle
+
+1. **New workflow** — `InputStep` calls `phase1_generate_docs`; the Orchestrator creates a row in `workflow_state` and returns a `workflow_id`. App stores it in `workflowId` state + `localStorage("engen_workflow_id")`.
+2. **Phase transitions** — Each subsequent API call includes `workflow_id` in the payload. The Orchestrator calls `save_state()` at every transition (DOC_REVIEW → CODE_GEN → CODE_REVIEW → PUBLISH → COMPLETED).
+3. **Resume-on-load** — A `useEffect` on mount checks `localStorage` for `engen_workflow_id`. If found, it calls the `resume_workflow` task and restores `step`, `docData`, and `codeData` from the server-side snapshot.
+4. **Completion** — `PublishStep` calls `onComplete()` which clears `localStorage("engen_workflow_id")`.
+5. **Reset** — `handleReset()` clears all in-memory state **and** removes the localStorage key.
+
+### 5.2 State Transitions
+
 **Transitions** are driven by callbacks passed to each step component.  
-`handleReset()` returns everything to initial state.
+`handleReset()` returns everything to initial state and clears localStorage.
 
 ---
 
@@ -365,12 +382,103 @@ Open the returned URL in a browser — the SPA should load and connect to the Or
 
 ---
 
+## 9. Resumable Workflow — State Persistence
+
+The SPA implements a **3-layer state persistence strategy** so users can close the browser, log off, or switch devices and resume their workflow exactly where they left off.
+
+### 9.1 Architecture Layers
+
+| Layer | Technology | Stored Data | Purpose |
+|---|---|---|---|
+| **Backend** | CloudSQL `workflow_state` table | Full workflow snapshot (JSONB) | Source of truth — survives browser clears |
+| **API** | Orchestrator tasks `resume_workflow` / `list_workflows` | N/A (pass-through) | Exposes persistence to the frontend |
+| **Frontend** | `localStorage("engen_workflow_id")` | UUID string only | Lightweight pointer — triggers resume on page load |
+
+### 9.2 CloudSQL Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS workflow_state (
+    workflow_id   VARCHAR(36) PRIMARY KEY,
+    created_by    VARCHAR(255),
+    pattern_title VARCHAR(500),
+    current_phase VARCHAR(50),           -- INPUT, DOC_REVIEW, CODE_GEN, CODE_REVIEW, PUBLISH, COMPLETED
+    image_base64  TEXT,
+    doc_data      JSONB,                 -- sections, full_doc, review_id, hadr, diagrams
+    hadr_sections JSONB,
+    hadr_diagram_uris JSONB,
+    code_data     JSONB,                 -- artifacts, spec, review_id
+    doc_review_id VARCHAR(255),
+    code_review_id VARCHAR(255),
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active     BOOLEAN DEFAULT TRUE
+);
+```
+
+### 9.3 Resume-on-Load Flow
+
+```
+Browser opens
+     │
+     ▼
+App.jsx useEffect
+     │
+     ├── localStorage has "engen_workflow_id"?
+     │        │
+     │    YES │                         NO
+     │        ▼                          ▼
+     │   POST /invoke                 Show INPUT step
+     │   { task: "resume_workflow",    (normal flow)
+     │     payload: { workflow_id } }
+     │        │
+     │        ▼
+     │   Orchestrator loads from
+     │   CloudSQL workflow_state
+     │        │
+     │        ▼
+     │   Returns { found, step,
+     │     doc_data, code_data }
+     │        │
+     │   ┌────┴────┐
+     │   │ found?  │
+     │   └────┬────┘
+     │    YES │         NO
+     │        ▼          ▼
+     │   Restore state  Clear localStorage
+     │   Jump to step   Show INPUT step
+     └───────────────────────────────────────
+```
+
+### 9.4 Phase-to-Step Mapping
+
+The Orchestrator maps CloudSQL `current_phase` values to SPA step names:
+
+| CloudSQL Phase | SPA Step | Data Restored |
+|---|---|---|
+| `DOC_REVIEW` | `DOC_REVIEW` | `doc_data` |
+| `CODE_GEN` | `CODE_GEN` | `doc_data` |
+| `CODE_REVIEW` | `CODE_REVIEW` | `doc_data` + `code_data` |
+| `PUBLISH` | `PUBLISH` | `doc_data` + `code_data` |
+| `COMPLETED` | — | Workflow deactivated; localStorage cleared |
+
+### 9.5 Key Files
+
+| File | Role |
+|---|---|
+| `inference-service/lib/workflow_state.py` | `WorkflowStateManager` — CRUD for `workflow_state` table |
+| `inference-service/agents/orchestrator/main.py` | `save_state()` calls at every phase transition; `resume_workflow` + `list_workflows` task handlers |
+| `engen-ui/src/App.jsx` | `useEffect` resume-on-load; `workflowId` state; localStorage read/write |
+| `engen-ui/src/steps/*.jsx` | All steps pass `workflow_id` in orchestrator API payloads |
+
+---
+
 ## Summary
 
 | Aspect | Detail |
 |---|---|
 | Framework | React 18 + Vite 6 |
-| State | `useState` (no Redux needed) |
+| State | `useState` + `localStorage` pointer + CloudSQL persistence |
+| Resumability | Close browser → reopen → auto-resume from last completed phase |
 | Styling | Vanilla CSS with custom properties |
 | API layer | `fetch` wrapper with Vite proxy (dev) / nginx proxy (prod) |
 | Local run | `npm install` → `npm run dev` → http://localhost:3000 |
