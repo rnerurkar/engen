@@ -579,8 +579,8 @@ sequenceDiagram
 
     Note over Orch,Ret: Step 2c: HA/DR Diagram Generation & Storage (Non-Blocking, A2A + Async Parallel)
     Orch->>Gen: A2A: HADR_DIAGRAM_GENERATOR_URL/generate_and_store_hadr_diagrams
-    Gen-->>Orch: diagram_urls{"Strategy|Phase"→urls}
-    Orch->>Orch: Deserialise "Strategy|Phase" string keys to tuples
+    Gen-->>Orch: diagram_urls (Strategy-Phase to urls)
+    Orch->>Orch: Deserialise Strategy-Phase string keys to tuples
     Orch->>Orch: Embed diagram URLs in HA/DR sections
 
     Note over Orch,Verifier: Step 3: User Approval (Pattern)
@@ -962,7 +962,7 @@ graph TD
         Orch[Orchestrator Agent]
         Extract[Extract Service Names<br/>regex + component_sources.py]
         Merge[Merge into generated_sections<br/>+ embed diagram URLs]
-        Deser[Deserialise \"Strategy|Phase\"<br/>string keys to tuples]
+        Deser[Deserialise Strategy-Phase<br/>string keys to tuples]
     end
 
     subgraph "HA/DR Retriever Agent (port 9006)"
@@ -1026,7 +1026,7 @@ graph TD
     DiagStore -->|upload SVG+XML+PNG| DiagGCS
     DiagGCS -->|public URLs| DiagStore
     DiagStore -->|url_map| DiagAgent
-    DiagAgent -->|response: \"Strategy|Phase\"→urls| Orch
+    DiagAgent -->|response: Strategy-Phase → urls| Orch
 
     Orch --> Deser
     Deser --> Merge
@@ -1114,12 +1114,12 @@ sequenceDiagram
         GCS-->>DiagStore: public URLs
         Note right of DiagStore: ...repeats for all 12 bundles
     end
-    DiagStore-->>DiagAgent: url_map{"Strategy|Phase"→{svg_url, drawio_url, png_url}}
+    DiagStore-->>DiagAgent: url_map with Strategy-Phase keys (svg_url, drawio_url, png_url)
     DiagAgent-->>Orch: A2A response (string-keyed url_map)
 
-    Orch->>Orch: Deserialise "Strategy|Phase" keys to (strategy, phase) tuples
+    Orch->>Orch: Deserialise Strategy-Phase keys to (strategy, phase) tuples
     Orch->>Orch: Embed diagram URLs in HA/DR sections
-    Orch->>Orch: generated_sections["HA/DR"] = formatted_hadr
+    Orch->>Orch: generated_sections HA/DR = formatted_hadr
     
     Note over Orch: Non-blocking: if any step fails,<br/>placeholder inserted and workflow continues
 ```
