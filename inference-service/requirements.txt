@@ -12,6 +12,7 @@ streamlit>=1.32.0
 
 sqlalchemy>=2.0.0
 pg8000>=1.29.0
+google-cloud-alloydb-connector[pg8000]>=1.0.0
 google-cloud-pubsub>=2.15.0
 
 # Real-time component source discovery (replaces component_catalog_pipeline)

@@ -1,19 +1,20 @@
 from lib.adk_core import ADKAgent, AgentRequest, AgentResponse, TaskStatus
-from lib.cloudsql_client import CloudSQLManager, logger as sql_logger
+from lib.cloudsql_client import AlloyDBManager, logger as sql_logger
 from config import Config
 from sqlalchemy import text  # Add this import
 import logging
+import os
 import uuid
 import json
 import time
 from typing import Dict, Any, Optional
-# sqlalchemy imports removed as CloudSQLManager handles it
+# sqlalchemy imports removed as AlloyDBManager handles it
 from google.cloud import pubsub_v1
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# CloudSQLManager moved to lib/cloudsql_client.py
+# AlloyDBManager (formerly CloudSQLManager) lives in lib/cloudsql_client.py
 # Using shared implementation.
 
 class NotificationService:
@@ -55,11 +56,11 @@ class HumanVerifierAgent:
     """
     def __init__(self):
         # Load from Config (Inject real secrets in prod)
-        self.db = CloudSQLManager(
-            connection_name="engen-project:us-central1:reviews-db",
-            db_user="review_service",
-            db_pass="super-secret",
-            db_name="engen_reviews"
+        self.db = AlloyDBManager(
+            connection_name=os.environ.get("ALLOYDB_INSTANCE", Config.ALLOYDB_INSTANCE),
+            db_user=os.environ.get("DB_USER", Config.DB_USER),
+            db_pass=os.environ.get("DB_PASS", Config.DB_PASS),
+            db_name=os.environ.get("DB_NAME", Config.DB_NAME)
         )
         self.notifier = NotificationService(
             project_id=Config.PROJECT_ID,
@@ -77,7 +78,7 @@ class HumanVerifierAgent:
         
         review_url = f"{self.frontend_base_url}/{request_id}"
         
-        # 1. Persist to CloudSQL
+        # 1. Persist to AlloyDB
         self.db.create_review_record(request_id, title, stage, content, documentation)
         
         # 2. Notify Humans

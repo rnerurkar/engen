@@ -45,3 +45,13 @@ class Config:
 
     # HA/DR Diagram Storage (SVG, draw.io XML, PNG)
     HADR_DIAGRAM_GCS_BUCKET = os.getenv("HADR_DIAGRAM_GCS_BUCKET", "engen-hadr-diagrams")
+
+    # AlloyDB Configuration (replaces CloudSQL)
+    # Instance URI format: projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>
+    ALLOYDB_INSTANCE = os.getenv(
+        "ALLOYDB_INSTANCE",
+        "projects/engen-project/locations/us-central1/clusters/engen-cluster/instances/engen-primary"
+    )
+    DB_USER = os.getenv("DB_USER", "postgres")
+    DB_PASS = os.getenv("DB_PASS", "postgres")
+    DB_NAME = os.getenv("DB_NAME", "reviews_db")

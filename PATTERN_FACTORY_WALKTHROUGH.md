@@ -1,8 +1,8 @@
-# The Pattern Factory Workflow — A Plain English Walkthrough (v2.4)
+# The Pattern Factory Workflow — A Plain English Walkthrough (v2.5)
 
 Think of Pattern Factory as an assembly line with **8 phases**. A user uploads an architecture diagram, and the system generates documentation (including HA/DR sections with visual diagrams) and deployable code for it — with human checkpoints along the way.
 
-The front-end is a **React 18 + Vite single-page application (SPA)** that replaced the earlier Streamlit prototype. It presents a 5-step chevron-style wizard (Input → Doc Review → Code Gen → Code Review → Publish) and communicates with the Orchestrator via a single `POST /invoke` BFF endpoint. Workflow state is persisted to **CloudSQL** so users can close the browser and resume later.
+The front-end is a **React 18 + Vite single-page application (SPA)** that replaced the earlier Streamlit prototype. It presents a 5-step chevron-style wizard (Input → Doc Review → Code Gen → Code Review → Publish) and communicates with the Orchestrator via a single `POST /invoke` BFF endpoint. Workflow state is persisted to **AlloyDB** so users can close the browser and resume later.
 
 ---
 
@@ -11,7 +11,7 @@ The front-end is a **React 18 + Vite single-page application (SPA)** that replac
 Before anything else, the SPA checks whether the user has an in-progress workflow.
 
 0a. When the React app loads, a `useEffect` hook reads `localStorage` for a saved `engen_workflow_id`.
-0b. If found, the app calls the Orchestrator's `resume_workflow` task with that ID. The Orchestrator loads the full workflow snapshot from the **CloudSQL `workflow_state` table** — including the current phase, saved documentation, and any generated code.
+0b. If found, the app calls the Orchestrator's `resume_workflow` task with that ID. The Orchestrator loads the full workflow snapshot from the **AlloyDB `workflow_state` table** — including the current phase, saved documentation, and any generated code.
 0c. The app restores `step`, `docData`, and `codeData` from the server response and jumps the user straight to the step where they left off. A loading spinner is shown while resuming.
 0d. If the workflow is no longer active (completed or deleted), the localStorage key is cleared and the user starts fresh.
 
@@ -20,7 +20,7 @@ Before anything else, the SPA checks whether the user has an in-progress workflo
 ## Phase 1 — "Look at the picture and find something similar"
 
 1. The user opens the **Pattern Factory SPA** (a React + Vite single-page application), uploads an architecture diagram image (e.g., a PNG of a cloud architecture), and types in a title. The UI shows a chevron-style stepper at the top to indicate progress through the 5-step wizard.
-2. The app sends this to the **Orchestrator** — the "traffic controller" that runs the whole show. The Orchestrator creates a new row in the CloudSQL `workflow_state` table and returns a `workflow_id` that the SPA stores in `localStorage` for future resume.
+2. The app sends this to the **Orchestrator** — the "traffic controller" that runs the whole show. The Orchestrator creates a new row in the AlloyDB `workflow_state` table and returns a `workflow_id` that the SPA stores in `localStorage` for future resume.
 3. The Orchestrator passes the image to the **Vision Agent** (powered by Gemini Vision AI). This agent looks at the picture and writes a plain-text technical description of what it sees (e.g., "A Cloud Run service connected to a Cloud SQL database behind a load balancer").
 4. The Orchestrator takes that description and sends it to the **Retrieval Agent**. This agent searches a knowledge base (Vertex AI Search) for the closest matching existing design pattern — called a **"Donor Pattern."** Think of it like finding a similar recipe before writing a new one.
 
@@ -66,7 +66,7 @@ This step also runs with the same safety net as Phase 2b — if diagrams fail, t
 
 18. The Orchestrator sends the final documentation — including all HA/DR sections with embedded diagram images — back to the React SPA for the user to read. The pattern documentation and the HA/DR sections are shown in **collapsible expander panels** so they're easy to navigate.
 19. If the user is happy, they click **"Approve & Continue."**
-20. The app calls the Orchestrator's `approve_docs` task (passing the `workflow_id`). The Orchestrator saves the approval in the **CloudSQL database** and updates the workflow state to `CODE_GEN` so the user can resume from here if they close the browser.
+20. The app calls the Orchestrator's `approve_docs` task (passing the `workflow_id`). The Orchestrator saves the approval in the **AlloyDB database** and updates the workflow state to `CODE_GEN` so the user can resume from here if they close the browser.
 21. The Orchestrator immediately kicks off a **background task** to publish the documentation to SharePoint (the company's knowledge base). It does *not* wait for this to finish — it moves on right away. The background worker updates the database as it goes: first to "IN_PROGRESS", then to "COMPLETED" with the SharePoint page URL.
 
 ---
@@ -90,7 +90,7 @@ This step also runs with the same safety net as Phase 2b — if diagrams fail, t
 
 30. The validated code bundle is shown to the user in the React SPA.
 31. The user reviews the file structure and code. If they're satisfied, they click **"Approve & Publish."**
-32. The Orchestrator saves the approval in CloudSQL, updates the workflow state to `PUBLISH`, and immediately kicks off another **background task** — this time to push the code to GitHub. It uses the GitHub REST API to create a new commit with all the generated files organized into folders:
+32. The Orchestrator saves the approval in AlloyDB, updates the workflow state to `PUBLISH`, and immediately kicks off another **background task** — this time to push the code to GitHub. It uses the GitHub REST API to create a new commit with all the generated files organized into folders:
     - `infrastructure/terraform/` for IaC templates
     - `src/{component_name}/` for application code
 33. The Orchestrator does *not* wait for the GitHub push to finish. It immediately returns a response to the app with **two tracking IDs** — one for the docs publishing and one for the code publishing.
@@ -100,8 +100,8 @@ This step also runs with the same safety net as Phase 2b — if diagrams fail, t
 ## Phase 6 — "Wait for everything to finish"
 
 34. The React SPA's `PublishStep` component enters a **polling loop**: every 3 seconds, it asks the Orchestrator "Are we done yet?" by calling `get_publish_status` with those two tracking IDs and the `workflow_id`.
-35. The Orchestrator checks the CloudSQL database and reports back the current status (e.g., "Docs: COMPLETED, Code: IN_PROGRESS").
-36. Once both tasks show "COMPLETED," the app displays the final **SharePoint page URL** and **GitHub commit URL** to the user. The Orchestrator marks the workflow state as `COMPLETED` and deactivates the row in CloudSQL. The SPA clears the `engen_workflow_id` from `localStorage`. Done!
+35. The Orchestrator checks the AlloyDB database and reports back the current status (e.g., "Docs: COMPLETED, Code: IN_PROGRESS").
+36. Once both tasks show "COMPLETED," the app displays the final **SharePoint page URL** and **GitHub commit URL** to the user. The Orchestrator marks the workflow state as `COMPLETED` and deactivates the row in AlloyDB. The SPA clears the `engen_workflow_id` from `localStorage`. Done!
 
 ---
 
@@ -112,4 +112,4 @@ This step also runs with the same safety net as Phase 2b — if diagrams fail, t
 - If the background publishing to SharePoint or GitHub fails, the database status is set to **"FAILED"** and the polling UI shows an error message to the user.
 - If the HA/DR text generation or diagram generation fails at any point, the system **does not stop**. It inserts a placeholder message ("*HA/DR section generation failed. Please complete manually.*") and continues with the rest of the document. The main pattern documentation is never blocked by HA/DR failures.
 - If a single HA/DR diagram takes too long (over 3 minutes), it **times out gracefully** and a simpler fallback diagram is generated automatically without AI calls.
-- If the user closes the browser mid-workflow, the state is **already persisted** in CloudSQL at the last completed phase. Reopening the SPA will automatically resume from that point (Phase 0 above). No work is lost.
+- If the user closes the browser mid-workflow, the state is **already persisted** in AlloyDB at the last completed phase. Reopening the SPA will automatically resume from that point (Phase 0 above). No work is lost.

@@ -1,5 +1,5 @@
 """
-Workflow State Manager — persists wizard state in CloudSQL for resumable sessions.
+Workflow State Manager — persists wizard state in AlloyDB for resumable sessions.
 
 Each user session gets a workflow_id. After every phase transition the orchestrator
 calls save_state() to snapshot the current step + all accumulated data.  When the
@@ -27,7 +27,7 @@ class WorkflowStateManager:
     def __init__(self, engine: sqlalchemy.Engine):
         """
         Args:
-            engine: SQLAlchemy engine (from CloudSQLManager.engine).
+            engine: SQLAlchemy engine (from AlloyDBManager.engine).
         """
         self.engine = engine
         self._ensure_table()

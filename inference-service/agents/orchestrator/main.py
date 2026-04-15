@@ -23,7 +23,7 @@ from lib.adk_core import ADKAgent, AgentRequest, AgentResponse, TaskStatus
 from lib.a2a_client import A2AClient, A2AError
 from lib.sharepoint_publisher import SharePointPublisher, SharePointPageConfig
 from lib.github_publisher import GitHubMCPPublisher
-from lib.cloudsql_client import CloudSQLManager, logger as sql_logger
+from lib.cloudsql_client import AlloyDBManager, logger as sql_logger
 from lib.workflow_state import WorkflowStateManager
 from core.pattern_synthesis.hadr_diagram_generator import (
     DR_STRATEGIES,
@@ -53,12 +53,12 @@ class OrchestratorAgent(ADKAgent):
         self.gh_branch = os.environ.get("GITHUB_BRANCH", "main")
         self.code_publisher = GitHubMCPPublisher(owner=self.gh_owner, repo=self.gh_repo, branch=self.gh_branch)
         
-        # CloudSQL
-        self.db = CloudSQLManager(
-             connection_name=os.environ.get("DB_INSTANCE", "engen-project:us-central1:reviews-db"),
-             db_user=os.environ.get("DB_USER", "postgres"),
-             db_pass=os.environ.get("DB_PASS", "postgres"),
-             db_name=os.environ.get("DB_NAME", "reviews_db")
+        # AlloyDB (replaces CloudSQL — wire-compatible PostgreSQL)
+        self.db = AlloyDBManager(
+             connection_name=os.environ.get("ALLOYDB_INSTANCE", Config.ALLOYDB_INSTANCE),
+             db_user=os.environ.get("DB_USER", Config.DB_USER),
+             db_pass=os.environ.get("DB_PASS", Config.DB_PASS),
+             db_name=os.environ.get("DB_NAME", Config.DB_NAME)
         )
 
         # Workflow State Manager (for resumable sessions)

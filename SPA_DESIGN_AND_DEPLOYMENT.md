@@ -1,6 +1,6 @@
 # Pattern Factory UI — SPA Design & Deployment Guide
 
-> **Version 1.3** — React 18 + Vite conversion of the Streamlit front-end, with resumable workflow state persistence.
+> **Version 1.4** — React 18 + Vite conversion of the Streamlit front-end, with resumable workflow state persistence. Database backend migrated from CloudSQL to AlloyDB for PostgreSQL.
 
 ---
 
@@ -43,13 +43,13 @@
 │  │Retriever│ │ Generator │ │ Publisher agents  │  │
 │  └─────────┘ └───────────┘ └──────────────────┘  │
 │  ┌──────────────────────────────────────────────┐ │
-│  │  WorkflowStateManager (CloudSQL)             │ │
+│  │  WorkflowStateManager (AlloyDB)              │ │
 │  │  workflow_state table — JSONB per phase      │ │
 │  └──────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────┘
 ```
 
-The SPA communicates with the **same Orchestrator Agent** as the Streamlit app. Workflow state is persisted in CloudSQL so users can close the browser and resume later.
+The SPA communicates with the **same Orchestrator Agent** as the Streamlit app. Workflow state is persisted in AlloyDB so users can close the browser and resume later.
 
 ---
 
@@ -92,8 +92,8 @@ engen-ui/
 | Streamlit Concept | React Equivalent | File |
 |---|---|---|
 | `st.session_state.step` | `useState("INPUT")` in App + `localStorage` resume | `App.jsx` |
-| `st.session_state.doc_data` | `useState(null)` — `docData` (persisted to CloudSQL) | `App.jsx` |
-| `st.session_state.code_data` | `useState(null)` — `codeData` (persisted to CloudSQL) | `App.jsx` |
+| `st.session_state.doc_data` | `useState(null)` — `docData` (persisted to AlloyDB) | `App.jsx` |
+| `st.session_state.code_data` | `useState(null)` — `codeData` (persisted to AlloyDB) | `App.jsx` |
 | `st.progress(idx/5)` | `<ProgressBar currentStep={step} />` (chevron stepper) | `ProgressBar.jsx` |
 | `st.sidebar` + Reset button | `<Sidebar onReset={…} />` | `Sidebar.jsx` |
 | `st.expander(…)` | `<Collapsible title={…}>` | `Collapsible.jsx` |
@@ -188,11 +188,11 @@ All BFF APIs are exposed by a **single agent** — the **OrchestratorAgent** (po
 | # | Task Name | Triggered By | SPA Step Transition | Purpose |
 |---|-----------|-------------|---------------------|---------|
 | 1 | `phase1_generate_docs` | "Start Analysis" button | `INPUT` → `DOC_REVIEW` | Upload diagram + title → returns generated doc sections, HA/DR text, HA/DR diagram URIs, `workflow_id` |
-| 2 | `approve_docs` | "Approve & Continue" button | `DOC_REVIEW` → `CODE_GEN` | Saves approval in CloudSQL, fires-and-forgets SharePoint publish, advances workflow state |
+| 2 | `approve_docs` | "Approve & Continue" button | `DOC_REVIEW` → `CODE_GEN` | Saves approval in AlloyDB, fires-and-forgets SharePoint publish, advances workflow state |
 | 3 | `phase2_generate_code` | Auto-triggered on step mount | `CODE_GEN` → `CODE_REVIEW` | Runs component spec → artifact gen → validation loop, returns artifacts + spec |
 | 4 | `approve_code` | "Approve & Publish" button | `CODE_REVIEW` → `PUBLISH` | Saves approval, fires-and-forgets GitHub publish, advances workflow state |
 | 5 | `get_publish_status` | 3-second polling interval | `PUBLISH` | Returns doc/code publish status per `review_id`, marks workflow `COMPLETED` when both done |
-| 6 | `resume_workflow` | `useEffect` on App mount | Any (resume) | Loads persisted workflow state from CloudSQL, returns step + all accumulated data |
+| 6 | `resume_workflow` | `useEffect` on App mount | Any (resume) | Loads persisted workflow state from AlloyDB, returns step + all accumulated data |
 | 7 | `list_workflows` | Resume picker UI (future) | Pre-INPUT | Lists up to 10 active workflows for a user |
 | 8 | `start_workflow` | Legacy / unused | — | Legacy loop entry point (returns error directing to phase-based flow) |
 
@@ -212,7 +212,7 @@ SPA                          Orchestrator (port 9000)              Downstream Ag
  │     full_doc, hadr_... }}      │                                     │
  │                                │                                     │
  ├─ POST /invoke ────────────────►│                                     │
- │  { "task": "resume_workflow",  │── SQL ──► CloudSQL workflow_state   │
+ │  { "task": "resume_workflow",  │── SQL ──► AlloyDB workflow_state     │
  │    "payload": { workflow_id }} │                                     │
  │◄─ { found, step, doc_data,    │                                     │
  │     code_data, ... }           │                                     │
@@ -390,11 +390,11 @@ The SPA implements a **3-layer state persistence strategy** so users can close t
 
 | Layer | Technology | Stored Data | Purpose |
 |---|---|---|---|
-| **Backend** | CloudSQL `workflow_state` table | Full workflow snapshot (JSONB) | Source of truth — survives browser clears |
+| **Backend** | AlloyDB `workflow_state` table | Full workflow snapshot (JSONB) | Source of truth — survives browser clears |
 | **API** | Orchestrator tasks `resume_workflow` / `list_workflows` | N/A (pass-through) | Exposes persistence to the frontend |
 | **Frontend** | `localStorage("engen_workflow_id")` | UUID string only | Lightweight pointer — triggers resume on page load |
 
-### 9.2 CloudSQL Schema
+### 9.2 AlloyDB Schema
 
 ```sql
 CREATE TABLE IF NOT EXISTS workflow_state (
@@ -433,7 +433,7 @@ App.jsx useEffect
      │        │
      │        ▼
      │   Orchestrator loads from
-     │   CloudSQL workflow_state
+     │   AlloyDB workflow_state
      │        │
      │        ▼
      │   Returns { found, step,
@@ -451,9 +451,9 @@ App.jsx useEffect
 
 ### 9.4 Phase-to-Step Mapping
 
-The Orchestrator maps CloudSQL `current_phase` values to SPA step names:
+The Orchestrator maps AlloyDB `current_phase` values to SPA step names:
 
-| CloudSQL Phase | SPA Step | Data Restored |
+| AlloyDB Phase | SPA Step | Data Restored |
 |---|---|---|
 | `DOC_REVIEW` | `DOC_REVIEW` | `doc_data` |
 | `CODE_GEN` | `CODE_GEN` | `doc_data` |
@@ -477,7 +477,7 @@ The Orchestrator maps CloudSQL `current_phase` values to SPA step names:
 | Aspect | Detail |
 |---|---|
 | Framework | React 18 + Vite 6 |
-| State | `useState` + `localStorage` pointer + CloudSQL persistence |
+| State | `useState` + `localStorage` pointer + AlloyDB persistence |
 | Resumability | Close browser → reopen → auto-resume from last completed phase |
 | Styling | Vanilla CSS with custom properties |
 | API layer | `fetch` wrapper with Vite proxy (dev) / nginx proxy (prod) |
