@@ -1,8 +1,42 @@
-# The Pattern Factory Workflow — A Plain English Walkthrough (v2.5)
+# The Pattern Factory Workflow — A Plain English Walkthrough
 
-Think of Pattern Factory as an assembly line with **8 phases**. A user uploads an architecture diagram, and the system generates documentation (including HA/DR sections with visual diagrams) and deployable code for it — with human checkpoints along the way.
+Think of Pattern Factory as an assembly line with **7 phases**. A user uploads an architecture diagram, and the system generates documentation (including HA/DR sections with visual diagrams) and deployable code for it — with human checkpoints along the way.
 
-The front-end is a **React 18 + Vite single-page application (SPA)** that replaced the earlier Streamlit prototype. It presents a 5-step chevron-style wizard (Input → Doc Review → Code Gen → Code Review → Publish) and communicates with the Orchestrator via a single `POST /invoke` BFF endpoint. Workflow state is persisted to **AlloyDB** so users can close the browser and resume later.
+The front-end is a **React 18 + Vite single-page application (SPA)** presenting a 5-step chevron-style wizard (Input → Doc Review → Code Gen → Code Review → Publish). It communicates with the Orchestrator via a single `POST /invoke` BFF endpoint. Workflow state is persisted to **AlloyDB** so users can close the browser and resume later.
+
+### How the Orchestrator works
+
+The Orchestrator is the central "traffic controller." For documentation generation (Phase 1), it uses **ADK Workflow Agents** — lightweight Python classes that run **in the same process** and share a `WorkflowContext` dictionary. The Orchestrator builds a workflow graph at startup:
+
+- A **SequentialAgent** that runs a series of steps one after another.
+- A **LoopAgent** nested inside it that iterates generate → HA/DR → review until the document is approved (up to 3 times).
+
+All core logic modules (PatternGenerator, VertexRetriever, PatternReviewer, ServiceHADRRetriever, HADRDocumentationGenerator, HADRDiagramGenerator, HADRDiagramStorage) are instantiated directly and passed into the workflow via the shared context — no network calls, no serialization overhead.
+
+For code generation (Phase 2), the Orchestrator communicates with the artifact agents over **A2A (Agent-to-Agent) HTTP calls**.
+
+Here's the workflow graph at a glance:
+
+```
+Phase1DocGenerationWorkflow (SequentialAgent)
+  │
+  ├── VisionAnalysisStep          ← Gemini Vision: image → description
+  │
+  ├── DonorRetrievalStep          ← Vertex AI Search: description → donor_context
+  │
+  ├── ContentRefinementLoop (LoopAgent, max 3 iterations, exit when "approved")
+  │     │
+  │     ├── PatternGenerateStep   ← Gemini Pro: generate core sections
+  │     │
+  │     ├── HADRSectionsStep      ← Parallel retrieval + generation → merge into doc
+  │     │     • asyncio.gather(retrieve_hadr, extract_donor_hadr)
+  │     │     • Generate 4 DR strategies in parallel
+  │     │     • Skip on re-iteration if reviewer didn't flag HA/DR
+  │     │
+  │     └── FullDocReviewStep     ← Review FULL doc (core + HA/DR) → approved / critique
+  │
+  └── HADRDiagramStep             ← Build 12 diagrams programmatically (< 1s) → upload to GCS
+```
 
 ---
 
@@ -17,99 +51,122 @@ Before anything else, the SPA checks whether the user has an in-progress workflo
 
 ---
 
-## Phase 1 — "Look at the picture and find something similar"
+## Phase 1 — "Analyze the diagram and find a donor pattern"
 
-1. The user opens the **Pattern Factory SPA** (a React + Vite single-page application), uploads an architecture diagram image (e.g., a PNG of a cloud architecture), and types in a title. The UI shows a chevron-style stepper at the top to indicate progress through the 5-step wizard.
-2. The app sends this to the **Orchestrator** — the "traffic controller" that runs the whole show. The Orchestrator creates a new row in the AlloyDB `workflow_state` table and returns a `workflow_id` that the SPA stores in `localStorage` for future resume.
-3. The Orchestrator passes the image to the **Vision Agent** (powered by Gemini Vision AI). This agent looks at the picture and writes a plain-text technical description of what it sees (e.g., "A Cloud Run service connected to a Cloud SQL database behind a load balancer").
-4. The Orchestrator takes that description and sends it to the **Retrieval Agent**. This agent searches a knowledge base (Vertex AI Search) for the closest matching existing design pattern — called a **"Donor Pattern."** Think of it like finding a similar recipe before writing a new one.
-
----
-
-## Phase 2 — "Write the documentation, then get it reviewed"
-
-5. Now the Orchestrator has two things: the image description and the donor pattern. It sends both to the **Generator Agent**, which uses Gemini Pro to write a first draft of documentation sections (Problem Statement, Solution, Architecture, etc.).
-6. That draft goes to the **Reviewer Agent** — an AI "critic." It scores the draft against quality guidelines and returns specific feedback (e.g., "The security section is too vague").
-7. If the score isn't good enough, the Orchestrator sends the critique back to the Generator to revise. This **generate → review → revise loop** runs up to 3 times until the quality is acceptable.
+1. The user opens the **Pattern Factory SPA**, uploads an architecture diagram image (e.g., a PNG of a cloud architecture), and types in a title. The UI shows a chevron-style stepper at the top to indicate progress.
+2. The app sends this to the **Orchestrator**. The Orchestrator creates a new row in the AlloyDB `workflow_state` table and returns a `workflow_id` that the SPA stores in `localStorage` for future resume. It then builds a `WorkflowContext` seeded with the uploaded image, the title, and references to every core logic module.
+3. The first step in the workflow is **VisionAnalysisStep**. It calls `PatternGenerator.generate_search_description()` in-process (via `asyncio.to_thread` so the event loop isn't blocked). Gemini Vision AI looks at the picture and writes a plain-text technical description (e.g., "A Cloud Run service connected to a Cloud SQL database behind a load balancer"). The description is stored in the context.
+4. Next, **DonorRetrievalStep** takes that description and the title and calls `VertexRetriever.get_best_donor_pattern()` in-process. This searches the knowledge base (Vertex AI Search) for the closest matching existing design pattern — the **"Donor Pattern."** Think of it like finding a similar recipe before writing a new one. The donor context is stored in the shared `WorkflowContext`.
 
 ---
 
-## Phase 2b — "Write the HA/DR sections for every disaster recovery strategy"
+## Phase 2 — "Write the docs, add HA/DR, and review the whole thing — in a loop"
 
-This step runs right after the documentation loop finishes. It's wrapped in a safety net — if anything here fails, the main document still gets delivered with a placeholder message saying "HA/DR section generation failed. Please complete manually." The main document is **never blocked** by HA/DR failures.
+The next part of the workflow is a **LoopAgent** called `ContentRefinementLoop`. It runs up to 3 iterations, each with three steps in sequence. The loop exits early if the reviewer approves the document.
 
-Just like the Generator Agent, Retriever Agent, and Reviewer Agent, the HA/DR components are now proper **agents** — each running as its own HTTP service and accessed by the Orchestrator via **A2A (Agent-to-Agent) HTTP calls**. This keeps the architecture consistent: the Orchestrator never directly imports HA/DR code; it delegates everything over the network.
+**Step A — Generate the core documentation:**
 
-8. The Orchestrator scans the draft documentation and picks out all the cloud service names it can find (e.g., "Amazon RDS", "AWS Lambda", "Cloud Run"). It does this by matching words against a dictionary of 40+ known service aliases and a curated list of common AWS and GCP service names.
-9. For each service found, the Orchestrator calls the **HA/DR Retriever Agent** (port 9006) via A2A HTTP. Inside that agent, the `ServiceHADRRetriever` searches a dedicated HA/DR knowledge base (a separate Vertex AI Search data store) to pull back reference documentation about how that service behaves during disasters. It searches for every combination of *service × DR strategy* (e.g., "How does Amazon RDS behave during a Warm Standby failover?"). All of these searches — typically 16 to 32 queries — run **in parallel at the same time** rather than one-by-one, which is much faster.
-10. The Orchestrator also calls the **HA/DR Generator Agent** (port 9007) via A2A HTTP to extract the donor pattern's existing HA/DR sections. This is used as a stylistic template (a "one-shot example") so the new content matches the company's standard format.
-11. The Orchestrator then calls the **HA/DR Generator Agent** again (same port 9007) to write four separate HA/DR sections — one per DR strategy (Backup and Restore, Pilot Light On Demand, Pilot Light Cold Standby, Warm Standby). Inside the agent, all four sections are generated **in parallel** (each with a 2-minute timeout) rather than sequentially. Each section includes sub-sections for Initial Provisioning, Failover, and Failback, with summary tables showing each service's state (Active, Standby, Scaled-Down, or Not-Deployed).
+5. **PatternGenerateStep** calls `PatternGenerator.generate_pattern()` in-process with the image, donor context, title, and any critique from a previous iteration. Gemini Pro writes documentation sections (Problem Statement, Solution, Architecture, etc.).
+
+**Step B — Generate the HA/DR sections:**
+
+6. **HADRSectionsStep** runs next — still inside the loop. On the first iteration it does full HA/DR generation:
+   - It scans the generated sections to extract cloud service names (e.g., "Amazon RDS", "AWS Lambda") by matching against a dictionary of 40+ known aliases and common service names. The extracted names are **cached in the context** so they don't need to be re-extracted later.
+   - It kicks off **two tasks in parallel** using `asyncio.gather`:
+     - **Task 1**: The `ServiceHADRRetriever` searches the dedicated HA/DR knowledge base (Vertex AI Search) for reference documentation about how each service behaves during disasters. All combinations of *service × DR strategy* run in parallel internally.
+     - **Task 2**: The `HADRDocumentationGenerator` extracts the donor pattern's existing HA/DR sections as a stylistic template.
+   - Once both tasks complete, it builds a pattern context and generates four separate HA/DR sections — one per DR strategy (Backup and Restore, Pilot Light On Demand, Pilot Light Cold Standby, Warm Standby). All four are generated **in parallel internally** (each with a 2-minute timeout). Each section includes sub-sections for Initial Provisioning, Failover, and Failback, with summary tables showing each service's state (Active, Standby, Scaled-Down, or Not-Deployed).
+   - The HA/DR sections are merged into the generated documentation under an "HA/DR" key so the reviewer sees the complete document.
+
+7. **On iterations 2 and 3**, the step is smarter: it checks the reviewer's critique. If the critique doesn't mention "HA/DR", "disaster recovery", "high availability", or similar keywords, the step **skips HA/DR regeneration entirely** — it just re-merges the cached HA/DR sections into the freshly generated core sections. This saves significant time and token costs.
+
+**Step C — Review the entire document (core + HA/DR):**
+
+8. **FullDocReviewStep** calls `PatternReviewer.review_pattern()` in-process with the **complete** document — including the HA/DR sections. The reviewer can specifically critique HA/DR quality (e.g., "The Warm Standby failover procedure is too vague"), not just the core sections. It sets an `approved` flag and a `critique` text in the context.
+9. If the document is approved, the LoopAgent exits. If not, the critique is available for the next iteration's PatternGenerateStep and HADRSectionsStep to act on.
 
 ---
 
-## Phase 2c — "Generate visual HA/DR diagrams for every scenario"
+## Phase 2b — "Generate visual HA/DR diagrams"
 
-This step also runs with the same safety net as Phase 2b — if diagrams fail, the text documentation still gets delivered.
+After the loop finishes, the workflow continues with the final step in the SequentialAgent. This runs with a safety net — if diagrams fail, the text documentation is still delivered.
 
-12. The Orchestrator makes a single A2A HTTP call to the **HA/DR Diagram Generator Agent** (port 9008). This agent handles both diagram generation and cloud storage upload internally. Inside the agent, the `HADRDiagramGenerator` creates component diagrams for every combination of DR strategy × lifecycle phase: 4 strategies × 3 phases = **12 diagrams** total. Each diagram shows the services in the pattern and their state (color-coded) under that specific scenario.
-13. For each diagram, the agent makes **two AI calls** to Gemini 1.5 Pro:
-    - One to generate an **SVG** image (embeddable in web pages).
-    - One to generate a **draw.io XML** file (editable by architects in the draw.io tool). The draw.io diagrams use **official AWS and GCP icon shapes** from a built-in registry of 40+ cloud services — so when you open them in draw.io, you see the actual AWS Lambda icon or Cloud SQL icon instead of plain rectangles.
-14. Each SVG is also locally converted to a **PNG** fallback image (using `svglib` + `reportlab` on Windows, or `cairosvg` on Linux).
-15. All 12 diagram generations run **in parallel**, but capped at 4 at a time (to avoid hitting Gemini's rate limits). Each diagram gets a 3-minute timeout — if it takes too long, a simpler fallback diagram is created automatically without AI.
-16. Still inside the same agent, the `HADRDiagramStorage` component uploads all three files per diagram (SVG, draw.io XML, PNG) to a **GCS bucket**, organized by pattern name, strategy, and phase — e.g., `patterns/my-pattern/hadr-diagrams/warm-standby/failover.svg`. All uploads run in parallel with a 1-minute timeout each.
-17. The agent returns the diagram URLs back to the Orchestrator. Since JSON can't handle Python tuple keys like `("Warm Standby", "Failover")`, the agent uses string keys like `"Warm Standby|Failover"` — the Orchestrator splits them back into tuples. The resulting diagram URLs are embedded directly into the HA/DR markdown sections, so the final documentation includes inline images and download links for the editable draw.io files.
+10. **HADRDiagramStep** generates component diagrams for every combination of DR strategy × lifecycle phase: 4 strategies × 3 phases = **12 diagrams** total. Each diagram shows the services in the pattern and their state (color-coded) under that specific scenario. It reuses the **cached service names** from the context rather than re-extracting them.
+11. By default, diagrams are **built programmatically** — no Gemini calls at all. A structured `STATE_MATRIX` maps every (strategy, phase) pair to the expected service states in Primary and DR regions. Each service is classified as "data" (databases, storage) or "compute" (everything else) and assigned the correct state (Active, Standby, Scaled-Down, Not-Deployed, Restoring, Syncing) from the matrix.
+    - The **SVG** (embeddable in web pages) is templated in Python: two regions side-by-side, colour-coded service boxes, state labels, dashed cross-region arrows with mechanism labels, and a legend. Always-valid XML — no retry logic needed.
+    - The **draw.io XML** is also templated in Python using the built-in `DRAWIO_SERVICE_ICONS` registry of 40+ AWS and GCP icon shapes. When an architect opens the file in draw.io, they see official AWS Lambda / Cloud SQL / etc. icons instead of plain rectangles. State-dependent colouring and opacity (50% for Not-Deployed / Scaled-Down) are applied automatically.
+    - An **AI mode** (`use_ai_diagrams=True`) is available as an opt-in flag for more creative SVG layouts. When enabled, SVG generation uses Gemini (defaulting to `gemini-2.0-flash` for speed), while draw.io XML remains programmatic (the AI draw.io call was the largest source of token waste).
+12. Each SVG is locally converted to a **PNG** fallback image (using `svglib` + `reportlab` on Windows, or `cairosvg` on Linux).
+13. In programmatic mode, all 12 diagrams complete in **under 1 second** with zero AI calls. In AI mode, generation is parallelised with a Semaphore(6) cap and a 3-minute timeout per diagram — timeouts fall back to the programmatic builder automatically.
+14. All three files per diagram (SVG, draw.io XML, PNG) are uploaded to a **GCS bucket** in parallel, organized by pattern name, strategy, and phase — e.g., `patterns/my-pattern/hadr-diagrams/warm-standby/failover.svg`. All uploads run in parallel with a 1-minute timeout each.
+15. The diagram URLs are embedded directly into the HA/DR markdown sections, so the final documentation includes inline images and download links for the editable draw.io files. The SequentialAgent's work is done — control returns to the Orchestrator with the complete document in the `WorkflowContext`.
 
 ---
 
 ## Phase 3 — "Human says 'Looks good' — start publishing the docs"
 
-18. The Orchestrator sends the final documentation — including all HA/DR sections with embedded diagram images — back to the React SPA for the user to read. The pattern documentation and the HA/DR sections are shown in **collapsible expander panels** so they're easy to navigate.
-19. If the user is happy, they click **"Approve & Continue."**
-20. The app calls the Orchestrator's `approve_docs` task (passing the `workflow_id`). The Orchestrator saves the approval in the **AlloyDB database** and updates the workflow state to `CODE_GEN` so the user can resume from here if they close the browser.
-21. The Orchestrator immediately kicks off a **background task** to publish the documentation to SharePoint (the company's knowledge base). It does *not* wait for this to finish — it moves on right away. The background worker updates the database as it goes: first to "IN_PROGRESS", then to "COMPLETED" with the SharePoint page URL.
+16. The Orchestrator extracts the final documentation — including all HA/DR sections with embedded diagram images — from the `WorkflowContext` and sends it back to the React SPA for the user to read. The pattern documentation and the HA/DR sections are shown in **collapsible expander panels** so they're easy to navigate.
+17. If the user is happy, they click **"Approve & Continue."**
+18. The app calls the Orchestrator's `approve_docs` task (passing the `workflow_id`). The Orchestrator saves the approval in the **AlloyDB database** and updates the workflow state to `CODE_GEN` so the user can resume from here if they close the browser.
+19. The Orchestrator immediately kicks off a **background task** to publish the documentation to SharePoint (the company's knowledge base). It does *not* wait for this to finish — it moves on right away. The background worker updates the database as it goes: first to "IN_PROGRESS", then to "COMPLETED" with the SharePoint page URL.
 
 ---
 
 ## Phase 4 — "Now build the actual code"
 
-22. While docs are being published in the background, the Orchestrator starts code generation. First, it calls the **Component Specification Agent**.
-23. This agent reads the documentation and extracts keywords (e.g., "Cloud SQL", "Cloud Run", "Load Balancer"). It normalizes them to standard names using an alias dictionary (e.g., "postgres" becomes `rds_instance`).
-24. For each component, it does a **real-time lookup** to find the actual infrastructure schema:
+This phase uses **A2A HTTP calls** to communicate with the artifact agents, which run as separate services.
+
+20. While docs are being published in the background, the Orchestrator starts code generation. First, it calls the **Component Specification Agent**.
+21. This agent reads the documentation and extracts keywords (e.g., "Cloud SQL", "Cloud Run", "Load Balancer"). It normalizes them to standard names using an alias dictionary (e.g., "postgres" becomes `rds_instance`).
+22. For each component, it does a **real-time lookup** to find the actual infrastructure schema:
     - **First**, it checks GitHub for matching Terraform modules (reads the `variables.tf` and `outputs.tf` files to understand what inputs/outputs the module expects).
     - **If not found** on GitHub, it falls back to AWS Service Catalog to find matching CloudFormation products.
-25. The agent assembles all of this into a **structured dependency graph** — basically a map of "Component A depends on Component B" — sorted in the right order to build them.
-26. Next, the **Artifact Generation Agent** takes this specification. It also fetches **"Golden Sample" templates** from a cloud storage bucket (GCS) — these are pre-approved infrastructure-as-code files that serve as examples of how the company wants things built.
-27. Using the specification + golden samples + documentation, the agent generates a complete **Artifact Bundle**: Terraform files for infrastructure AND application boilerplate code — all in one pass so cross-references between components are correct.
-28. The **Artifact Validation Agent** then checks the generated code against a **6-point checklist**: Is the syntax correct? Is everything included? Are the components wired together properly? Are there security issues? Does the boilerplate actually make sense? Does it follow best practices? It gives a score out of 100 and either PASS or NEEDS_REVISION.
-29. If it fails, the critique goes back to the generator to fix the specific issues. This **generate → validate → fix loop** runs up to 3 times.
+23. The agent assembles all of this into a **structured dependency graph** — basically a map of "Component A depends on Component B" — sorted in the right order to build them.
+24. Next, the **Artifact Generation Agent** takes this specification. It also fetches **"Golden Sample" templates** from a cloud storage bucket (GCS) — these are pre-approved infrastructure-as-code files that serve as examples of how the company wants things built.
+25. Using the specification + golden samples + documentation, the agent generates a complete **Artifact Bundle**: Terraform files for infrastructure AND application boilerplate code — all in one pass so cross-references between components are correct.
+26. The **Artifact Validation Agent** then checks the generated code against a **6-point checklist**: Is the syntax correct? Is everything included? Are the components wired together properly? Are there security issues? Does the boilerplate actually make sense? Does it follow best practices? It gives a score out of 100 and either PASS or NEEDS_REVISION.
+27. If it fails, the critique goes back to the generator to fix the specific issues. This **generate → validate → fix loop** runs up to 3 times.
 
 ---
 
 ## Phase 5 — "Human says 'Code looks good' — publish it to GitHub"
 
-30. The validated code bundle is shown to the user in the React SPA.
-31. The user reviews the file structure and code. If they're satisfied, they click **"Approve & Publish."**
-32. The Orchestrator saves the approval in AlloyDB, updates the workflow state to `PUBLISH`, and immediately kicks off another **background task** — this time to push the code to GitHub. It uses the GitHub REST API to create a new commit with all the generated files organized into folders:
+28. The validated code bundle is shown to the user in the React SPA.
+29. The user reviews the file structure and code. If they're satisfied, they click **"Approve & Publish."**
+30. The Orchestrator saves the approval in AlloyDB, updates the workflow state to `PUBLISH`, and immediately kicks off another **background task** — this time to push the code to GitHub. It uses the GitHub REST API to create a new commit with all the generated files organized into folders:
     - `infrastructure/terraform/` for IaC templates
     - `src/{component_name}/` for application code
-33. The Orchestrator does *not* wait for the GitHub push to finish. It immediately returns a response to the app with **two tracking IDs** — one for the docs publishing and one for the code publishing.
+31. The Orchestrator does *not* wait for the GitHub push to finish. It immediately returns a response to the app with **two tracking IDs** — one for the docs publishing and one for the code publishing.
 
 ---
 
 ## Phase 6 — "Wait for everything to finish"
 
-34. The React SPA's `PublishStep` component enters a **polling loop**: every 3 seconds, it asks the Orchestrator "Are we done yet?" by calling `get_publish_status` with those two tracking IDs and the `workflow_id`.
-35. The Orchestrator checks the AlloyDB database and reports back the current status (e.g., "Docs: COMPLETED, Code: IN_PROGRESS").
-36. Once both tasks show "COMPLETED," the app displays the final **SharePoint page URL** and **GitHub commit URL** to the user. The Orchestrator marks the workflow state as `COMPLETED` and deactivates the row in AlloyDB. The SPA clears the `engen_workflow_id` from `localStorage`. Done!
+32. The React SPA's `PublishStep` component enters a **polling loop**: every 3 seconds, it asks the Orchestrator "Are we done yet?" by calling `get_publish_status` with those two tracking IDs and the `workflow_id`.
+33. The Orchestrator checks the AlloyDB database and reports back the current status (e.g., "Docs: COMPLETED, Code: IN_PROGRESS").
+34. Once both tasks show "COMPLETED," the app displays the final **SharePoint page URL** and **GitHub commit URL** to the user. The Orchestrator marks the workflow state as `COMPLETED` and deactivates the row in AlloyDB. The SPA clears the `engen_workflow_id` from `localStorage`. Done!
 
 ---
 
 ## What happens if something goes wrong?
 
-- If any agent call fails, the Orchestrator **retries up to 3 times**.
+- If any Phase 2 A2A agent call fails, the Orchestrator's client **retries up to 3 times** with linear backoff. Phase 1 steps run in-process, so there are no network failures to retry — any exception propagates immediately and the workflow reports the error.
 - If artifact validation fails 3 times in a row, the workflow **stops and shows the errors** for manual intervention.
 - If the background publishing to SharePoint or GitHub fails, the database status is set to **"FAILED"** and the polling UI shows an error message to the user.
-- If the HA/DR text generation or diagram generation fails at any point, the system **does not stop**. It inserts a placeholder message ("*HA/DR section generation failed. Please complete manually.*") and continues with the rest of the document. The main pattern documentation is never blocked by HA/DR failures.
-- If a single HA/DR diagram takes too long (over 3 minutes), it **times out gracefully** and a simpler fallback diagram is generated automatically without AI calls.
+- If the HA/DR text generation fails at any point inside the loop, it **does not stop the workflow**. The step catches the exception and inserts a placeholder message ("*HA/DR section generation failed. Please complete manually.*"). The main document is **never blocked** by HA/DR failures.
+- If HA/DR diagram generation fails after the loop, the text documentation is still delivered intact.
+- In programmatic diagram mode (default), there are no AI failures possible — diagrams are deterministic Python templates. In AI mode, if a single diagram takes too long (over 3 minutes), it **falls back to the programmatic builder** automatically.
 - If the user closes the browser mid-workflow, the state is **already persisted** in AlloyDB at the last completed phase. Reopening the SPA will automatically resume from that point (Phase 0 above). No work is lost.
+
+---
+
+## Key performance characteristics
+
+| Technique | What it does | Impact |
+|---|---|---|
+| In-process workflow execution | Phase 1 runs all steps in the same Python process — no HTTP, no JSON serialization, no timeouts | Eliminates network overhead entirely |
+| Parallel HA/DR retrieval + donor extraction | `asyncio.gather` runs service HA/DR lookup and donor section extraction simultaneously | Saves ~5–10 seconds per iteration |
+| Service name caching | Extracted once from the document and stored in context; reused by HA/DR text gen and diagram gen | Avoids redundant processing |
+| Selective HA/DR regeneration | On loop iterations 2+, skips full HA/DR regen if the reviewer didn't critique that section | Saves ~30–60 seconds per skipped regeneration |
+| Programmatic diagram generation | SVG + draw.io XML built from a structured state matrix — zero Gemini calls, 12 diagrams in < 1 second | Eliminates ~150 seconds and 24+ Gemini calls |
+| HA/DR inside the review loop | Reviewer critiques the full document including HA/DR — catches HA/DR quality issues early | Reduces total iterations needed |

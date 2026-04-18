@@ -2,9 +2,6 @@ import sys
 import os
 import asyncio
 import base64
-import json
-import logging
-import re
 import uuid
 from typing import Dict, Optional
 
@@ -13,63 +10,157 @@ current_file_path = os.path.abspath(__file__)
 agent_dir = os.path.dirname(current_file_path)        # .../agents/orchestrator
 agents_root = os.path.dirname(agent_dir)              # .../agents
 inference_service_root = os.path.dirname(agents_root) # .../inference-service
-codebase_root = os.path.dirname(inference_service_root) # .../codebase
 
 # 2. Add inference-service (for config, core)
 if inference_service_root not in sys.path:
     sys.path.append(inference_service_root)
 
-from lib.adk_core import ADKAgent, AgentRequest, AgentResponse, TaskStatus
-from lib.a2a_client import A2AClient, A2AError
+from lib.adk_core import (
+    ADKAgent, AgentRequest, AgentResponse, TaskStatus,
+    WorkflowContext, SequentialAgent, LoopAgent,
+)
 from lib.sharepoint_publisher import SharePointPublisher, SharePointPageConfig
 from lib.github_publisher import GitHubMCPPublisher
-from lib.cloudsql_client import AlloyDBManager, logger as sql_logger
+from lib.cloudsql_client import AlloyDBManager
 from lib.workflow_state import WorkflowStateManager
-from core.pattern_synthesis.hadr_diagram_generator import (
-    DR_STRATEGIES,
-    LIFECYCLE_PHASES,
+
+# Core logic modules — imported directly instead of via A2A HTTP calls
+from core.generator import PatternGenerator
+from core.retriever import VertexRetriever
+from core.reviewer import PatternReviewer
+from core.pattern_synthesis.service_hadr_retriever import ServiceHADRRetriever
+from core.pattern_synthesis.hadr_generator import HADRDocumentationGenerator
+from core.pattern_synthesis.hadr_diagram_generator import HADRDiagramGenerator
+from core.pattern_synthesis.hadr_diagram_storage import HADRDiagramStorage
+
+# Workflow step agents (ADK SequentialAgent / LoopAgent pattern)
+from agents.orchestrator.workflow_agents import (
+    VisionAnalysisStep,
+    DonorRetrievalStep,
+    PatternGenerateStep,
+    HADRSectionsStep,
+    FullDocReviewStep,
+    HADRDiagramStep,
 )
+
 from config import Config
 
 class OrchestratorAgent(ADKAgent):
     """
-    Orchestrates the workflow: Retrieve -> Generate -> Review -> (Human Check) -> Artifacts -> (Human Check) -> Publish.
+    Orchestrates the workflow using ADK SequentialAgent + LoopAgent
+    instead of A2A HTTP calls.
+
+    Phase 1 (Doc Generation):
+      SequentialAgent → VisionAnalysis → DonorRetrieval
+        → LoopAgent(Generate → HA/DR → Review, max_iterations=3)
+        → HADRDiagramGeneration
+
+    All sub-agents operate in-process via WorkflowContext — no HTTP
+    overhead, no serialisation, no A2A timeout issues.
     """
+
     def __init__(self):
         super().__init__(name="OrchestratorAgent", port=Config.ORCHESTRATOR_PORT)
-        
-        # A2A Client
+
+        # ── Core Logic Modules (direct in-process, replacing A2A) ────────
+        self.pattern_generator = PatternGenerator(
+            project_id=Config.PROJECT_ID
+        )
+        self.retriever = VertexRetriever(
+            project_id=Config.PROJECT_ID,
+            location="global",
+            data_store_id=Config.DATA_STORE_ID,
+        )
+        self.reviewer = PatternReviewer(project_id=Config.PROJECT_ID)
+
+        # HA/DR core modules
+        self.hadr_retriever = ServiceHADRRetriever(
+            project_id=Config.PROJECT_ID,
+            location="global",
+            data_store_id=Config.SERVICE_HADR_DATA_STORE_ID,
+        )
+        self.hadr_generator = HADRDocumentationGenerator(
+            project_id=Config.PROJECT_ID,
+            location=Config.LOCATION,
+        )
+        self.hadr_diagram_generator = HADRDiagramGenerator(
+            project_id=Config.PROJECT_ID,
+            location=Config.LOCATION,
+        )
+        self.hadr_diagram_storage = HADRDiagramStorage(
+            bucket_name=Config.HADR_DIAGRAM_GCS_BUCKET,
+            project_id=Config.PROJECT_ID,
+        )
+
+        # ── ADK Workflow: Phase 1 Doc Generation ────────────────────────
+        # LoopAgent: Generate core sections → HA/DR sections → Review
+        self.content_refinement_loop = LoopAgent(
+            name="ContentRefinementLoop",
+            sub_agents=[
+                PatternGenerateStep(),
+                HADRSectionsStep(),
+                FullDocReviewStep(),
+            ],
+            max_iterations=3,
+            exit_key="approved",
+        )
+
+        # SequentialAgent: Analyze → Retrieve → Loop → Diagrams
+        self.phase1_workflow = SequentialAgent(
+            name="Phase1DocGenerationWorkflow",
+            sub_agents=[
+                VisionAnalysisStep(),
+                DonorRetrievalStep(),
+                self.content_refinement_loop,
+                HADRDiagramStep(),
+            ],
+        )
+
+        # ── A2A Client (retained for Phase 2 artifact agents only) ──────
+        from lib.a2a_client import A2AClient
         self.client = A2AClient(agent_name=self.name)
-        
-        # SharePoint Publisher
+
+        # ── Publishers ──────────────────────────────────────────────────
         sp_config = SharePointPageConfig.from_env()
-        self.publisher = SharePointPublisher(sp_config) if sp_config.is_valid() else None
+        self.publisher = (
+            SharePointPublisher(sp_config) if sp_config.is_valid() else None
+        )
         if not self.publisher:
-            self.logger.warning("SharePoint Publisher NOT configured. Documentation publishing will be skipped.")
-            
-        # GitHub Publisher (Defaults to environment variables)
+            self.logger.warning(
+                "SharePoint Publisher NOT configured. "
+                "Documentation publishing will be skipped."
+            )
+
         self.gh_owner = os.environ.get("GITHUB_OWNER", "rnerurkar")
         self.gh_repo = os.environ.get("GITHUB_REPO", "engen")
         self.gh_branch = os.environ.get("GITHUB_BRANCH", "main")
-        self.code_publisher = GitHubMCPPublisher(owner=self.gh_owner, repo=self.gh_repo, branch=self.gh_branch)
-        
-        # AlloyDB (replaces CloudSQL — wire-compatible PostgreSQL)
-        self.db = AlloyDBManager(
-             connection_name=os.environ.get("ALLOYDB_INSTANCE", Config.ALLOYDB_INSTANCE),
-             db_user=os.environ.get("DB_USER", Config.DB_USER),
-             db_pass=os.environ.get("DB_PASS", Config.DB_PASS),
-             db_name=os.environ.get("DB_NAME", Config.DB_NAME)
+        self.code_publisher = GitHubMCPPublisher(
+            owner=self.gh_owner,
+            repo=self.gh_repo,
+            branch=self.gh_branch,
         )
 
-        # Workflow State Manager (for resumable sessions)
+        # ── AlloyDB ────────────────────────────────────────────────────
+        self.db = AlloyDBManager(
+            connection_name=os.environ.get(
+                "ALLOYDB_INSTANCE", Config.ALLOYDB_INSTANCE
+            ),
+            db_user=os.environ.get("DB_USER", Config.DB_USER),
+            db_pass=os.environ.get("DB_PASS", Config.DB_PASS),
+            db_name=os.environ.get("DB_NAME", Config.DB_NAME),
+        )
+
+        # ── Workflow State Manager ────────────────────────────────────
         self.workflow_state: Optional[WorkflowStateManager] = None
         if self.db and self.db.engine:
             self.workflow_state = WorkflowStateManager(self.db.engine)
-            self.logger.info("WorkflowStateManager initialized — resumable workflows enabled")
+            self.logger.info(
+                "WorkflowStateManager initialized — resumable workflows enabled"
+            )
         else:
-            self.logger.warning("WorkflowStateManager NOT available — no DB engine")
-
-        # HA/DR agents are now accessed via A2A calls (no direct instantiation)
+            self.logger.warning(
+                "WorkflowStateManager NOT available — no DB engine"
+            )
 
     async def handle(self, req: AgentRequest) -> AgentResponse:
         self.logger.info(f"Received request: {req.task}")
@@ -114,11 +205,18 @@ class OrchestratorAgent(ADKAgent):
         return AgentResponse(status=TaskStatus.FAILED, error=f"Unknown task: {req.task}", agent_name=self.name)
 
     async def run_phase1_docs(self, payload):
-        """Phase 1: Analyze -> Retrieve -> Generate Docs. Returns content for review."""
+        """
+        Phase 1: Analyse → Retrieve → Generate + HA/DR → Review (loop) → Diagrams.
+
+        Delegates the entire pipeline to the ADK Phase1DocGenerationWorkflow
+        (SequentialAgent + LoopAgent).  All sub-agents operate in-process via
+        a shared WorkflowContext — no A2A HTTP calls.
+        """
         title = payload.get("title")
         image_b64 = payload.get("image_base64")
         user_id = payload.get("user_id", "anonymous")
-        if not title or not image_b64: raise ValueError("Missing title or image_base64")
+        if not title or not image_b64:
+            raise ValueError("Missing title or image_base64")
 
         # Create workflow record for resumable sessions
         workflow_id = payload.get("workflow_id") or str(uuid.uuid4())
@@ -130,91 +228,51 @@ class OrchestratorAgent(ADKAgent):
                 image_base64=image_b64,
             )
 
-        # 0. ANALYZE
-        self.logger.info("--- Step 0: ANALYZING Diagram ---")
-        desc_resp = await self.client.call_agent(Config.GENERATOR_URL, "describe_image", {"image_base64": image_b64})
-        description = desc_resp.get("result", {}).get("description", "")
+        # ── Build WorkflowContext ────────────────────────────────────────
+        # Seed it with input data and references to core modules so that
+        # each step agent can fetch what it needs without constructor args.
+        image_bytes = base64.b64decode(image_b64)
 
-        # 1. RETRIEVE
-        self.logger.info("--- Step 1: RETRIEVING Donor Pattern ---")
-        retrieve_resp = await self.client.call_agent(Config.RETRIEVER_URL, "retrieve_donor", {"title": title, "description": description})
-        donor_context = retrieve_resp.get("result")
-        if not donor_context: raise ValueError("Failed to retrieve donor pattern")
+        ctx = WorkflowContext(
+            {
+                # Input data
+                "title": title,
+                "image_bytes": image_bytes,
+                # Core logic module references (prefixed with _ by convention)
+                "_generator": self.pattern_generator,
+                "_retriever": self.retriever,
+                "_reviewer": self.reviewer,
+                "_hadr_retriever": self.hadr_retriever,
+                "_hadr_generator": self.hadr_generator,
+                "_hadr_diagram_generator": self.hadr_diagram_generator,
+                "_hadr_diagram_storage": self.hadr_diagram_storage,
+            }
+        )
 
-        # 2 & 3. GENERATE & REVIEW LOOP
-        max_iterations = 3
-        current_iteration = 0
-        ai_approved = False
-        generated_sections = None
-        critique_feedback = None
+        # ── Execute the Phase 1 workflow ─────────────────────────────────
+        self.logger.info(
+            f"=== Starting Phase1DocGenerationWorkflow for '{title}' ==="
+        )
+        ctx = await self.phase1_workflow.run(ctx)
+        self.logger.info(
+            f"=== Phase1DocGenerationWorkflow completed for '{title}' ==="
+        )
 
-        while current_iteration < max_iterations and not ai_approved:
-            current_iteration += 1
-            self.logger.info(f"--- Iteration {current_iteration}/{max_iterations} ---")
-            
-            gen_payload = {"image_base64": image_b64, "donor_context": donor_context, "title": title}
-            if critique_feedback: gen_payload["critique"] = critique_feedback.get("critique")
+        # ── Extract results from context ─────────────────────────────────
+        generated_sections = ctx.get("generated_sections") or {}
+        donor_context = ctx.get("donor_context") or {}
+        hadr_sections = ctx.get("hadr_sections") or {}
 
-            gen_resp = await self.client.call_agent(Config.GENERATOR_URL, "generate_pattern", gen_payload)
-            generated_sections = gen_resp.get("result", {}).get("sections")
-
-            review_resp = await self.client.call_agent(Config.REVIEWER_URL, "review_pattern", {"sections": generated_sections, "donor_context": donor_context})
-            critique_feedback = review_resp.get("result", {})
-            ai_approved = critique_feedback.get("approved", False)
-
-        # --- HA/DR SECTION GENERATION ---
-        self.logger.info("--- Step 3: GENERATING HA/DR SECTIONS ---")
-        hadr_sections = {}
-        diagram_urls = {}
-        try:
-            hadr_sections = await self._agenerate_hadr_sections(
-                generated_sections=generated_sections or {},
-                donor_context=donor_context,
-            )
-        except Exception as e:
-            self.logger.error(f"HA/DR text generation failed (non-blocking): {e}", exc_info=True)
-
-        # --- HA/DR DIAGRAM GENERATION & STORAGE ---
-        self.logger.info("--- Step 3b: GENERATING HA/DR DIAGRAMS ---")
-        try:
-            if hadr_sections:
-                diagram_urls = await self._agenerate_and_store_hadr_diagrams(
-                    pattern_title=title,
-                    generated_sections=generated_sections or {},
-                    hadr_sections=hadr_sections,
-                )
-        except Exception as e:
-            self.logger.error(f"HA/DR diagram generation failed (non-blocking): {e}", exc_info=True)
-
-        # --- Merge HA/DR into generated sections ---
-        try:
-            if hadr_sections:
-                if generated_sections is None:
-                    generated_sections = {}
-                generated_sections["HA/DR"] = self._format_hadr_sections(
-                    hadr_sections, diagram_urls
-                )
-            elif not hadr_sections:
-                if generated_sections is None:
-                    generated_sections = {}
-                generated_sections["HA/DR"] = (
-                    "*HA/DR section generation failed. Please complete manually.*"
-                )
-        except Exception as e:
-            self.logger.error(f"HA/DR merge failed (non-blocking): {e}", exc_info=True)
-            if generated_sections is None:
-                generated_sections = {}
-            generated_sections["HA/DR"] = (
-                "*HA/DR section generation failed. Please complete manually.*"
-            )
-
-        full_doc = "\n\n".join([f"# {k}\n{v}" for k, v in (generated_sections or {}).items()])
+        full_doc = "\n\n".join(
+            f"# {k}\n{v}" for k, v in generated_sections.items()
+        )
 
         # Create PENDING review record
         review_id = str(uuid.uuid4())
-        
         if self.db:
-             self.db.create_review_record(review_id, title, "PATTERN", generated_sections, full_doc)
+            self.db.create_review_record(
+                review_id, title, "PATTERN", generated_sections, full_doc
+            )
 
         result = {
             "workflow_id": workflow_id,
@@ -222,7 +280,7 @@ class OrchestratorAgent(ADKAgent):
             "title": title,
             "sections": generated_sections,
             "full_doc": full_doc,
-            "donor_context": donor_context
+            "donor_context": donor_context,
         }
 
         # ── Persist state → DOC_REVIEW ──
@@ -448,255 +506,6 @@ class OrchestratorAgent(ADKAgent):
                 w["last_updated"] = w["last_updated"].isoformat()
 
         return {"workflows": workflows}
-
-    # ─── HA/DR Generation Helpers (A2A Delegation) ────────────────────────
-
-    async def _agenerate_hadr_sections(
-        self,
-        generated_sections: Dict,
-        donor_context: Dict,
-    ) -> Dict[str, str]:
-        """
-        Delegates HA/DR documentation generation to the three HA/DR agents
-        via A2A calls:
-          1. Extracts service names locally (CPU-only, fast)
-          2. Calls HADRRetrieverAgent to retrieve per-service HA/DR docs
-          3. Calls HADRGeneratorAgent to extract donor HA/DR sections
-          4. Calls HADRGeneratorAgent to generate all 4 DR strategy sections
-        """
-        # 1. Extract service names (CPU-only, fast — stays local)
-        doc_text = "\n".join(str(v) for v in generated_sections.values())
-        service_names = self._extract_service_names_from_doc(doc_text)
-        if not service_names:
-            self.logger.warning("No service names extracted — skipping HA/DR generation")
-            return {}
-
-        self.logger.info(f"Extracted service names for HA/DR: {service_names}")
-
-        # 2. Retrieve service-level HA/DR docs via HADRRetrieverAgent
-        retriever_resp = await self.client.call_agent(
-            Config.HADR_RETRIEVER_URL,
-            "retrieve_all_services_hadr",
-            {"service_names": service_names},
-        )
-        service_hadr_docs = retriever_resp.get("result", {}).get(
-            "service_hadr_docs", {}
-        )
-
-        # 3. Extract donor pattern HA/DR sections via HADRGeneratorAgent
-        donor_html = donor_context.get("html_content", "") if donor_context else ""
-        extract_resp = await self.client.call_agent(
-            Config.HADR_GENERATOR_URL,
-            "extract_donor_hadr_sections",
-            {"donor_html_content": donor_html},
-        )
-        donor_hadr_sections = extract_resp.get("result", {}).get(
-            "donor_hadr_sections", {}
-        )
-
-        # 4. Build pattern context
-        pattern_context = {
-            "title": generated_sections.get("Executive Summary", "")[:200],
-            "solution_overview": generated_sections.get(
-                "Solution Architecture",
-                generated_sections.get("Solution", ""),
-            )[:2000],
-            "services": service_names,
-        }
-
-        # 5. Generate all 4 strategies in parallel via HADRGeneratorAgent
-        gen_resp = await self.client.call_agent(
-            Config.HADR_GENERATOR_URL,
-            "generate_hadr_sections",
-            {
-                "pattern_context": pattern_context,
-                "donor_hadr_sections": donor_hadr_sections,
-                "service_hadr_docs": service_hadr_docs,
-            },
-        )
-        hadr_sections = gen_resp.get("result", {}).get("hadr_sections", {})
-
-        return hadr_sections
-
-    def _extract_service_names_from_doc(self, doc_text: str) -> list:
-        """
-        Lightweight extraction of canonical service names from the pattern
-        documentation.  Falls back to regex-based extraction if the LLM
-        is not available.
-        """
-        from lib.component_sources import COMPONENT_TYPE_ALIASES
-
-        # Quick regex pass: look for known service keywords in the doc
-        doc_lower = doc_text.lower()
-        found_services = set()
-
-        # Build a reverse map: canonical_type → friendly display name
-        # We want to return recognisable names like "Amazon RDS", "AWS Lambda"
-        canonical_to_display = {
-            "s3_bucket": "Amazon S3",
-            "lambda_function": "AWS Lambda",
-            "api_gateway": "Amazon API Gateway",
-            "dynamodb_table": "Amazon DynamoDB",
-            "rds_instance": "Amazon RDS",
-            "ecs_service": "Amazon ECS",
-            "eks_cluster": "Amazon EKS",
-            "sqs_queue": "Amazon SQS",
-            "sns_topic": "Amazon SNS",
-            "vpc": "Amazon VPC",
-            "cloudfront": "Amazon CloudFront",
-            "load_balancer": "Elastic Load Balancer",
-            "elasticache": "Amazon ElastiCache",
-            "iam_role": "AWS IAM",
-            "waf": "AWS WAF",
-            "kms_key": "AWS KMS",
-            "secrets_manager": "AWS Secrets Manager",
-            "codepipeline": "AWS CodePipeline",
-            "ecr_repository": "Amazon ECR",
-            "step_function": "AWS Step Functions",
-        }
-
-        for alias, canonical in COMPONENT_TYPE_ALIASES.items():
-            # Match the alias as a whole word in the doc text
-            pattern = r'\b' + re.escape(alias.replace('_', ' ')) + r'\b'
-            if re.search(pattern, doc_lower):
-                display_name = canonical_to_display.get(canonical, canonical)
-                found_services.add(display_name)
-
-        # Also check for common full service names
-        common_names = [
-            "Amazon RDS", "Amazon S3", "AWS Lambda", "Amazon ECS",
-            "Amazon EKS", "Amazon DynamoDB", "Amazon SQS", "Amazon SNS",
-            "Amazon ElastiCache", "Amazon CloudFront", "Amazon API Gateway",
-            "Amazon VPC", "AWS WAF", "AWS KMS", "Amazon ECR",
-            "AWS Step Functions", "Cloud SQL", "Cloud Run", "Cloud Storage",
-            "Cloud Functions", "Cloud Pub/Sub", "Cloud CDN",
-        ]
-        for name in common_names:
-            if name.lower() in doc_lower:
-                found_services.add(name)
-
-        return list(found_services)
-
-    async def _agenerate_and_store_hadr_diagrams(
-        self,
-        pattern_title: str,
-        generated_sections: Dict,
-        hadr_sections: Dict[str, str],
-    ) -> Dict:
-        """
-        Delegates diagram generation + GCS upload to the
-        HADRDiagramGeneratorAgent via a single A2A call.
-
-        Returns:
-            Dict keyed by (strategy, phase) tuples → dict with svg_url,
-            drawio_url, png_url.
-        """
-        # Extract service names for diagram generation
-        doc_text = "\n".join(str(v) for v in generated_sections.values())
-        service_names = self._extract_service_names_from_doc(doc_text)
-        if not service_names:
-            self.logger.warning("No services found — skipping diagram generation")
-            return {}
-
-        pattern_context = {
-            "title": pattern_title,
-            "services": service_names,
-        }
-
-        # Single A2A call to HADRDiagramGeneratorAgent
-        resp = await self.client.call_agent(
-            Config.HADR_DIAGRAM_GENERATOR_URL,
-            "generate_and_store_hadr_diagrams",
-            {
-                "pattern_title": pattern_title,
-                "services": service_names,
-                "hadr_text_sections": hadr_sections,
-                "pattern_context": pattern_context,
-            },
-        )
-        # The agent returns string keys "Strategy|Phase" — convert to tuples
-        raw_map = resp.get("result", {}).get("diagram_urls", {})
-        url_map = {}
-        for key, urls in raw_map.items():
-            if "|" in key:
-                strategy, phase = key.split("|", 1)
-                url_map[(strategy, phase)] = urls
-            else:
-                url_map[key] = urls
-
-        self.logger.info(
-            f"Received {len(url_map)} diagram bundles from "
-            f"HADRDiagramGeneratorAgent for '{pattern_title}'"
-        )
-        return url_map
-
-    @staticmethod
-    def _format_hadr_sections(
-        hadr_sections: Dict[str, str],
-        diagram_urls: Optional[Dict] = None,
-    ) -> str:
-        """
-        Combine the four individual DR strategy sections into a single
-        Markdown block with embedded diagram references for each
-        DR-strategy × lifecycle-phase combination.
-        """
-        if diagram_urls is None:
-            diagram_urls = {}
-
-        parts = ["## High Availability / Disaster Recovery\n"]
-
-        for strategy in DR_STRATEGIES:
-            section_text = hadr_sections.get(strategy, "")
-            if not section_text:
-                parts.append(
-                    f"## {strategy}\n\n*Section not generated.*\n"
-                )
-                continue
-
-            # Inject diagram references into the section text for each phase
-            enriched_text = section_text
-            for phase in LIFECYCLE_PHASES:
-                urls = diagram_urls.get((strategy, phase), {})
-                if urls and urls.get("png_url"):
-                    # Build the diagram embed block
-                    png_url = urls["png_url"]
-                    svg_url = urls.get("svg_url", "")
-                    drawio_url = urls.get("drawio_url", "")
-
-                    diagram_block = (
-                        f"\n\n**Component Diagram — {phase}**\n\n"
-                        f"![{strategy} - {phase}]({png_url})\n\n"
-                    )
-                    if svg_url:
-                        diagram_block += f"[View SVG]({svg_url})"
-                    if drawio_url:
-                        diagram_block += (
-                            f" | [Edit in draw.io]({drawio_url})"
-                        )
-                    diagram_block += "\n"
-
-                    # Insert diagram block right after the phase heading
-                    # Look for ### <phase> heading and insert after it
-                    import re
-                    phase_pattern = re.compile(
-                        rf"(###\s*{re.escape(phase)}[^\n]*\n)",
-                        re.IGNORECASE,
-                    )
-                    match = phase_pattern.search(enriched_text)
-                    if match:
-                        insert_pos = match.end()
-                        enriched_text = (
-                            enriched_text[:insert_pos]
-                            + diagram_block
-                            + enriched_text[insert_pos:]
-                        )
-                    else:
-                        # Fallback: append at the end of the strategy section
-                        enriched_text += diagram_block
-
-            parts.append(enriched_text)
-
-        return "\n\n---\n\n".join(parts)
 
     async def run_workflow_loop(self, payload):
         """Legacy loop"""

@@ -61,6 +61,16 @@ class PatternDiagramBundle:
         return list(self.diagrams.values())
 
 
+@dataclass
+class RegionStates:
+    """Service states for a given (DR strategy, lifecycle phase) pair."""
+    primary_core: str       # State of data/storage services in primary region
+    primary_non_core: str   # State of compute/network services in primary region
+    dr_core: str            # State of data/storage services in DR region
+    dr_non_core: str        # State of compute/network services in DR region
+    arrow_label: str        # Label for the cross-region replication/failover arrow
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────────────────────────────────────
@@ -87,6 +97,71 @@ STATE_COLORS = {
     "Restoring":    "#E91E63",  # pink
     "Syncing":      "#9C27B0",  # purple
 }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Structured state matrix for programmatic diagram generation
+#
+# Maps every (DR strategy, lifecycle phase) pair to the expected service
+# states in the Primary and DR regions.  "Core" = databases & persistent
+# storage (stateful); "non-core" = compute, networking, messaging (stateless).
+# ──────────────────────────────────────────────────────────────────────────────
+
+STATE_MATRIX: Dict[Tuple[str, str], RegionStates] = {
+    # ── Backup and Restore ────────────────────────────────────────────────
+    ("Backup and Restore", "Initial Provisioning"): RegionStates(
+        "Active", "Active", "Not-Deployed", "Not-Deployed",
+        "Scheduled Backup \u2192 Cross-Region Storage"),
+    ("Backup and Restore", "Failover"): RegionStates(
+        "Not-Deployed", "Not-Deployed", "Restoring", "Restoring",
+        "Restore from Backup"),
+    ("Backup and Restore", "Failback"): RegionStates(
+        "Syncing", "Syncing", "Active", "Active",
+        "Data Sync DR \u2192 Primary"),
+    # ── Pilot Light On Demand ─────────────────────────────────────────────
+    ("Pilot Light On Demand", "Initial Provisioning"): RegionStates(
+        "Active", "Active", "Standby", "Not-Deployed",
+        "Async Replication"),
+    ("Pilot Light On Demand", "Failover"): RegionStates(
+        "Not-Deployed", "Not-Deployed", "Active", "Restoring",
+        "Promote Replica"),
+    ("Pilot Light On Demand", "Failback"): RegionStates(
+        "Syncing", "Syncing", "Active", "Active",
+        "Data Sync DR \u2192 Primary"),
+    # ── Pilot Light Cold Standby ──────────────────────────────────────────
+    ("Pilot Light Cold Standby", "Initial Provisioning"): RegionStates(
+        "Active", "Active", "Standby", "Scaled-Down",
+        "Async Replication"),
+    ("Pilot Light Cold Standby", "Failover"): RegionStates(
+        "Not-Deployed", "Not-Deployed", "Active", "Active",
+        "Start + Promote"),
+    ("Pilot Light Cold Standby", "Failback"): RegionStates(
+        "Syncing", "Syncing", "Active", "Active",
+        "Data Sync DR \u2192 Primary"),
+    # ── Warm Standby ──────────────────────────────────────────────────────
+    ("Warm Standby", "Initial Provisioning"): RegionStates(
+        "Active", "Active", "Standby", "Scaled-Down",
+        "Active Replication"),
+    ("Warm Standby", "Failover"): RegionStates(
+        "Not-Deployed", "Not-Deployed", "Active", "Active",
+        "Scale Up + DNS Failover"),
+    ("Warm Standby", "Failback"): RegionStates(
+        "Syncing", "Syncing", "Active", "Active",
+        "Data Sync DR \u2192 Primary"),
+}
+
+# Keywords that identify a service as "core" (stateful data layer).
+# Everything else is classified as "non-core" (compute / network / messaging).
+_CORE_SERVICE_KEYWORDS = frozenset({
+    "rds", "aurora", "dynamodb", "elasticache", "neptune", "redshift",
+    "sql", "spanner", "firestore", "bigtable", "bigquery", "memorystore",
+    "s3", "efs", "ebs", "storage", "persistent disk", "filestore",
+})
+
+
+def _is_data_service(service_name: str) -> bool:
+    """True if the service holds persistent state (database / storage)."""
+    lower = service_name.lower()
+    return any(kw in lower for kw in _CORE_SERVICE_KEYWORDS)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # draw.io icon shape mapping  (AWS 4.0 + GCP shape libraries)
@@ -280,16 +355,45 @@ class HADRDiagramGenerator:
     combination of DR strategy and lifecycle phase using Gemini.
     """
 
-    def __init__(self, project_id: str, location: str = "us-central1"):
+    def __init__(
+        self,
+        project_id: str,
+        location: str = "us-central1",
+        use_ai_diagrams: bool = False,
+        ai_model_name: str = "gemini-2.0-flash",
+    ):
+        """
+        Args:
+            project_id:       GCP project ID for Vertex AI.
+            location:         GCP region.
+            use_ai_diagrams:  When False (default), generates diagrams
+                              programmatically — zero Gemini calls, zero
+                              tokens, completes in < 1 second.  Set to True
+                              to use AI for creative SVG layouts at the cost
+                              of speed and tokens.
+            ai_model_name:    Model to use when ``use_ai_diagrams=True``.
+                              Defaults to ``gemini-2.0-flash`` (fast/cheap).
+                              Change to ``gemini-2.5-pro`` only if quality
+                              matters more than speed.
+        """
         self.project_id = project_id
         self.location = location
-        self._init_model()
+        self.use_ai_diagrams = use_ai_diagrams
+        self.ai_model_name = ai_model_name
+        if self.use_ai_diagrams:
+            self._init_model()
+        else:
+            self.model = None
+            logger.info(
+                "HADRDiagramGenerator initialised in programmatic mode "
+                "(zero AI calls)"
+            )
 
     def _init_model(self):
         try:
             vertexai.init(project=self.project_id, location=self.location)
             self.model = GenerativeModel(
-                "gemini-1.5-pro-preview-0409",
+                self.ai_model_name,
                 system_instruction=(
                     "You are a Principal Cloud Architect and technical "
                     "illustrator. You generate accurate, clean SVG component "
@@ -297,7 +401,9 @@ class HADRDiagramGenerator:
                     "architectures."
                 ),
             )
-            logger.info("HADRDiagramGenerator model initialised")
+            logger.info(
+                f"HADRDiagramGenerator model initialised ({self.ai_model_name})"
+            )
         except Exception as e:
             logger.error(f"Failed to initialise diagram model: {e}")
             self.model = None
@@ -407,15 +513,21 @@ class HADRDiagramGenerator:
         pattern_context: Dict[str, Any],
         service_diagram_descriptions: Optional[Dict[str, Dict[str, List[str]]]] = None,
         timeout_per_diagram: float = 180.0,
-        max_concurrent: int = 4,
+        max_concurrent: int = 6,
     ) -> PatternDiagramBundle:
         """
         Async version of ``generate_all_diagrams`` — generates up to 12
-        diagrams in parallel using ``asyncio.gather``.
+        diagrams.
 
-        Each diagram involves two Gemini calls (SVG + draw.io) and a local
-        SVG→PNG conversion.  All three are CPU/IO-bound and offloaded to
-        threads so the event loop stays free.
+        **Programmatic mode** (``use_ai_diagrams=False``, the default):
+        All 12 diagrams are built synchronously in < 1 second with zero
+        Gemini calls.  The semaphore and timeout are not used.
+
+        **AI mode** (``use_ai_diagrams=True``):
+        SVG generation is parallelised via ``asyncio.gather`` with a
+        ``Semaphore(max_concurrent)`` cap.  draw.io XML is still built
+        programmatically (the AI draw.io call was the biggest token sink
+        and added no value over the deterministic builder).
 
         Args:
             pattern_name:         Human-readable pattern title.
@@ -425,15 +537,40 @@ class HADRDiagramGenerator:
             service_diagram_descriptions:
                 Optional dict of service_name → dr_strategy → [descriptions]
                 from ingested service-level HA/DR diagrams.
-            timeout_per_diagram:  Max seconds per single diagram
-                                  (SVG + draw.io + PNG combined, default 180).
-            max_concurrent:       Concurrency cap to avoid Gemini quota
-                                  exhaustion (default 4 at a time).
+            timeout_per_diagram:  Max seconds per single diagram when using
+                                  AI (default 180, ignored in programmatic mode).
+            max_concurrent:       Concurrency cap for AI mode (default 6).
 
         Returns:
             PatternDiagramBundle with up to 12 DiagramArtifact entries.
         """
         bundle = PatternDiagramBundle(pattern_name=pattern_name)
+
+        # ── Fast path: programmatic (no AI) ──────────────────────────────
+        if not self.use_ai_diagrams:
+            import time
+            t0 = time.monotonic()
+
+            for strategy in DR_STRATEGIES:
+                strategy_text = hadr_text_sections.get(strategy, "")
+                phase_texts = self._split_phases(strategy_text)
+                for phase in LIFECYCLE_PHASES:
+                    phase_text = phase_texts.get(phase, "")
+                    artifact = self._generate_single_diagram(
+                        pattern_name, services, strategy,
+                        phase, phase_text, pattern_context,
+                    )
+                    bundle.diagrams[(strategy, phase)] = artifact
+
+            elapsed = time.monotonic() - t0
+            logger.info(
+                f"Programmatic generation of {len(bundle.diagrams)} diagrams "
+                f"for '{pattern_name}' completed in {elapsed:.2f}s "
+                f"(zero AI calls)"
+            )
+            return bundle
+
+        # ── AI path: semaphore-gated parallel Gemini calls ───────────────
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def _gen_one(
@@ -460,8 +597,12 @@ class HADRDiagramGenerator:
                     fallback = DiagramArtifact(
                         dr_strategy=strategy,
                         lifecycle_phase=phase,
-                        svg_content=self._fallback_svg(strategy, phase, services),
-                        drawio_xml=self._fallback_drawio(strategy, phase, services),
+                        svg_content=self._build_programmatic_svg(
+                            strategy, phase, services
+                        ),
+                        drawio_xml=self._build_programmatic_drawio(
+                            strategy, phase, services
+                        ),
                         is_fallback=True,
                         description=phase_text,
                     )
@@ -474,8 +615,12 @@ class HADRDiagramGenerator:
                     fallback = DiagramArtifact(
                         dr_strategy=strategy,
                         lifecycle_phase=phase,
-                        svg_content=self._fallback_svg(strategy, phase, services),
-                        drawio_xml=self._fallback_drawio(strategy, phase, services),
+                        svg_content=self._build_programmatic_svg(
+                            strategy, phase, services
+                        ),
+                        drawio_xml=self._build_programmatic_drawio(
+                            strategy, phase, services
+                        ),
                         is_fallback=True,
                         description=phase_text,
                     )
@@ -504,7 +649,7 @@ class HADRDiagramGenerator:
         total = len(bundle.diagrams)
         fallbacks = sum(1 for a in bundle.all_artifacts() if a.is_fallback)
         logger.info(
-            f"Async generated {total} diagrams for '{pattern_name}' "
+            f"AI-generated {total} diagrams for '{pattern_name}' "
             f"({fallbacks} fallbacks)"
         )
         return bundle
@@ -521,62 +666,385 @@ class HADRDiagramGenerator:
         pattern_context: Dict[str, Any],
         reference_diagram_descriptions: str = "",
     ) -> DiagramArtifact:
-        """Generate SVG + draw.io XML for one (strategy, phase) pair."""
+        """Generate SVG + draw.io XML for one (strategy, phase) pair.
+
+        When ``use_ai_diagrams`` is False (default), both SVG and draw.io
+        are built programmatically — zero Gemini calls, deterministic
+        output, always-valid XML.
+
+        When ``use_ai_diagrams`` is True, SVG is generated via Gemini
+        (with one retry on invalid output) while draw.io is still built
+        programmatically (the AI draw.io call was the biggest token sink
+        and added no value over the deterministic builder).
+        """
         artifact = DiagramArtifact(
             dr_strategy=dr_strategy,
             lifecycle_phase=lifecycle_phase,
         )
 
-        if not self.model:
-            logger.error("Model not available; returning fallback diagram")
-            artifact.svg_content = self._fallback_svg(
-                dr_strategy, lifecycle_phase, services
-            )
-            artifact.drawio_xml = self._fallback_drawio(
-                dr_strategy, lifecycle_phase, services
-            )
-            artifact.is_fallback = True
-            artifact.description = phase_description
-            artifact.png_bytes = self._svg_to_png(artifact.svg_content)
-            return artifact
-
-        # ── 1. Generate SVG ──────────────────────────────────────────────
-        svg_content = self._generate_svg(
-            pattern_name, services, dr_strategy,
-            lifecycle_phase, phase_description, pattern_context,
+        # ── draw.io is ALWAYS programmatic (biggest token/speed win) ─────
+        artifact.drawio_xml = self._build_programmatic_drawio(
+            dr_strategy, lifecycle_phase, services
         )
-        valid_svg, svg_content = self._validate_and_fix_svg(svg_content)
-        if not valid_svg:
-            # One retry with explicit error feedback
-            logger.warning(f"SVG invalid for {dr_strategy}/{lifecycle_phase}, retrying…")
+
+        if not self.use_ai_diagrams or not self.model:
+            # ── Fully programmatic mode (default) ────────────────────────
+            artifact.svg_content = self._build_programmatic_svg(
+                dr_strategy, lifecycle_phase, services
+            )
+        else:
+            # ── AI SVG mode (opt-in) ─────────────────────────────────────
             svg_content = self._generate_svg(
                 pattern_name, services, dr_strategy,
                 lifecycle_phase, phase_description, pattern_context,
-                retry_hint="Previous SVG was malformed. Ensure valid XML with xmlns and viewBox.",
-                reference_diagram_descriptions=reference_diagram_descriptions,
             )
             valid_svg, svg_content = self._validate_and_fix_svg(svg_content)
             if not valid_svg:
-                logger.error(f"SVG retry failed for {dr_strategy}/{lifecycle_phase}")
-                svg_content = self._fallback_svg(dr_strategy, lifecycle_phase, services)
-                artifact.is_fallback = True
+                logger.warning(
+                    f"SVG invalid for {dr_strategy}/{lifecycle_phase}, retrying…"
+                )
+                svg_content = self._generate_svg(
+                    pattern_name, services, dr_strategy,
+                    lifecycle_phase, phase_description, pattern_context,
+                    retry_hint=(
+                        "Previous SVG was malformed. Ensure valid XML "
+                        "with xmlns and viewBox."
+                    ),
+                    reference_diagram_descriptions=reference_diagram_descriptions,
+                )
+                valid_svg, svg_content = self._validate_and_fix_svg(svg_content)
+                if not valid_svg:
+                    logger.error(
+                        f"SVG retry failed for {dr_strategy}/{lifecycle_phase}"
+                    )
+                    svg_content = self._build_programmatic_svg(
+                        dr_strategy, lifecycle_phase, services
+                    )
+                    artifact.is_fallback = True
 
-        artifact.svg_content = svg_content
+            artifact.svg_content = svg_content
 
-        # ── 2. Generate draw.io XML ──────────────────────────────────────
-        drawio_xml = self._generate_drawio(
-            pattern_name, services, dr_strategy,
-            lifecycle_phase, phase_description, pattern_context,
-        )
-        artifact.drawio_xml = drawio_xml
+        # ── SVG → PNG conversion ─────────────────────────────────────────
+        artifact.png_bytes = self._svg_to_png(artifact.svg_content)
 
-        # ── 3. Convert SVG → PNG ─────────────────────────────────────────
-        artifact.png_bytes = self._svg_to_png(svg_content)
-
-        # ── 4. Store description ─────────────────────────────────────────
+        # ── Store description ────────────────────────────────────────────
         artifact.description = phase_description
 
         return artifact
+
+    # ─── Programmatic diagram builders (zero AI calls) ───────────────────
+
+    @staticmethod
+    def _build_programmatic_svg(
+        dr_strategy: str,
+        lifecycle_phase: str,
+        services: List[str],
+    ) -> str:
+        """
+        Build an SVG component diagram entirely in Python — no Gemini calls.
+
+        Layout: two regions side-by-side (Primary + DR), each service drawn
+        as a colour-coded rounded rectangle with a state label, connected by
+        dashed arrows.  A legend and title are included.
+
+        The output is always valid SVG (no retry logic needed).
+        """
+        states = STATE_MATRIX.get(
+            (dr_strategy, lifecycle_phase),
+            RegionStates("Active", "Active", "Standby", "Standby", "Replication"),
+        )
+
+        n = len(services)
+        svc_h = 55                          # vertical spacing per service
+        region_top_pad = 80                 # space for region label
+        region_h = region_top_pad + max(n, 1) * svc_h + 20
+        canvas_h = max(600, region_h + 130) # room for title + legend
+
+        parts: List[str] = []
+
+        # ── Header ───────────────────────────────────────────────────────
+        parts.append(
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 900 {canvas_h}" width="900" height="{canvas_h}">'
+        )
+        parts.append(
+            '<defs>'
+            '<marker id="ah" markerWidth="10" markerHeight="7" '
+            'refX="10" refY="3.5" orient="auto">'
+            '<polygon points="0 0,10 3.5,0 7" fill="#555"/>'
+            '</marker>'
+            '</defs>'
+        )
+        parts.append(
+            '<style>'
+            'text{font-family:Arial,Helvetica,sans-serif}'
+            '.t{font-size:17px;font-weight:bold;fill:#222}'
+            '.rl{font-size:14px;font-weight:bold;fill:#333}'
+            '.sn{font-size:12px;fill:#fff}'
+            '.st{font-size:11px;font-style:italic}'
+            '.al{font-size:10px;fill:#555}'
+            '.lg{font-size:10px;fill:#555}'
+            '</style>'
+        )
+
+        # Background
+        parts.append(f'<rect width="900" height="{canvas_h}" fill="#FAFAFA" rx="4"/>')
+
+        # Title
+        title_text = f"{dr_strategy} \u2014 {lifecycle_phase}"
+        parts.append(
+            f'<text x="450" y="35" text-anchor="middle" class="t">'
+            f'{title_text}</text>'
+        )
+
+        # ── Regions ──────────────────────────────────────────────────────
+        parts.append(
+            f'<rect x="30" y="55" width="390" height="{region_h}" '
+            f'rx="10" fill="#E3F2FD" stroke="#1565C0" stroke-width="1.5"/>'
+        )
+        parts.append(
+            '<text x="225" y="82" text-anchor="middle" class="rl">'
+            'Primary Region</text>'
+        )
+        parts.append(
+            f'<rect x="480" y="55" width="390" height="{region_h}" '
+            f'rx="10" fill="#FFF3E0" stroke="#E65100" stroke-width="1.5"/>'
+        )
+        parts.append(
+            '<text x="675" y="82" text-anchor="middle" class="rl">'
+            'DR Region</text>'
+        )
+
+        # ── Service boxes + arrows ───────────────────────────────────────
+        for i, svc in enumerate(services):
+            is_core = _is_data_service(svc)
+            p_state = states.primary_core if is_core else states.primary_non_core
+            d_state = states.dr_core if is_core else states.dr_non_core
+            p_color = STATE_COLORS.get(p_state, "#9E9E9E")
+            d_color = STATE_COLORS.get(d_state, "#9E9E9E")
+
+            y = 100 + i * svc_h
+
+            # Primary box
+            parts.append(
+                f'<rect x="55" y="{y}" width="170" height="38" '
+                f'rx="6" fill="{p_color}"/>'
+            )
+            parts.append(
+                f'<text x="140" y="{y + 24}" text-anchor="middle" '
+                f'class="sn">{svc}</text>'
+            )
+            parts.append(
+                f'<text x="140" y="{y + 50}" text-anchor="middle" '
+                f'class="st" fill="{p_color}">{p_state}</text>'
+            )
+
+            # DR box
+            dr_opacity = ' opacity="0.5"' if d_state in ("Not-Deployed", "Scaled-Down") else ""
+            parts.append(
+                f'<rect x="505" y="{y}" width="170" height="38" '
+                f'rx="6" fill="{d_color}"{dr_opacity}/>'
+            )
+            parts.append(
+                f'<text x="590" y="{y + 24}" text-anchor="middle" '
+                f'class="sn">{svc}</text>'
+            )
+            parts.append(
+                f'<text x="590" y="{y + 50}" text-anchor="middle" '
+                f'class="st" fill="{d_color}">{d_state}</text>'
+            )
+
+            # Dashed arrow
+            parts.append(
+                f'<line x1="225" y1="{y + 19}" x2="503" y2="{y + 19}" '
+                f'stroke="#888" stroke-width="1" stroke-dasharray="4,3" '
+                f'marker-end="url(#ah)"/>'
+            )
+
+        # Central arrow label
+        if n > 0:
+            mid_y = 100 + (n // 2) * svc_h + 10
+            parts.append(
+                f'<text x="364" y="{mid_y}" text-anchor="middle" '
+                f'class="al">{states.arrow_label}</text>'
+            )
+
+        # ── Legend ────────────────────────────────────────────────────────
+        legend_y = region_h + 75
+        for j, (state_name, color) in enumerate(STATE_COLORS.items()):
+            lx = 30 + j * 145
+            parts.append(
+                f'<rect x="{lx}" y="{legend_y}" width="12" height="12" '
+                f'rx="2" fill="{color}"/>'
+            )
+            parts.append(
+                f'<text x="{lx + 16}" y="{legend_y + 11}" '
+                f'class="lg">{state_name}</text>'
+            )
+
+        parts.append('</svg>')
+        return "\n".join(parts)
+
+    @staticmethod
+    def _build_programmatic_drawio(
+        dr_strategy: str,
+        lifecycle_phase: str,
+        services: List[str],
+    ) -> str:
+        """
+        Build draw.io XML entirely in Python — no Gemini calls.
+
+        Uses the ``DRAWIO_SERVICE_ICONS`` registry for official AWS/GCP
+        icon shapes and the ``STATE_COLORS`` palette for state-dependent
+        colouring.  The output is always valid mxfile XML.
+        """
+        states = STATE_MATRIX.get(
+            (dr_strategy, lifecycle_phase),
+            RegionStates("Active", "Active", "Standby", "Standby", "Replication"),
+        )
+
+        n = len(services)
+        svc_spacing = 90
+        region_h = 80 + max(n, 1) * svc_spacing + 30
+        cells: List[str] = []
+        cid = 10  # next cell ID counter
+
+        for i, svc in enumerate(services):
+            is_core = _is_data_service(svc)
+            p_state = states.primary_core if is_core else states.primary_non_core
+            d_state = states.dr_core if is_core else states.dr_non_core
+            p_color = STATE_COLORS.get(p_state, "#9E9E9E")
+            d_color = STATE_COLORS.get(d_state, "#9E9E9E")
+            y = 100 + i * svc_spacing
+
+            icon_style = get_drawio_icon_style(svc)
+
+            # ── Primary service cell ─────────────────────────────────────
+            if icon_style:
+                p_style = (
+                    f"{icon_style}whiteSpace=wrap;fillColor={p_color};"
+                    f"fontColor=#232F3E;strokeColor={p_color};fontStyle=1;"
+                    f"fontSize=11;labelPosition=center;"
+                    f"verticalLabelPosition=bottom;verticalAlign=top;"
+                    f"align=center;"
+                )
+                w, h = 60, 60
+            else:
+                p_style = (
+                    f"rounded=1;whiteSpace=wrap;fillColor={p_color};"
+                    f"fontColor=#ffffff;strokeColor=#757575;"
+                    f"fontSize=11;fontStyle=1;"
+                )
+                w, h = 160, 45
+
+            p_opacity = "opacity=50;" if p_state in ("Not-Deployed", "Scaled-Down") else ""
+            cells.append(
+                f'        <mxCell id="{cid}" '
+                f'value="{svc}&#10;[{p_state}]" '
+                f'style="{p_style}{p_opacity}" vertex="1" parent="1">\n'
+                f'          <mxGeometry x="80" y="{y}" '
+                f'width="{w}" height="{h}" as="geometry"/>\n'
+                f'        </mxCell>'
+            )
+            p_id = cid
+            cid += 1
+
+            # Primary state badge
+            cells.append(
+                f'        <mxCell id="{cid}" value="{p_state}" '
+                f'style="text;fontSize=10;fontStyle=2;'
+                f'fontColor={p_color};align=center;" '
+                f'vertex="1" parent="1">\n'
+                f'          <mxGeometry x="65" y="{y + h + 2}" '
+                f'width="90" height="18" as="geometry"/>\n'
+                f'        </mxCell>'
+            )
+            cid += 1
+
+            # ── DR service cell ──────────────────────────────────────────
+            if icon_style:
+                d_style = (
+                    f"{icon_style}whiteSpace=wrap;fillColor={d_color};"
+                    f"fontColor=#232F3E;strokeColor={d_color};fontStyle=1;"
+                    f"fontSize=11;labelPosition=center;"
+                    f"verticalLabelPosition=bottom;verticalAlign=top;"
+                    f"align=center;"
+                )
+            else:
+                d_style = (
+                    f"rounded=1;whiteSpace=wrap;fillColor={d_color};"
+                    f"fontColor=#ffffff;strokeColor=#757575;"
+                    f"fontSize=11;fontStyle=1;"
+                )
+
+            d_opacity = "opacity=50;" if d_state in ("Not-Deployed", "Scaled-Down") else ""
+            cells.append(
+                f'        <mxCell id="{cid}" '
+                f'value="{svc}&#10;[{d_state}]" '
+                f'style="{d_style}{d_opacity}" vertex="1" parent="1">\n'
+                f'          <mxGeometry x="500" y="{y}" '
+                f'width="{w}" height="{h}" as="geometry"/>\n'
+                f'        </mxCell>'
+            )
+            d_id = cid
+            cid += 1
+
+            # DR state badge
+            cells.append(
+                f'        <mxCell id="{cid}" value="{d_state}" '
+                f'style="text;fontSize=10;fontStyle=2;'
+                f'fontColor={d_color};align=center;" '
+                f'vertex="1" parent="1">\n'
+                f'          <mxGeometry x="485" y="{y + h + 2}" '
+                f'width="90" height="18" as="geometry"/>\n'
+                f'        </mxCell>'
+            )
+            cid += 1
+
+            # ── Edge between primary ↔ DR ────────────────────────────────
+            cells.append(
+                f'        <mxCell id="{cid}" '
+                f'value="{states.arrow_label}" '
+                f'style="edgeStyle=orthogonalEdgeStyle;'
+                f'strokeColor=#666666;fontSize=9;" '
+                f'edge="1" source="{p_id}" target="{d_id}" parent="1">\n'
+                f'          <mxGeometry relative="1" as="geometry"/>\n'
+                f'        </mxCell>'
+            )
+            cid += 1
+
+        cells_str = "\n".join(cells)
+        esc_name = f"{dr_strategy} - {lifecycle_phase}"
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<mxfile host="draw.io">\n'
+            f'  <diagram name="{esc_name}" id="prog1">\n'
+            '    <mxGraphModel dx="1200" dy="800" grid="1" '
+            'gridSize="10" guides="1">\n'
+            '      <root>\n'
+            '        <mxCell id="0"/>\n'
+            '        <mxCell id="1" parent="0"/>\n'
+            '        <mxCell id="2" value="Primary Region" '
+            'style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;'
+            'strokeColor=#6c8ebf;fontSize=14;fontStyle=1;'
+            'verticalAlign=top;" vertex="1" parent="1">\n'
+            f'          <mxGeometry x="30" y="50" width="350" '
+            f'height="{region_h}" as="geometry"/>\n'
+            '        </mxCell>\n'
+            '        <mxCell id="3" value="DR Region" '
+            'style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;'
+            'strokeColor=#d6b656;fontSize=14;fontStyle=1;'
+            'verticalAlign=top;" vertex="1" parent="1">\n'
+            f'          <mxGeometry x="420" y="50" width="350" '
+            f'height="{region_h}" as="geometry"/>\n'
+            '        </mxCell>\n'
+            f'{cells_str}\n'
+            '      </root>\n'
+            '    </mxGraphModel>\n'
+            '  </diagram>\n'
+            '</mxfile>'
+        )
 
     # ─── SVG generation via Gemini ───────────────────────────────────────
 
@@ -654,7 +1122,7 @@ Start with <svg and end with </svg>.
                 prompt,
                 generation_config=GenerationConfig(
                     temperature=0.2,
-                    max_output_tokens=8192,
+                    max_output_tokens=4096,
                 ),
             )
             return self._strip_code_fences(response.text.strip())
@@ -744,7 +1212,7 @@ Start with <?xml or <mxfile and end with </mxfile>.
                 prompt,
                 generation_config=GenerationConfig(
                     temperature=0.2,
-                    max_output_tokens=8192,
+                    max_output_tokens=4096,
                 ),
             )
             xml_text = self._strip_code_fences(response.text.strip())

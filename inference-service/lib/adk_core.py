@@ -275,6 +275,151 @@ class ADKAgent:
 # Alias for backward compatibility
 Agent = ADKAgent
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ADK Workflow Primitives — SequentialAgent, LoopAgent, WorkflowContext
+# ──────────────────────────────────────────────────────────────────────────────
+
+class WorkflowContext:
+    """
+    Shared mutable state passed between agents in an ADK workflow.
+
+    Acts as the communication channel between SequentialAgent /
+    LoopAgent sub-agents.  Each step reads from and writes to this
+    context, enabling data to flow through the pipeline without
+    HTTP serialisation overhead.
+    """
+
+    def __init__(self, initial_data: Optional[Dict[str, Any]] = None):
+        self._data: Dict[str, Any] = dict(initial_data or {})
+
+    # ── Read / Write ─────────────────────────────────────────────────────
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self._data[key] = value
+
+    def update(self, d: Dict[str, Any]) -> None:
+        self._data.update(d)
+
+    def pop(self, key: str, default: Any = None) -> Any:
+        return self._data.pop(key, default)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return dict(self._data)
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
+
+    def __repr__(self) -> str:
+        keys = list(self._data.keys())
+        return f"WorkflowContext(keys={keys})"
+
+
+class WorkflowAgent:
+    """
+    Base class for agents that participate in an ADK workflow.
+
+    Unlike ``ADKAgent`` (which exposes HTTP endpoints), WorkflowAgent
+    operates in-process and communicates via ``WorkflowContext``.
+    Sub-agents override ``run()`` to implement their step logic.
+    """
+
+    def __init__(self, name: str):
+        self.name = name
+        self.logger = logging.getLogger(name)
+
+    async def run(self, ctx: WorkflowContext) -> WorkflowContext:
+        """Execute the agent's work, reading from and writing to *ctx*."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement run()"
+        )
+
+
+class SequentialAgent(WorkflowAgent):
+    """
+    ADK Workflow: executes sub-agents sequentially, passing a shared
+    ``WorkflowContext`` through the chain.
+
+    Each sub-agent receives the context produced by the previous one,
+    enabling a pipeline-style data flow without HTTP calls.
+    """
+
+    def __init__(self, name: str, sub_agents: List[WorkflowAgent]):
+        super().__init__(name)
+        self.sub_agents = sub_agents
+
+    async def run(self, ctx: WorkflowContext) -> WorkflowContext:
+        self.logger.info(
+            f"[{self.name}] Starting sequential workflow "
+            f"({len(self.sub_agents)} steps)"
+        )
+        for i, agent in enumerate(self.sub_agents, 1):
+            self.logger.info(
+                f"[{self.name}] Step {i}/{len(self.sub_agents)}: "
+                f"{agent.name}"
+            )
+            ctx = await agent.run(ctx)
+        self.logger.info(f"[{self.name}] Sequential workflow complete")
+        return ctx
+
+
+class LoopAgent(WorkflowAgent):
+    """
+    ADK Workflow: executes sub-agents in a loop until an exit condition
+    is met in the ``WorkflowContext``.
+
+    On each iteration, all sub-agents run in sequence.  If the context
+    key specified by ``exit_key`` evaluates truthy after a full
+    iteration, the loop exits early.  Otherwise it runs up to
+    ``max_iterations`` times.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        sub_agents: List[WorkflowAgent],
+        max_iterations: int = 3,
+        exit_key: str = "approved",
+    ):
+        super().__init__(name)
+        self.sub_agents = sub_agents
+        self.max_iterations = max_iterations
+        self.exit_key = exit_key
+
+    async def run(self, ctx: WorkflowContext) -> WorkflowContext:
+        self.logger.info(
+            f"[{self.name}] Starting loop (max {self.max_iterations} "
+            f"iterations, exit_key='{self.exit_key}')"
+        )
+        for iteration in range(1, self.max_iterations + 1):
+            ctx.set("loop_iteration", iteration)
+            self.logger.info(
+                f"[{self.name}] Iteration {iteration}/"
+                f"{self.max_iterations}"
+            )
+            for agent in self.sub_agents:
+                self.logger.info(
+                    f"[{self.name}]   Running: {agent.name}"
+                )
+                ctx = await agent.run(ctx)
+
+            if ctx.get(self.exit_key, False):
+                self.logger.info(
+                    f"[{self.name}] Exit condition "
+                    f"'{self.exit_key}' met at iteration {iteration}"
+                )
+                break
+        else:
+            self.logger.warning(
+                f"[{self.name}] Max iterations reached without "
+                f"exit condition"
+            )
+        return ctx
+
+
 def setup_logging(level: str = "INFO"):
     """Setup comprehensive logging configuration"""
     log_level = getattr(logging, level.upper(), logging.INFO)

@@ -1,6 +1,6 @@
 # EnGen: Architecture Pattern Documentation System
 
-**Document Version:** 2.5  
+**Document Version:** 3.0  
 **Date:** April 15, 2026  
 **Author:** EnGen Development Team  
 **Status:** Production Ready
@@ -39,13 +39,22 @@ graph TB
     subgraph Serving["SERVING PLANE (Agent Swarm)"]
         Orch[Orchestrator Agent<br/>- Workflow Coordinator]
         
-        subgraph Generation["Content Generation"]
-            Ret[Retrieval Agent<br/>- Vector Search]
-            Gen[Generator Agent<br/>- Vision & Text]
-            Rev[Reviewer Agent<br/>- Quality Control]
+        subgraph Phase1["Phase 1: ADK Workflow (In-Process)"]
+            subgraph SeqAgent["SequentialAgent: Phase1DocGenerationWorkflow"]
+                VA[VisionAnalysisStep<br/>- Gemini Vision]
+                DR[DonorRetrievalStep<br/>- Vertex AI Search]
+                subgraph Loop["LoopAgent: ContentRefinementLoop (max 3)"]
+                    PG[PatternGenerateStep<br/>- Gemini Pro]
+                    HS[HADRSectionsStep<br/>- Parallel Retrieval]
+                    FDR[FullDocReviewStep<br/>- Quality Control]
+                end
+                HD[HADRDiagramStep<br/>- Programmatic SVG + draw.io + GCS]
+            end
+            VA --> DR --> Loop --> HD
+            PG --> HS --> FDR
         end
-        
-        subgraph Synthesis["Pattern Synthesis"]
+
+        subgraph Phase2["Phase 2: A2A HTTP"]
             CompSpec[Component<br/>Specification Agent]
             ArtGen[Artifact<br/>Generation Agent]
             ArtVal[Artifact<br/>Validation Agent]
@@ -55,22 +64,11 @@ graph TB
             Human[Human Verifier Agent<br/>- Approval Gate]
         end
 
-        subgraph HADRAgents["HA/DR Agents"]
-            HADRRet[HA/DR Retriever Agent<br/>- Filtered Search]
-            HADRGen[HA/DR Generator Agent<br/>- Text & Donor Parsing]
-            HADRDiag[HA/DR Diagram<br/>Generator Agent<br/>- SVG + draw.io + PNG + GCS]
-        end
-
-        Orch -->|A2A| Ret
-        Orch -->|A2A| Gen
-        Orch -->|A2A| Rev
-        Orch -->|A2A| Human
+        Orch -->|WorkflowContext| SeqAgent
         Orch -->|A2A| CompSpec
         Orch -->|A2A| ArtGen
         Orch -->|A2A| ArtVal
-        Orch -->|A2A| HADRRet
-        Orch -->|A2A| HADRGen
-        Orch -->|A2A| HADRDiag
+        Orch -->|A2A| Human
     end
 
     subgraph RealTimeSources["Real-Time Component Sources"]
@@ -105,8 +103,8 @@ graph TB
         DiagGCS[GCS Bucket<br/>hadr-diagrams]
     end
     
-    HADRRet -->|Filtered Retrieval| HADRDS
-    HADRDiag -->|SVG + draw.io + PNG + Upload| DiagGCS
+    HS -->|Direct Call| HADRDS
+    HD -->|SVG + draw.io + PNG + Upload| DiagGCS
 
     UI --> Orch
     UI -.->|Poll via Orch| DB
@@ -124,17 +122,17 @@ graph TB
 
 | Agent Name | Role | Primary Responsibility |
 |------------|------|------------------------|
-| **OrchestratorAgent** | Controller | Manages the end-to-end workflow via task-based BFF endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`, `resume_workflow`, `list_workflows`). Coordinates A2A calls, retries, triggers async publishing, orchestrates HA/DR section generation after the content generation loop, and persists workflow state to AlloyDB via `WorkflowStateManager` at every phase transition for resumable sessions. |
-| **GeneratorAgent** | Creator | Multimodal agent that uses Gemini Vision to analyze diagrams and Gemini Pro to draft documentation. |
-| **RetrievalAgent** | Librarian | Performs hybrid search (semantic + keyword) in Vertex AI to find relevant "Donor Pattern" documents. |
-| **ReviewerAgent** | Critic | Evaluates generated text against diverse quality rubrics and provides specific feedback for refinement. |
-| **ComponentSpecificationAgent** | Architect | Performs **real-time** lookups against GitHub repositories (via MCP Server or PyGithub fallback) and AWS Service Catalog to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. |
-| **ArtifactGenerationAgent** | Engineer | Synthesizes IaC and Boilerplate using "Golden Sample" templates fetched from GCS. |
-| **ArtifactValidationAgent** | QA | Validates generated code against a 6-point rubric: Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, and Best Practices. |
+| **OrchestratorAgent** | Controller | Manages the end-to-end workflow via task-based BFF endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`, `resume_workflow`, `list_workflows`). **Phase 1 (doc generation)** is orchestrated entirely in-process using an ADK `SequentialAgent` containing a `LoopAgent` — no A2A HTTP calls. Core logic modules (PatternGenerator, VertexRetriever, PatternReviewer, ServiceHADRRetriever, HADRDocumentationGenerator, HADRDiagramGenerator, HADRDiagramStorage) are instantiated directly and shared across workflow steps via a `WorkflowContext`. **Phase 2 (artifact generation)** retains A2A HTTP calls to the ComponentSpecification, ArtifactGeneration, and ArtifactValidation agents. Persists workflow state to AlloyDB via `WorkflowStateManager` at every phase transition for resumable sessions. |
+| **VisionAnalysisStep** | Analyser | ADK `WorkflowAgent` step that uses Gemini Vision (via `PatternGenerator.generate_search_description`) to produce a textual description of the architecture diagram. Runs in-process within the Phase 1 `SequentialAgent`. |
+| **DonorRetrievalStep** | Librarian | ADK `WorkflowAgent` step that performs hybrid search in Vertex AI Search (via `VertexRetriever.get_best_donor_pattern`) to find the best donor pattern. Runs in-process within the Phase 1 `SequentialAgent`. |
+| **PatternGenerateStep** | Creator | ADK `WorkflowAgent` step inside the `LoopAgent` that uses Gemini Pro (via `PatternGenerator.generate_pattern`) to generate core documentation sections, incorporating any critique from the reviewer on subsequent iterations. |
+| **HADRSectionsStep** | HA/DR Writer | ADK `WorkflowAgent` step inside the `LoopAgent` that generates pattern-level HA/DR sections. **Optimised**: runs service HA/DR retrieval and donor extraction in parallel via `asyncio.gather`, caches service names across iterations, and skips HA/DR regeneration on iterations > 1 if the reviewer did not flag the HA/DR section. |
+| **FullDocReviewStep** | Critic | ADK `WorkflowAgent` step inside the `LoopAgent` that reviews the **entire** document — including HA/DR sections — against quality rubrics and sets the `approved` flag. This is a key improvement: the reviewer now critiques HA/DR quality, enabling HA/DR refinement within the loop. |
+| **HADRDiagramStep** | HA/DR Visualiser & Storage | ADK `WorkflowAgent` step that runs **after** the `LoopAgent` to produce SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG fallback images for every DR strategy × lifecycle phase combination. **By default, diagrams are generated programmatically** from a structured `STATE_MATRIX` — zero Gemini calls, 12 diagrams in < 1 second, zero tokens. An opt-in AI mode (`use_ai_diagrams=True`, defaults to `gemini-2.0-flash`) is available for creative SVG layouts; draw.io XML is always programmatic. Uploads all artefacts to GCS and embeds URLs into the HA/DR sections. |
+| **ComponentSpecificationAgent** | Architect | Performs **real-time** lookups against GitHub repositories (via MCP Server or PyGithub fallback) and AWS Service Catalog to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. Accessed via A2A HTTP (Phase 2). |
+| **ArtifactGenerationAgent** | Engineer | Synthesizes IaC and Boilerplate using "Golden Sample" templates fetched from GCS. Accessed via A2A HTTP (Phase 2). |
+| **ArtifactValidationAgent** | QA | Validates generated code against a 6-point rubric: Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, and Best Practices. Accessed via A2A HTTP (Phase 2). |
 | **HumanVerifierAgent** | Gatekeeper | Provides governance gates with AlloyDB persistence and Pub/Sub notifications. Currently operates in **simulated auto-approval** mode; actual user approval is handled via the React SPA calling orchestrator endpoints directly. |
-| **HADRRetrieverAgent** | HA/DR Librarian | Performs **hybrid retrieval** (metadata filter + vector search) against a dedicated `service-hadr-datastore` in Vertex AI Search to fetch service-level HA/DR documentation chunks, scoped by service name, DR strategy, and lifecycle phase. Accessed by the Orchestrator via **A2A HTTP** on port 9006. Tasks: `retrieve_service_hadr` (single service), `retrieve_all_services_hadr` (bulk). Wraps the `ServiceHADRRetriever` core logic. |
-| **HADRGeneratorAgent** | HA/DR Writer | Generates pattern-level HA/DR documentation by synthesizing service-level HA/DR references with the donor pattern's HA/DR sections as one-shot structural examples, producing one DR strategy section at a time via Gemini 1.5 Pro. Accessed by the Orchestrator via **A2A HTTP** on port 9007. Tasks: `generate_hadr_sections` (all 4 DR strategies, async parallel), `extract_donor_hadr_sections` (parse donor HTML). Wraps the `HADRDocumentationGenerator` core logic. |
-| **HADRDiagramGeneratorAgent** | HA/DR Visualiser & Storage | Generates SVG component diagrams, draw.io XML files (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`), and PNG fallback images for every DR strategy × lifecycle phase combination (4 × 3 = 12 diagrams per pattern), then uploads all artefacts (SVG, draw.io XML, PNG) to a dedicated GCS bucket and returns public URLs. Accessed by the Orchestrator via **A2A HTTP** on port 9008. Task: `generate_and_store_hadr_diagrams`. Wraps both the `HADRDiagramGenerator` and `HADRDiagramStorage` core logic. Uses `asyncio.gather` with `Semaphore(4)` concurrency control, 180 s per-diagram timeout, and 60 s per-upload timeout. |
 
 ---
 
@@ -154,13 +152,15 @@ The Ingestion Plane handles the end-to-end processing of both unstructured conte
 
 > **Note (v2.1):** A new Service HA/DR Ingestion Pipeline has been added to index service-level HA/DR documentation into a dedicated Vertex AI Search data store. This enables the Serving Plane to generate grounded HA/DR sections for pattern documents (see Section 3.6 and Section 4.9).
 
-> **Note (v2.2):** HA/DR diagram generation has been added, producing SVG + draw.io XML (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`) + PNG for every DR strategy × lifecycle phase combination. All HA/DR operations now use async parallelism (`asyncio.gather` with `Semaphore`, `wait_for` timeouts, and `to_thread` offloading) for production-grade performance (see Section 4.9).
+> **Note (v2.2):** HA/DR diagram generation was added, producing SVG + draw.io XML (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`) + PNG for every DR strategy × lifecycle phase combination. Async parallelism introduced for all HA/DR operations. *(Diagram generation approach superseded by v3.0 programmatic generation — see below.)*
 
-> **Note (v2.3):** HA/DR components have been refactored from direct imports in the Orchestrator into proper **agent wrappers** (`HADRRetrieverAgent`, `HADRGeneratorAgent`, `HADRDiagramGeneratorAgent`) following the established Agent → Core logic → A2A HTTP delegation pattern. The Orchestrator no longer directly instantiates any HA/DR core classes; all HA/DR operations are now accessed via A2A HTTP calls on ports 9006–9008 (see Section 4.9). `HADRDiagramStorage` has been encapsulated inside `HADRDiagramGeneratorAgent`, and JSON tuple-key serialisation uses `"Strategy|Phase"` string keys.
+> **Note (v2.3):** HA/DR components were refactored from direct imports in the Orchestrator into proper **agent wrappers** (`HADRRetrieverAgent`, `HADRGeneratorAgent`, `HADRDiagramGeneratorAgent`) following the established Agent → Core logic → A2A HTTP delegation pattern. JSON tuple-key serialisation uses `"Strategy|Phase"` string keys. *(A2A HTTP delegation superseded by v3.0 in-process ADK workflow — see below. Standalone wrappers preserved for independent deployment.)*
 
 > **Note (v2.4):** The Streamlit front-end has been replaced by a **React 18 + Vite single-page application (SPA)** with a chevron-style 5-step wizard (Section 4.10). A **3-layer resumable workflow state persistence** strategy has been implemented: AlloyDB `workflow_state` table (backend), Orchestrator `resume_workflow` / `list_workflows` tasks (API), and browser `localStorage` pointer (frontend). Users can close the browser and resume from the last completed phase. The `WorkflowStateManager` class (`lib/workflow_state.py`) handles all CRUD operations on the `workflow_state` table.
 
 > **Note (v2.5):** The database backend has been migrated from **CloudSQL for PostgreSQL** to **AlloyDB for PostgreSQL**. AlloyDB is wire-compatible with PostgreSQL so all DDL schemas, JSONB columns, indexes, and SQL queries are unchanged. The migration affects only the connection layer: `AlloyDBManager` (in `lib/cloudsql_client.py`) uses the `google-cloud-alloydb-connector` library with AlloyDB Auth Proxy, replacing the Cloud SQL Auth Proxy connector. The `CloudSQLManager` class name is preserved as a backward-compatibility alias. AlloyDB instance URIs use the format `projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>`.
+
+> **Note (v3.0 — ADK Workflow Refactoring):** Phase 1 (doc generation) has been refactored from **A2A HTTP orchestration** to **ADK Workflow Agent orchestration** using `SequentialAgent` + `LoopAgent` primitives defined in `lib/adk_core.py`. All Phase 1 core logic modules (`PatternGenerator`, `VertexRetriever`, `PatternReviewer`, `ServiceHADRRetriever`, `HADRDocumentationGenerator`, `HADRDiagramGenerator`, `HADRDiagramStorage`) are now instantiated directly in the `OrchestratorAgent` and shared across workflow step agents via a `WorkflowContext` — eliminating all HTTP overhead, A2A timeout issues, and session management for Phase 1. The standalone HA/DR agent wrappers (`HADRRetrieverAgent`, `HADRGeneratorAgent`, `HADRDiagramGeneratorAgent` on ports 9006–9008) are preserved for independent deployment but are no longer called by the Orchestrator. **Key architectural change:** HA/DR section generation has been moved **inside** the `LoopAgent` refinement loop so the `FullDocReviewStep` now critiques the entire document (core + HA/DR), enabling HA/DR quality improvement across iterations. Performance optimisations applied: (1) parallel retrieval + donor extraction via `asyncio.gather` in `HADRSectionsStep`; (2) service name extraction cached in `WorkflowContext` (was called twice); (3) HA/DR regeneration skipped on re-iterations if reviewer did not flag it; (4) **HA/DR diagrams are now generated programmatically by default** from a structured `STATE_MATRIX` mapping each (strategy, phase) to deterministic `RegionStates` — zero Gemini calls, 12 diagrams in < 1 second, zero tokens consumed; draw.io XML is always programmatic (even in opt-in AI mode); an opt-in AI mode (`use_ai_diagrams=True`, model defaults to `gemini-2.0-flash`) is available for creative SVG layouts with reduced `max_output_tokens` (4096, down from 8192). Estimated end-to-end time savings: **~130–170 seconds** per pattern generation (text workflow) plus **~60–120 seconds** eliminated by programmatic diagrams. Phase 2 (artifact generation) retains A2A HTTP calls. See `agents/orchestrator/workflow_agents.py` for the step agent implementations.
 
 ### 3.2 End-to-End Sequence Diagram
 
@@ -515,8 +515,8 @@ The Serving Plane uses a multi-agent system to analyze architecture diagrams, re
 5.  **Artifact Generation**: Automated creation of deployable code based on authoritative interfaces ("Golden Samples") from GCS.
 6.  **Real-Time Schema Grounding**: Component specifications are grounded in live infrastructure schemas fetched at inference time from GitHub (via MCP or PyGithub) and AWS Service Catalog, replacing the previous offline Vertex AI Search catalog approach.
 7.  **Phase-Based Orchestration**: The workflow is split into discrete phases (`phase1_generate_docs`, `phase2_generate_code`) with explicit approval gates between them.
-8.  **Non-Blocking HA/DR Generation**: HA/DR section and diagram generation executes after the content generation loop completes. It is wrapped in a non-blocking try/except so that failures do not prevent the main pattern document from being returned.
-9.  **Async Parallelism (v2.2)**: All HA/DR operations (retrieval, text generation, diagram generation, GCS upload) use `asyncio.gather` with concurrency controls (`Semaphore(4)` for Gemini calls), per-operation timeouts (`wait_for`), and thread offloading (`to_thread`) to prevent blocking the event loop and maximise throughput.
+8.  **Non-Blocking HA/DR Generation**: HA/DR section text generation executes **inside** the `LoopAgent` refinement loop (so the full-document reviewer critiques core + HA/DR together). HA/DR diagram generation executes **after** the loop completes. Both are wrapped in non-blocking try/except so that failures do not prevent the main pattern document from being returned.
+9.  **Programmatic Diagrams (v3.0)**: HA/DR diagrams are generated **programmatically by default** from a structured `STATE_MATRIX` — zero Gemini calls, 12 diagrams in < 1 second. An opt-in AI mode is available for creative SVG layouts (`use_ai_diagrams=True`, `gemini-2.0-flash`); draw.io XML is always programmatic. GCS upload uses `asyncio.gather` with 60 s per-upload timeout.
 10. **Observability**: Centralized logging, metrics tracking, and health checks (liveness/readiness) via the `ADKAgent` framework.
 
 ### 4.2 Agent Swarm Architecture
@@ -532,9 +532,9 @@ The system consists of the following agents, orchestrating a complex workflow:
 *   **Artifact Generation Agent**: "Engineer", synthesizes both IaC and application reference code using Golden Sample templates.
 *   **Artifact Validation Agent**: "QA Engineer", validates generated code against a 6-point rubric (Syntax, Completeness, Integration, Security, Relevance, Best Practices).
 *   **Human Verifier Agent**: "Gatekeeper", manages the approval lifecycle with AlloyDB persistence and Pub/Sub notifications.
-*   **HA/DR Retriever Agent**: "HA/DR Librarian", performs hybrid retrieval (metadata filter + vector search) against a dedicated `service-hadr-datastore` to fetch service-level HA/DR documentation chunks. Accessed by the Orchestrator via **A2A HTTP** on port 9006. Wraps the `ServiceHADRRetriever` core logic.
-*   **HA/DR Generator Agent**: "HA/DR Writer", synthesizes service-level HA/DR references with donor pattern examples to produce pattern-level HA/DR sections via Gemini 1.5 Pro. Accessed by the Orchestrator via **A2A HTTP** on port 9007. Wraps the `HADRDocumentationGenerator` core logic.
-*   **HA/DR Diagram Generator Agent**: "HA/DR Visualiser & Storage Manager", generates SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG component diagrams for all 12 DR strategy × lifecycle phase combinations, then uploads all artefacts to GCS and returns public URLs. Accessed by the Orchestrator via **A2A HTTP** on port 9008. Wraps both the `HADRDiagramGenerator` and `HADRDiagramStorage` core logic. Uses async parallelism (`asyncio.gather` with `Semaphore(4)`) and 180 s per-diagram timeout.
+*   **HA/DR Retriever Agent**: "HA/DR Librarian", performs hybrid retrieval (metadata filter + vector search) against a dedicated `service-hadr-datastore` to fetch service-level HA/DR documentation chunks. In v3.0, invoked as in-process `HADRSectionsStep` within the `LoopAgent` via `ServiceHADRRetriever` core logic (no A2A HTTP). Standalone agent wrapper on port 9006 preserved for independent deployment.
+*   **HA/DR Generator Agent**: "HA/DR Writer", synthesizes service-level HA/DR references with donor pattern examples to produce pattern-level HA/DR sections via Gemini 1.5 Pro. In v3.0, invoked as in-process `HADRSectionsStep` within the `LoopAgent` via `HADRDocumentationGenerator` core logic (no A2A HTTP). Standalone agent wrapper on port 9007 preserved for independent deployment.
+*   **HA/DR Diagram Generator Agent**: "HA/DR Visualiser & Storage Manager", produces SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG component diagrams for all 12 DR strategy × lifecycle phase combinations, then uploads artefacts to GCS and returns public URLs. In v3.0, invoked as in-process `HADRDiagramStep` after the `LoopAgent` via `HADRDiagramGenerator` + `HADRDiagramStorage` core logic (no A2A HTTP). **Diagrams are generated programmatically** by default from a `STATE_MATRIX` (zero Gemini calls); opt-in AI mode available. Standalone agent wrapper on port 9008 preserved for independent deployment.
 
 ### 4.3 High-Level Sequence Diagram
 
@@ -562,27 +562,23 @@ sequenceDiagram
     Orch->>Ret: find_donor(description)
     Ret-->>Orch: donor_context
 
-    Note over Orch,Rev: Step 2: Content Generation Loop (Max 3)
-    loop Content refinement
+    Note over Orch,Rev: Step 2: Content Generation Loop (LoopAgent, Max 3)
+    loop Content + HA/DR refinement (in-process)
         Orch->>Gen: generate_pattern(desc, donor)
         Gen-->>Orch: draft_sections
-        Orch->>Rev: review_pattern(draft)
+        Orch->>Orch: Extract service names (cached in WorkflowContext)
+        Orch->>Ret: In-process: ServiceHADRRetriever.aretrieve_all [N×4 parallel]
+        Ret-->>Orch: service_hadr_docs
+        Orch->>Gen: In-process: HADRDocumentationGenerator.agenerate [4 parallel, 120s]
+        Gen-->>Orch: hadr_sections{strategy→markdown}
+        Orch->>Orch: Merge HA/DR into generated_sections
+        Orch->>Rev: review_full_doc(draft + HA/DR)
         Rev-->>Orch: {approved, critique}
     end
 
-    Note over Orch,Ret: Step 2b: HA/DR Section Generation (Non-Blocking, A2A + Async Parallel)
-    Orch->>Orch: Extract service names from draft
-    Orch->>Ret: A2A: HADR_RETRIEVER_URL/retrieve_all_services_hadr [N×4 parallel]
-    Ret-->>Orch: service_hadr_docs (per-service × per-strategy)
-    Orch->>Orch: A2A: HADR_GENERATOR_URL/extract_donor_hadr_sections
-    Orch->>Gen: A2A: HADR_GENERATOR_URL/generate_hadr_sections [4 parallel, 120s timeout]
-    Gen-->>Orch: hadr_sections{strategy→markdown}
-    Orch->>Orch: Merge HA/DR into generated_sections
-
-    Note over Orch,Ret: Step 2c: HA/DR Diagram Generation & Storage (Non-Blocking, A2A + Async Parallel)
-    Orch->>Gen: A2A: HADR_DIAGRAM_GENERATOR_URL/generate_and_store_hadr_diagrams
-    Gen-->>Orch: diagram_urls (Strategy-Phase to urls)
-    Orch->>Orch: Deserialise Strategy-Phase string keys to tuples
+    Note over Orch,Gen: Step 2b: HA/DR Diagram Generation (Programmatic, Non-Blocking)
+    Orch->>Orch: HADRDiagramGenerator: programmatic SVG + draw.io from STATE_MATRIX (12 diagrams, < 1s)
+    Orch->>Orch: HADRDiagramStorage: upload to GCS [12 parallel, 60s timeout]
     Orch->>Orch: Embed diagram URLs in HA/DR sections
 
     Note over Orch,Verifier: Step 3: User Approval (Pattern)
@@ -646,50 +642,51 @@ sequenceDiagram
 1.  **Analysis**: The Orchestrator sends the input diagram to the `Generator Agent`. The agent uses Gemini Vision to extract a detailed technical description.
 2.  **Retrieval**: The Orchestrator uses this description to query the `Retriever Agent`. This agent performs a hybrid search (Vector + Keyword) in Vertex AI Search to find the best matching "Donor Pattern" to serve as a structural template.
 
-#### Phase 2: Content Generation Loop
-3.  **Drafting**: The Orchestrator invokes the `Generator Agent` with the diagram description and the donor pattern context. Gemini 1.5 Pro generates a first draft of the documentation (Problem, Solution, Architecture).
-4.  **Review**: The `Reviewer Agent` analyzes the draft against quality guidelines. It returns a score and specific critique.
-5.  **Refinement**: If the score is below threshold, the Orchestrator feeds the critique back into the `Generator Agent` for a revised draft. This repeats for up to 3 iterations.
+#### Phase 2: Content Generation Loop (LoopAgent, In-Process)
+3.  **Drafting**: The `ContentDraftStep` invokes `PatternGenerator` with the diagram description and the donor pattern context. Gemini 1.5 Pro generates a first draft of the documentation (Problem, Solution, Architecture).
+4.  **HA/DR Section Generation (Inside Loop)**: The `HADRSectionsStep` executes within the same `LoopAgent` iteration:
+    *   Extracts canonical service names from the generated documentation using regex matching against the `component_sources.py` alias dictionary (40+ mappings) and a curated list of common service names. Results are cached in `WorkflowContext`.
+    *   Calls `ServiceHADRRetriever.aretrieve_all_services_hadr()` in-process to query the `service-hadr-datastore` via **hybrid retrieval** (metadata filter + vector search). All N × 4 queries are dispatched in parallel via `asyncio.gather`.
+    *   Calls `HADRDocumentationGenerator.extract_donor_hadr_sections()` in-process to parse the donor pattern's HTML and extract HA/DR sub-sections.
+    *   Retrieval and donor extraction run in parallel via `asyncio.gather`.
+    *   Calls `HADRDocumentationGenerator.agenerate_hadr_sections()` in-process — all four DR strategy sections generated in parallel via `asyncio.gather`, each with a 120 s timeout.
+    *   Results include per-phase summary tables showing each service's state (Active, Standby, Scaled-Down, Not-Deployed).
+5.  **Full-Document Review**: The `FullDocReviewStep` sends the complete document (core sections + HA/DR) to the `PatternReviewer`. This enables the reviewer to critique HA/DR quality alongside core content.
+6.  **Refinement**: If the score is below threshold, the `LoopAgent` feeds the critique back for a revised draft. HA/DR is regenerated only if the reviewer flagged it. This repeats for up to 3 iterations.
+7.  **Non-Blocking Merge**: The generated HA/DR sections are merged into the `generated_sections` dictionary under the `HA/DR` key. If HA/DR generation fails for any reason, a placeholder message is inserted and the workflow continues normally — the main pattern document is never blocked by HA/DR failures.
 
-#### Phase 2b: HA/DR Section Generation (Non-Blocking, A2A + Async Parallel)
-6.  **Service Name Extraction**: After the content generation loop completes, the Orchestrator extracts canonical service names from the generated documentation using regex matching against the `component_sources.py` alias dictionary (40+ mappings) and a curated list of common service names (AWS and GCP).
-7.  **Service HA/DR Retrieval (A2A → Async)**: The Orchestrator calls the `HADRRetrieverAgent` via A2A HTTP (`HADR_RETRIEVER_URL/retrieve_all_services_hadr`). Inside the agent, `ServiceHADRRetriever.aretrieve_all_services_hadr()` queries the dedicated `service-hadr-datastore` in Vertex AI Search using **hybrid retrieval**: a metadata filter (exact `service_name` + `dr_strategy`) combined with semantic/vector search. All N × 4 queries are dispatched in parallel via `asyncio.gather`. This returns HA/DR chunks organized as `service → strategy → [chunks]`.
-8.  **Donor HA/DR Extraction (A2A)**: The Orchestrator calls the `HADRGeneratorAgent` via A2A HTTP (`HADR_GENERATOR_URL/extract_donor_hadr_sections`) to parse the donor pattern's HTML content and extract existing HA/DR sub-sections keyed by DR strategy name, using regex-based heading detection. These serve as one-shot structural examples for the generator.
-9.  **HA/DR Generation (A2A → Async)**: The Orchestrator calls the `HADRGeneratorAgent` via A2A HTTP (`HADR_GENERATOR_URL/generate_hadr_sections`). Inside the agent, `HADRDocumentationGenerator.agenerate_hadr_sections()` generates all four DR strategy sections in parallel via `asyncio.gather`, each with a 120 s timeout via `asyncio.wait_for`. Each prompt includes the donor example, service-level reference chunks, and the new pattern's component context. The output includes per-phase summary tables showing each service's state (Active, Standby, Scaled-Down, Not-Deployed).
-10. **Non-Blocking Merge**: The generated HA/DR sections are merged into the `generated_sections` dictionary under the `HA/DR` key. If HA/DR generation fails for any reason, a placeholder message is inserted and the workflow continues normally — the main pattern document is never blocked by HA/DR failures.
-
-#### Phase 2c: HA/DR Diagram Generation & Storage (Non-Blocking, A2A + Async Parallel)
-11. **Diagram Generation & Storage (A2A → Async)**: The Orchestrator makes a single A2A HTTP call to the `HADRDiagramGeneratorAgent` (`HADR_DIAGRAM_GENERATOR_URL/generate_and_store_hadr_diagrams`). This agent encapsulates both diagram generation and GCS upload. Inside the agent, `HADRDiagramGenerator.agenerate_all_diagrams()` produces SVG component diagrams, draw.io XML files (with official cloud-provider icon shapes), and PNG fallback images for every DR strategy × lifecycle phase combination (4 × 3 = 12 diagrams). All 12 diagram generations run in parallel via `asyncio.gather` with a `Semaphore(4)` concurrency cap to avoid Gemini quota exhaustion, and each diagram has a 180 s timeout. Each diagram involves two Gemini 1.5 Pro calls (SVG + draw.io) plus a local SVG→PNG conversion. After generation, `HADRDiagramStorage.aupload_diagram_bundle()` uploads all three artefacts per diagram to GCS in parallel with a 60 s timeout per upload.
-12. **draw.io Icon Shapes**: The draw.io XML generation uses `DRAWIO_SERVICE_ICONS` — a registry of 40+ AWS and GCP services mapped to their official draw.io shape library identifiers (`mxgraph.aws4.*` for AWS, `mxgraph.gcp2.*` for GCP). This ensures diagrams render with recognisable cloud-provider icons when opened in draw.io, rather than plain rectangles.
-13. **SVG→PNG Conversion**: PNG fallback images are generated locally from the SVG content using `svglib` + `reportlab` (with a `pycairo` shim on Windows). On Linux environments, `cairosvg` is used as the primary converter.
-14. **Tuple Key Deserialisation**: Since JSON cannot serialise Python tuple keys, the `HADRDiagramGeneratorAgent` returns URL maps with string keys in `"Strategy|Phase"` format. The Orchestrator deserialises these back to `(strategy, phase)` tuples via `key.split("|", 1)` for use in `_format_hadr_sections()`.
-15. **URL Embedding**: The returned diagram URLs are embedded into the HA/DR markdown sections so that the rendered documentation contains inline SVG references and links to the editable draw.io files.
+#### Phase 2b: HA/DR Diagram Generation & Storage (Programmatic, Non-Blocking)
+8.  **Programmatic Diagram Generation (Default)**: The `HADRDiagramStep` runs **after** the `LoopAgent` completes. By default, `HADRDiagramGenerator` produces all 12 diagrams (4 DR strategies × 3 lifecycle phases) **programmatically** from a structured `STATE_MATRIX` — a dictionary mapping each `(strategy, phase)` to a `RegionStates` dataclass specifying the exact state (Active, Standby, Scaled-Down, Not-Deployed) for core vs. non-core services in primary and DR regions. The `_is_data_service()` classifier distinguishes data services (databases, storage) from compute services. SVG is built by `_build_programmatic_svg()` and draw.io XML by `_build_programmatic_drawio()` (using the `DRAWIO_SERVICE_ICONS` registry). **Zero Gemini calls, < 1 second for all 12 diagrams, zero tokens consumed.**
+9.  **Opt-In AI Mode**: When `use_ai_diagrams=True`, SVG generation uses Gemini (`gemini-2.0-flash` by default, configurable via `ai_model_name`) with `max_output_tokens=4096`. Draw.io XML remains always programmatic even in AI mode (biggest token savings). AI mode uses `asyncio.gather` with `Semaphore(6)` concurrency control and per-diagram timeout.
+10. **SVG→PNG Conversion**: PNG fallback images are generated locally from the SVG content using `svglib` + `reportlab` (with `pycairo` shim on Windows). On Linux, `cairosvg` is the primary converter.
+11. **Diagram Storage**: `HADRDiagramStorage.aupload_diagram_bundle()` uploads all three artefacts per diagram to GCS in parallel with a 60 s timeout per upload.
+12. **URL Embedding**: The returned diagram URLs are embedded into the HA/DR markdown sections so that the rendered documentation contains inline SVG references and links to the editable draw.io files.
 
 #### Phase 3: Governance (Point 1) & Async Doc Publishing
-16. **Pattern Verification**: The Orchestrator returns the generated documentation — including HA/DR sections with embedded diagram URLs — to the React SPA. The user reviews the pattern sections and the HA/DR content (with inline diagrams) in collapsible expander panels, then clicks "Approve & Continue" in the chevron wizard.
-17. **Approval**: The React SPA calls the `approve_docs` task (passing the `workflow_id`). The Orchestrator updates AlloyDB review status, persists the workflow state to `CODE_GEN` via `WorkflowStateManager`, and receives a `review_id`.
-18. **Async Publishing**: It immediately spawns a background task to publish the documentation to SharePoint, using the `review_id` to track progress in AlloyDB. The workflow *does not wait* for this to finish but proceeds to artifact generation.
+13. **Pattern Verification**: The Orchestrator returns the generated documentation — including HA/DR sections with embedded diagram URLs — to the React SPA. The user reviews the pattern sections and the HA/DR content (with inline diagrams) in collapsible expander panels, then clicks "Approve & Continue" in the chevron wizard.
+14. **Approval**: The React SPA calls the `approve_docs` task (passing the `workflow_id`). The Orchestrator updates AlloyDB review status, persists the workflow state to `CODE_GEN` via `WorkflowStateManager`, and receives a `review_id`.
+15. **Async Publishing**: It immediately spawns a background task to publish the documentation to SharePoint, using the `review_id` to track progress in AlloyDB. The workflow *does not wait* for this to finish but proceeds to artifact generation.
 
 #### Phase 4: Pattern Synthesis (Holistic Generation)
-19. **Real-Time Schema Resolution**: The `ComponentSpecificationAgent` extracts component keywords from the documentation, normalizes them using the `component_sources.py` alias dictionary (40+ mappings), and performs a two-tier real-time lookup:
+16. **Real-Time Schema Resolution**: The `ComponentSpecificationAgent` extracts component keywords from the documentation, normalizes them using the `component_sources.py` alias dictionary (40+ mappings), and performs a two-tier real-time lookup:
     *   **Tier 1 (GitHub)**: Searches configured GitHub repositories via the MCP Server protocol (with PyGithub fallback) for matching Terraform modules, parsing `variables.tf` and `outputs.tf` files using `python-hcl2`.
     *   **Tier 2 (AWS)**: Falls back to AWS Service Catalog via `boto3` to find matching CloudFormation products with their provisioning parameters and constraints.
-20. **Comprehensive Specification**: It generates a structured dependency graph grounded in these real-world schemas, with topological ordering via `graphlib.TopologicalSorter` to determine execution order.
-21. **Golden Sample Injection**: The `ArtifactGenerationAgent` retrieves enterprise-approved "Golden Sample" IaC templates from GCS to use as few-shot examples.
-22. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window.
-23. **Automated Validation Loop**:
+17. **Comprehensive Specification**: It generates a structured dependency graph grounded in these real-world schemas, with topological ordering via `graphlib.TopologicalSorter` to determine execution order.
+18. **Golden Sample Injection**: The `ArtifactGenerationAgent` retrieves enterprise-approved "Golden Sample" IaC templates from GCS to use as few-shot examples.
+19. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window.
+20. **Automated Validation Loop**:
     *   **Validate**: The `ArtifactValidationAgent` checks the generated code against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices (Medium).
     *   **Feedback**: If issues are found, the critique is fed back to the generator.
     *   **Retry**: The generator attempts to fix the specific issues (max 3 retries).
 
 #### Phase 5: Governance (Point 2) & Async Code Publishing
-24. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review (or approved directly via the React SPA wizard).
-25. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub via the REST API (direct push to the configured branch). The workflow state is persisted to `PUBLISH` via `WorkflowStateManager`.
-26. **Immediate Return**: The Orchestrator returns a `processing` status to the client, along with the review IDs needed to track the background tasks.
+21. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review (or approved directly via the React SPA wizard).
+22. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub via the REST API (direct push to the configured branch). The workflow state is persisted to `PUBLISH` via `WorkflowStateManager`.
+23. **Immediate Return**: The Orchestrator returns a `processing` status to the client, along with the review IDs needed to track the background tasks.
 
 #### Phase 6: Client Polling
-27. **Status Check**: The React SPA's `PublishStep` component polls the orchestrator's `get_publish_status` task every 3 seconds using the returned IDs and `workflow_id`.
-28. **Completion**: Once the background tasks update the DB status to `COMPLETED`, the orchestrator marks the workflow state as `COMPLETED`, deactivates the `workflow_state` row, and relays the final URLs for the SharePoint page and GitHub commit back to the client. The SPA clears `localStorage("engen_workflow_id")`.
+24. **Status Check**: The React SPA's `PublishStep` component polls the orchestrator's `get_publish_status` task every 3 seconds using the returned IDs and `workflow_id`.
+25. **Completion**: Once the background tasks update the DB status to `COMPLETED`, the orchestrator marks the workflow state as `COMPLETED`, deactivates the `workflow_state` row, and relays the final URLs for the SharePoint page and GitHub commit back to the client. The SPA clears `localStorage("engen_workflow_id")`.
 
 
 ### 4.5 Response Assembly
@@ -943,16 +940,20 @@ sequenceDiagram
 
 ### 4.9 HA/DR Documentation & Diagram Generation Workflow
 
-This workflow generates the High Availability / Disaster Recovery (HA/DR) section of a pattern document by synthesizing service-level HA/DR reference documentation with donor pattern examples, and produces visual component diagrams (SVG + draw.io XML + PNG) for every DR strategy × lifecycle phase combination. It executes as **Steps 3 and 3b** within `run_phase1_docs`, after the content generation loop completes but before the documentation is returned to the user. All HA/DR operations use **async parallelism** for production-grade performance.
+This workflow generates the High Availability / Disaster Recovery (HA/DR) section of a pattern document by synthesizing service-level HA/DR reference documentation with donor pattern examples, and produces visual component diagrams (SVG + draw.io XML + PNG) for every DR strategy × lifecycle phase combination. In v3.0, HA/DR section generation executes **inside** the `LoopAgent` refinement loop (as `HADRSectionsStep`), while diagram generation executes **after** the loop (as `HADRDiagramStep`). All core logic is invoked **in-process** — no A2A HTTP calls. Diagrams are generated **programmatically by default** from a structured `STATE_MATRIX`, with an opt-in AI mode available.
 
 #### 4.9.1 System Components
 
 | Component | Responsibility |
 |-----------|----------------|
-| **OrchestratorAgent** | Coordinates the HA/DR generation flow: extracts service names, delegates to the HA/DR agents via **A2A HTTP calls** (retriever → extract donor → generate text → generate & store diagrams), deserialises `"Strategy|Phase"` string keys back to tuples, and merges HA/DR output with diagram URLs into `generated_sections`. Wraps the entire flow in try/except for non-blocking behavior. No longer directly imports or instantiates any HA/DR core classes. |
-| **HADRRetrieverAgent** (port 9006) | Wraps `ServiceHADRRetriever` core logic. Queries the `service-hadr-datastore` in Vertex AI Search using hybrid retrieval (metadata filter + vector search). Returns chunks organized as `service_name → dr_strategy → [chunks]`. Each chunk carries structured metadata including `service_name`, `service_type`, `dr_strategy`, and `lifecycle_phase`. Tasks: `retrieve_service_hadr` (single service), `retrieve_all_services_hadr` (bulk — dispatches all N × 4 queries in parallel via `asyncio.gather`). |
-| **HADRGeneratorAgent** (port 9007) | Wraps `HADRDocumentationGenerator` core logic. Takes service-level HA/DR chunks, donor pattern HA/DR sections (one-shot), and pattern context. Generates one DR strategy section at a time via Gemini 1.5 Pro. Produces Markdown with per-phase summary tables showing each service's state. Tasks: `generate_hadr_sections` (all 4 strategies in parallel via `asyncio.gather` with 120 s per-strategy timeout), `extract_donor_hadr_sections` (parses donor HTML to extract HA/DR sub-sections using regex heading detection). |
-| **HADRDiagramGeneratorAgent** (port 9008) | Wraps both `HADRDiagramGenerator` and `HADRDiagramStorage` core logic. Generates SVG component diagrams, draw.io XML files (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`), and PNG fallback images for every DR strategy × lifecycle phase combination (4 × 3 = 12 diagrams). Each diagram involves two Gemini 1.5 Pro calls (one for SVG, one for draw.io XML) plus a local SVG→PNG conversion. After generation, uploads all artefacts to GCS. Returns URL map with string keys `"Strategy|Phase"` (since JSON cannot serialise tuple keys). Task: `generate_and_store_hadr_diagrams`. Async: `asyncio.gather` with `Semaphore(4)` concurrency control, 180 s timeout per diagram, 60 s timeout per upload. |
+| **OrchestratorAgent** | Instantiates all HA/DR core logic modules (`ServiceHADRRetriever`, `HADRDocumentationGenerator`, `HADRDiagramGenerator`, `HADRDiagramStorage`) directly and shares them across workflow steps via `WorkflowContext`. Coordinates the HA/DR generation flow through in-process `WorkflowAgent` steps. No A2A HTTP calls for HA/DR operations. |
+| **HADRSectionsStep** (in-process) | ADK `WorkflowAgent` step running **inside** the `LoopAgent`. Extracts service names (cached in `WorkflowContext`), calls `ServiceHADRRetriever` for hybrid retrieval (metadata filter + vector search, N×4 parallel queries), calls `HADRDocumentationGenerator` for donor parsing and per-strategy text generation (4 parallel, 120 s timeout), and merges results into `generated_sections["HA/DR"]`. |
+| **HADRDiagramStep** (in-process) | ADK `WorkflowAgent` step running **after** the `LoopAgent`. Calls `HADRDiagramGenerator` to produce 12 diagrams programmatically (default) or via AI, then calls `HADRDiagramStorage` to upload to GCS. Embeds diagram URLs into HA/DR sections. |
+| **ServiceHADRRetriever** (core logic) | Queries the `service-hadr-datastore` in Vertex AI Search using hybrid retrieval (metadata filter + vector search). Returns chunks organized as `service_name → dr_strategy → [chunks]`. Each chunk carries structured metadata including `service_name`, `service_type`, `dr_strategy`, and `lifecycle_phase`. Methods: `aretrieve_service_hadr` (single), `aretrieve_all_services_hadr` (bulk — dispatches all N × 4 queries in parallel via `asyncio.gather`). |
+| **HADRDocumentationGenerator** (core logic) | Takes service-level HA/DR chunks, donor pattern HA/DR sections (one-shot), and pattern context. Generates one DR strategy section at a time via Gemini 1.5 Pro. Produces Markdown with per-phase summary tables showing each service's state. Methods: `agenerate_hadr_sections` (all 4 strategies in parallel via `asyncio.gather` with 120 s per-strategy timeout), `extract_donor_hadr_sections` (parses donor HTML using regex heading detection). |
+| **HADRDiagramGenerator** (core logic) | Produces SVG, draw.io XML (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`), and PNG fallback images for every DR strategy × lifecycle phase combination (4 × 3 = 12 diagrams). **Default mode (programmatic)**: Uses `STATE_MATRIX` — a dictionary mapping each `(strategy, phase)` to a `RegionStates` dataclass — to build deterministic SVG via `_build_programmatic_svg()` and draw.io XML via `_build_programmatic_drawio()`. Zero Gemini calls. **Opt-in AI mode** (`use_ai_diagrams=True`): SVG generated via Gemini (`gemini-2.0-flash` default, `max_output_tokens=4096`); draw.io XML is always programmatic even in AI mode. |
+| **HADRDiagramStorage** (core logic) | Uploads SVG + draw.io XML + PNG to GCS in parallel via `asyncio.gather`, 60 s timeout per upload. Returns URL map `{(strategy, phase) → {svg_url, drawio_url, png_url}}`. |
+| **Standalone Agent Wrappers** (ports 9006–9008) | `HADRRetrieverAgent`, `HADRGeneratorAgent`, `HADRDiagramGeneratorAgent` are preserved as standalone A2A HTTP agent wrappers for independent deployment and testing, but are **no longer called by the Orchestrator**. |
 | **Vertex AI Search (HA/DR Data Store)** | Dedicated data store containing service-level HA/DR documentation chunks with structured metadata for precise filtered retrieval. Populated by the Service HA/DR Ingestion Pipeline (Section 3.6). |
 | **GCS (Diagram Bucket)** | Stores diagram artefacts at path `patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.{svg,drawio,png}`. Serves public URLs for embedding in SharePoint pages and documentation. |
 
@@ -960,33 +961,26 @@ This workflow generates the High Availability / Disaster Recovery (HA/DR) sectio
 
 ```mermaid
 graph TD
-    subgraph "Orchestrator (run_phase1_docs — Steps 3 & 3b)"
-        Orch[Orchestrator Agent]
-        Extract[Extract Service Names<br/>regex + component_sources.py]
-        Merge[Merge into generated_sections<br/>+ embed diagram URLs]
-        Deser[Deserialise Strategy-Phase<br/>string keys to tuples]
+    subgraph "Phase 1 SequentialAgent (in-process)"
+        subgraph "LoopAgent (max 3 iterations)"
+            Draft[ContentDraftStep<br/>PatternGenerator]
+            HADR_Step[HADRSectionsStep<br/>- Extract service names<br/>- Retrieve + Generate text]
+            Review[FullDocReviewStep<br/>PatternReviewer]
+        end
+        DiagStep[HADRDiagramStep<br/>- Programmatic SVG + draw.io<br/>from STATE_MATRIX]
     end
 
-    subgraph "HA/DR Retriever Agent (port 9006)"
-        RetAgent[HADRRetrieverAgent]
-        Retriever[ServiceHADRRetriever<br/>core logic]
-        HADRDS[(Vertex AI Search<br/>service-hadr-datastore)]
-    end
-
-    subgraph "HA/DR Generator Agent (port 9007)"
-        GenAgent[HADRGeneratorAgent]
-        Generator[HADRDocumentationGenerator<br/>core logic]
-        DonorParse[extract_donor_hadr_sections]
-        GeminiText[Gemini 1.5 Pro<br/>Text Generation]
-    end
-
-    subgraph "HA/DR Diagram Generator Agent (port 9008)"
-        DiagAgent[HADRDiagramGeneratorAgent]
-        DiagGen[HADRDiagramGenerator<br/>core logic]
-        DiagStore[HADRDiagramStorage<br/>core logic]
-        IconReg["DRAWIO_SERVICE_ICONS<br/>(40+ AWS/GCP shapes)"]
-        GeminiDiag[Gemini 1.5 Pro<br/>SVG + draw.io]
+    subgraph "Core Logic (shared via WorkflowContext)"
+        Retriever[ServiceHADRRetriever]
+        Generator[HADRDocumentationGenerator]
+        DiagGen[HADRDiagramGenerator<br/>- STATE_MATRIX<br/>- _build_programmatic_svg<br/>- _build_programmatic_drawio<br/>- DRAWIO_SERVICE_ICONS]
+        DiagStore[HADRDiagramStorage]
         PNGConv[SVG→PNG<br/>svglib + reportlab]
+    end
+
+    subgraph "External Services"
+        HADRDS[(Vertex AI Search<br/>service-hadr-datastore)]
+        GeminiText[Gemini 1.5 Pro<br/>Text Generation]
         DiagGCS[(GCS Bucket<br/>hadr-diagrams)]
     end
 
@@ -994,44 +988,36 @@ graph TD
         DonorHTML[Donor Pattern HTML]
     end
 
-    %% Text Generation Flow (A2A)
-    Orch -->|doc_text| Extract
-    Extract -->|A2A: retrieve_all_services_hadr| RetAgent
-    RetAgent --> Retriever
+    subgraph "Standalone Agents (preserved, not called by Orchestrator)"
+        RetAgent["HADRRetrieverAgent (port 9006)"]
+        GenAgent["HADRGeneratorAgent (port 9007)"]
+        DiagAgent["HADRDiagramGeneratorAgent (port 9008)"]
+    end
+
+    %% Text Generation Flow (in-process)
+    Draft -->|doc_text| HADR_Step
+    HADR_Step -->|in-process| Retriever
     Retriever -->|metadata filter + vector| HADRDS
-    HADRDS -->|service_hadr_docs| Retriever
-    Retriever -->|service→strategy→chunks| RetAgent
-    RetAgent -->|response| Orch
+    HADRDS -->|service→strategy→chunks| Retriever
 
-    DonorHTML -->|A2A: extract_donor_hadr_sections| GenAgent
-    GenAgent --> DonorParse
-    DonorParse -->|donor_hadr_sections| GenAgent
-    GenAgent -->|response| Orch
+    DonorHTML -->|in-process| Generator
+    Generator -->|donor_hadr_sections| HADR_Step
 
-    Orch -->|A2A: generate_hadr_sections| GenAgent
-    GenAgent --> Generator
+    HADR_Step -->|in-process| Generator
     Generator -->|prompt per strategy| GeminiText
     GeminiText -->|markdown section| Generator
-    Generator -->|hadr_sections: strategy→text| GenAgent
-    GenAgent -->|response| Orch
 
-    %% Diagram Generation & Storage Flow (A2A)
-    Orch -->|A2A: generate_and_store_hadr_diagrams| DiagAgent
-    DiagAgent --> DiagGen
-    DiagGen -->|icon lookup| IconReg
-    DiagGen -->|SVG prompt| GeminiDiag
-    DiagGen -->|draw.io prompt| GeminiDiag
-    GeminiDiag -->|SVG + draw.io XML| DiagGen
+    HADR_Step -->|merged doc| Review
+    Review -->|critique/approve| Draft
+
+    %% Diagram Generation Flow (in-process, programmatic by default)
+    DiagStep -->|in-process| DiagGen
+    DiagGen -->|programmatic SVG + draw.io| DiagGen
     DiagGen -->|SVG bytes| PNGConv
     PNGConv -->|PNG bytes| DiagGen
-    DiagGen -->|artefacts| DiagStore
+    DiagStep -->|in-process| DiagStore
     DiagStore -->|upload SVG+XML+PNG| DiagGCS
     DiagGCS -->|public URLs| DiagStore
-    DiagStore -->|url_map| DiagAgent
-    DiagAgent -->|response: Strategy-Phase → urls| Orch
-
-    Orch --> Deser
-    Deser --> Merge
 ```
 
 #### 4.9.3 Sequence Diagram
@@ -1039,143 +1025,136 @@ graph TD
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Orch as Orchestrator Agent
-    participant Extract as Service Name Extractor
-    participant RetAgent as HADRRetrieverAgent<br/>(port 9006)
-    participant Ret as ServiceHADRRetriever<br/>(core logic)
+    participant Orch as OrchestratorAgent
+    participant WCtx as WorkflowContext
+    participant Ret as ServiceHADRRetriever<br/>(core logic, in-process)
     participant HADRDS as Vertex AI Search<br/>(HA/DR Data Store)
-    participant GenAgent as HADRGeneratorAgent<br/>(port 9007)
-    participant DonorParse as Donor HA/DR Parser
-    participant Gen as HADRDocumentationGenerator<br/>(core logic)
+    participant Gen as HADRDocumentationGenerator<br/>(core logic, in-process)
     participant Gemini as Gemini 1.5 Pro
-    participant DiagAgent as HADRDiagramGeneratorAgent<br/>(port 9008)
-    participant DiagGen as HADRDiagramGenerator<br/>(core logic)
-    participant DiagStore as HADRDiagramStorage<br/>(core logic)
+    participant DiagGen as HADRDiagramGenerator<br/>(core logic, in-process)
+    participant DiagStore as HADRDiagramStorage<br/>(core logic, in-process)
     participant GCS as GCS (Diagram Bucket)
 
-    Note over Orch,GCS: Step 3: HA/DR Text Generation (A2A + async parallel)
+    Note over Orch,GCS: Inside LoopAgent — HADRSectionsStep (in-process)
     
-    Orch->>Extract: _extract_service_names_from_doc(doc_text)
-    Extract->>Extract: Regex match against COMPONENT_TYPE_ALIASES
-    Extract->>Extract: Match common service names (AWS+GCP)
-    Extract-->>Orch: service_names[] (e.g. ["Amazon RDS", "AWS Lambda"])
-
-    Orch->>RetAgent: A2A HTTP: retrieve_all_services_hadr(service_names)
-    RetAgent->>Ret: aretrieve_all_services_hadr(service_names)
-    
-    par Async Parallel (N×4 queries via asyncio.gather)
-        Ret->>HADRDS: SearchRequest(filter=svc1+strategy1, query=semantic)
-        Ret->>HADRDS: SearchRequest(filter=svc1+strategy2, query=semantic)
-        Ret->>HADRDS: SearchRequest(filter=svc2+strategy1, query=semantic)
-        Note right of Ret: ...all N×4 queries dispatched in parallel
-        HADRDS-->>Ret: SearchResponse (extractive answers + metadata)
+    Orch->>WCtx: Check cached service_names
+    alt First iteration (not cached)
+        Orch->>Orch: _extract_service_names_from_doc(doc_text)
+        Orch->>WCtx: Cache service_names
     end
-    Ret-->>RetAgent: service_hadr_docs {svc→strategy→[chunks]}
-    RetAgent-->>Orch: A2A response
+    WCtx-->>Orch: service_names[] (e.g. ["Amazon RDS", "AWS Lambda"])
 
-    Orch->>GenAgent: A2A HTTP: extract_donor_hadr_sections(donor_html)
-    GenAgent->>DonorParse: extract_donor_hadr_sections(donor_html)
-    DonorParse-->>GenAgent: donor_hadr_sections {strategy→text}
-    GenAgent-->>Orch: A2A response
+    par Parallel: Retrieval + Donor Extraction (asyncio.gather)
+        Orch->>Ret: aretrieve_all_services_hadr(service_names)
+        par Async Parallel (N×4 queries via asyncio.gather)
+            Ret->>HADRDS: SearchRequest(filter=svc1+strategy1, query=semantic)
+            Ret->>HADRDS: SearchRequest(filter=svc1+strategy2, query=semantic)
+            Note right of Ret: ...all N×4 queries dispatched in parallel
+            HADRDS-->>Ret: SearchResponse (extractive answers + metadata)
+        end
+        Ret-->>Orch: service_hadr_docs {svc→strategy→[chunks]}
+    and
+        Orch->>Gen: extract_donor_hadr_sections(donor_html)
+        Gen-->>Orch: donor_hadr_sections {strategy→text}
+    end
 
     Orch->>Orch: Build pattern_context (title, solution, services)
 
-    Orch->>GenAgent: A2A HTTP: generate_hadr_sections(payload)
     par Async Parallel (4 strategies via asyncio.gather, 120s timeout each)
-        GenAgent->>Gen: agenerate_hadr_sections(strategy1)
+        Orch->>Gen: agenerate_hadr_sections(strategy1)
         Gen->>Gemini: generate_content(prompt, temp=0.3)
         Gemini-->>Gen: markdown section with summary tables
     and
-        GenAgent->>Gen: agenerate_hadr_sections(strategy2)
+        Orch->>Gen: agenerate_hadr_sections(strategy2)
     and
-        GenAgent->>Gen: agenerate_hadr_sections(strategy3)
+        Orch->>Gen: agenerate_hadr_sections(strategy3)
     and
-        GenAgent->>Gen: agenerate_hadr_sections(strategy4)
+        Orch->>Gen: agenerate_hadr_sections(strategy4)
     end
-    Gen-->>GenAgent: hadr_sections{strategy→markdown}
-    GenAgent-->>Orch: A2A response
+    Gen-->>Orch: hadr_sections{strategy→markdown}
+    Orch->>Orch: _format_hadr_sections() → merge into generated_sections["HA/DR"]
 
-    Orch->>Orch: _format_hadr_sections() → combine with --- separators
+    Note over Orch,GCS: After LoopAgent — HADRDiagramStep (in-process, programmatic by default)
 
-    Note over Orch,GCS: Step 3b: HA/DR Diagram Generation & Storage (A2A + async parallel)
-
-    Orch->>DiagAgent: A2A HTTP: generate_and_store_hadr_diagrams(payload)
-    DiagAgent->>DiagGen: agenerate_all_diagrams(services, hadr_sections)
+    Orch->>DiagGen: generate_all_diagrams(services, hadr_sections)
     
-    par Async Parallel (12 diagrams, Semaphore(4), 180s timeout each)
-        DiagGen->>Gemini: generate SVG (strategy1/phase1)
-        DiagGen->>Gemini: generate draw.io XML with icons (strategy1/phase1)
-        DiagGen->>DiagGen: SVG→PNG via svglib+reportlab
-        Note right of DiagGen: ...repeats for all 12 strategy×phase combos
+    alt Programmatic Mode (default: use_ai_diagrams=False)
+        loop 12 diagrams (4 strategies × 3 phases)
+            DiagGen->>DiagGen: STATE_MATRIX[(strategy, phase)] → RegionStates
+            DiagGen->>DiagGen: _is_data_service(svc) → classify core vs non-core
+            DiagGen->>DiagGen: _build_programmatic_svg(services, states)
+            DiagGen->>DiagGen: _build_programmatic_drawio(services, states, DRAWIO_SERVICE_ICONS)
+            DiagGen->>DiagGen: SVG→PNG via svglib+reportlab
+        end
+        Note right of DiagGen: Zero Gemini calls, < 1s total
+    else AI Mode (opt-in: use_ai_diagrams=True)
+        par Async Parallel (12 diagrams, Semaphore(6))
+            DiagGen->>Gemini: generate SVG (gemini-2.0-flash, max_tokens=4096)
+            DiagGen->>DiagGen: _build_programmatic_drawio (always programmatic)
+            DiagGen->>DiagGen: SVG→PNG via svglib+reportlab
+        end
     end
-    DiagGen-->>DiagAgent: PatternDiagramBundle (12 × {SVG, draw.io XML, PNG})
+    DiagGen-->>Orch: PatternDiagramBundle (12 × {SVG, draw.io XML, PNG})
 
-    DiagAgent->>DiagStore: aupload_diagram_bundle(bundles)
+    Orch->>DiagStore: aupload_diagram_bundle(bundles)
     par Async Parallel (12 uploads via asyncio.gather, 60s timeout each)
         DiagStore->>GCS: upload SVG + draw.io + PNG
         GCS-->>DiagStore: public URLs
-        Note right of DiagStore: ...repeats for all 12 bundles
     end
-    DiagStore-->>DiagAgent: url_map with Strategy-Phase keys (svg_url, drawio_url, png_url)
-    DiagAgent-->>Orch: A2A response (string-keyed url_map)
+    DiagStore-->>Orch: url_map {(strategy, phase) → {svg_url, drawio_url, png_url}}
 
-    Orch->>Orch: Deserialise Strategy-Phase keys to (strategy, phase) tuples
     Orch->>Orch: Embed diagram URLs in HA/DR sections
-    Orch->>Orch: generated_sections HA/DR = formatted_hadr
     
     Note over Orch: Non-blocking: if any step fails,<br/>placeholder inserted and workflow continues
 ```
 
 #### 4.9.4 Step-by-Step Explanation
 
-**Step 3: HA/DR Text Generation (Async Parallel)**
+**HA/DR Text Generation (Inside LoopAgent — HADRSectionsStep)**
 
-1.  **Service Name Extraction**: The Orchestrator calls `_extract_service_names_from_doc()` which performs a two-pass extraction:
+1.  **Service Name Extraction**: The `HADRSectionsStep` calls `_extract_service_names_from_doc()` which performs a two-pass extraction:
     *   **Pass 1 — Alias Matching**: Iterates through the 40+ entries in `COMPONENT_TYPE_ALIASES` from `component_sources.py`, matching each alias as a whole word in the document text. Matches are normalized to display names (e.g., "postgres" → "Amazon RDS").
     *   **Pass 2 — Common Name Matching**: Checks for full service names (e.g., "Amazon RDS", "Cloud SQL") directly in the text.
-2.  **Bulk HA/DR Retrieval (A2A → Async)**: The Orchestrator calls the `HADRRetrieverAgent` via A2A HTTP (`HADR_RETRIEVER_URL/retrieve_all_services_hadr`). Inside the agent, `ServiceHADRRetriever.aretrieve_all_services_hadr()` dispatches all N × 4 queries (services × strategies) in parallel via `asyncio.gather(return_exceptions=True)`. Each query uses:
-    *   **Metadata filter**: `service_name = "{name}" AND dr_strategy = "{strategy}"` to prevent cross-contamination.
-    *   **Semantic query**: `"{service_name} HA/DR {strategy} behaviour during provisioning failover failback"` to rank the filtered chunks.
-    *   **Extractive content**: Returns up to 5 extractive answers and 5 extractive segments per query.
-    *   Blocking Discovery Engine SDK calls are offloaded via `asyncio.to_thread()` to avoid blocking the event loop.
-3.  **Donor HA/DR Parsing (A2A)**: The Orchestrator calls the `HADRGeneratorAgent` via A2A HTTP (`HADR_GENERATOR_URL/extract_donor_hadr_sections`). Inside the agent, the `HADRDocumentationGenerator.extract_donor_hadr_sections()` static method uses regex to find Markdown `##`/`###` headings or HTML `<h2>`/`<h3>` tags matching the four DR strategy names, and captures all content between consecutive strategy headings.
-4.  **Per-Strategy Generation (A2A → Async Parallel)**: The Orchestrator calls the `HADRGeneratorAgent` via A2A HTTP (`HADR_GENERATOR_URL/generate_hadr_sections`). Inside the agent, `HADRDocumentationGenerator.agenerate_hadr_sections()` generates all four DR strategies in parallel via `asyncio.gather`, each with a 120 s timeout via `asyncio.wait_for`. Blocking Gemini SDK calls are offloaded via `asyncio.to_thread()`. This design allows:
-    *   **True parallelism**: All four strategies generate concurrently instead of sequentially.
-    *   **Independent timeout**: A stalled strategy generation is killed after 120 s without blocking others.
-    *   **Controlled token usage**: Each prompt stays within the Gemini context window.
-5.  **Prompt Structure**: Each prompt includes:
+    *   **Caching**: Results are stored in `WorkflowContext` so subsequent loop iterations reuse them without re-extraction.
+2.  **Parallel Retrieval + Donor Extraction (in-process)**: The step dispatches two operations in parallel via `asyncio.gather`:
+    *   `ServiceHADRRetriever.aretrieve_all_services_hadr()` — dispatches all N × 4 queries (services × strategies) in parallel. Each query uses metadata filter (`service_name = "{name}" AND dr_strategy = "{strategy}"`), semantic query, and extractive content (up to 5 extractive answers and 5 segments per query). Blocking Discovery Engine SDK calls are offloaded via `asyncio.to_thread()`.
+    *   `HADRDocumentationGenerator.extract_donor_hadr_sections()` — uses regex to find Markdown `##`/`###` headings or HTML `<h2>`/`<h3>` tags matching the four DR strategy names, capturing content between consecutive strategy headings.
+3.  **Per-Strategy Generation (in-process, Async Parallel)**: `HADRDocumentationGenerator.agenerate_hadr_sections()` generates all four DR strategies in parallel via `asyncio.gather`, each with a 120 s timeout via `asyncio.wait_for`. Blocking Gemini SDK calls are offloaded via `asyncio.to_thread()`.
+4.  **Prompt Structure**: Each prompt includes:
     *   **Role instruction**: "You are a Principal Cloud Architect specialising in HA/DR."
     *   **Donor example** (one-shot): The corresponding section from the donor pattern, providing structural and stylistic guidance.
     *   **Service-level references**: Per-service HA/DR chunks for this specific strategy.
     *   **Pattern context**: Title, solution overview, and service list of the new pattern.
     *   **Output format**: Requires three sub-sections (Initial Provisioning, Failover, Failback) each with a summary table showing per-service state.
-6.  **Output Merge**: The four generated sections are combined using `_format_hadr_sections()` which joins them with `---` separators under a top-level `## High Availability / Disaster Recovery` heading. Diagram URLs are embedded inline. The result is stored in `generated_sections["HA/DR"]`.
-7.  **Non-Blocking Guarantee**: The entire Step 3 is wrapped in a try/except at the Orchestrator level. If any sub-step raises an exception, the error is logged and a placeholder string is inserted: "*HA/DR section generation failed. Please complete manually.*"
+5.  **Output Merge**: The four generated sections are combined using `_format_hadr_sections()` which joins them with `---` separators under a top-level `## High Availability / Disaster Recovery` heading. The result is stored in `generated_sections["HA/DR"]`.
+6.  **Full-Document Review**: The `FullDocReviewStep` sends core + HA/DR to the reviewer. On re-iterations, HA/DR is only regenerated if the reviewer specifically flagged it.
+7.  **Non-Blocking Guarantee**: The entire HA/DR text generation is wrapped in try/except. If any sub-step raises an exception, the error is logged and a placeholder string is inserted: "*HA/DR section generation failed. Please complete manually.*"
 
-**Step 3b: HA/DR Diagram Generation & Storage (Async Parallel)**
+**HA/DR Diagram Generation & Storage (After LoopAgent — HADRDiagramStep)**
 
-8.  **Diagram Generation & Storage (A2A → Async)**: The Orchestrator makes a single A2A HTTP call to the `HADRDiagramGeneratorAgent` (`HADR_DIAGRAM_GENERATOR_URL/generate_and_store_hadr_diagrams`). This agent encapsulates both generation and storage. Inside the agent, `HADRDiagramGenerator.agenerate_all_diagrams()` produces diagrams for every DR strategy × lifecycle phase combination (4 × 3 = 12 diagrams). All 12 diagram generations run in parallel via `asyncio.gather` with:
-    *   **Concurrency control**: `asyncio.Semaphore(4)` limits concurrent Gemini calls to avoid quota exhaustion.
-    *   **Per-diagram timeout**: `asyncio.wait_for()` with 180 s limit ensures no single diagram blocks the pipeline.
-    *   **Thread offloading**: Blocking Gemini SDK calls are wrapped in `asyncio.to_thread()`.
-    *   **Fallback**: On timeout or error, a deterministic fallback diagram is generated without LLM calls.
-9.  **Per-Diagram Artefacts**: Each diagram involves:
-    *   **SVG Generation**: A Gemini 1.5 Pro call with a detailed prompt, colour palette constants (`STATE_COLORS`), and a one-shot SVG example.
-    *   **draw.io XML Generation**: A second Gemini 1.5 Pro call with the `DRAWIO_SERVICE_ICONS` registry injected into the prompt, a one-shot draw.io XML example using icon shapes, and layout rules instructing the model to use `mxgraph.aws4.*` / `mxgraph.gcp2.*` shapes for known services.
-    *   **SVG→PNG Conversion**: Local conversion using `svglib` + `reportlab` (with `pycairo` shim on Windows). Falls back to `cairosvg` on Linux. Produces a PNG fallback image.
+8.  **Programmatic Diagram Generation (Default)**: The `HADRDiagramStep` calls `HADRDiagramGenerator.generate_all_diagrams()` (synchronous in programmatic mode). For each of the 12 (strategy, phase) combinations:
+    *   **State Lookup**: `STATE_MATRIX[(strategy, phase)]` returns a `RegionStates` dataclass specifying `primary_core`, `primary_non_core`, `dr_core`, `dr_non_core` states and `arrow_label`.
+    *   **Service Classification**: `_is_data_service(service_name)` checks against a keyword set (`db`, `database`, `rds`, `dynamo`, `s3`, `storage`, `sql`, etc.) to distinguish data services from compute services.
+    *   **SVG Generation**: `_build_programmatic_svg()` produces a valid SVG with two-region layout, colour-coded service boxes (`STATE_COLORS`), and a central directional arrow.
+    *   **draw.io XML Generation**: `_build_programmatic_drawio()` uses the `DRAWIO_SERVICE_ICONS` registry (40+ AWS/GCP icon shapes) to produce mxfile XML with icon-enriched cells, opacity modifiers for inactive states, and proper layout.
+    *   **SVG→PNG Conversion**: Local conversion using `svglib` + `reportlab` (with `pycairo` shim on Windows). Falls back to `cairosvg` on Linux.
+    *   **Zero Gemini calls, < 1 second for all 12 diagrams, zero tokens consumed.**
+9.  **Opt-In AI Mode**: When `use_ai_diagrams=True`:
+    *   **SVG**: Generated via Gemini (`gemini-2.0-flash` default, configurable via `ai_model_name`). `max_output_tokens=4096` (reduced from 8192). Uses `asyncio.gather` with `Semaphore(6)` concurrency control.
+    *   **draw.io XML**: Always programmatic via `_build_programmatic_drawio()` — this is the biggest token savings since draw.io prompts included the full `DRAWIO_SERVICE_ICONS` dictionary (~2500 tokens) plus one-shot examples.
+    *   **Fallback**: On Gemini timeout or error, falls back to `_build_programmatic_svg()` automatically.
 10. **draw.io Icon Shape Registry**: The `DRAWIO_SERVICE_ICONS` dictionary maps 40+ cloud services to their official draw.io shape library identifiers:
     *   **AWS** (22 services): Uses `shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.{service};` pattern.
     *   **GCP** (20+ services): Uses `shape=mxgraph.gcp2.{service};` pattern.
     *   Icons render as 60×60 cells with `labelPosition=center`, `verticalLabelPosition=bottom`, and opacity modifiers for inactive states (Standby, Scaled-Down, Not-Deployed).
     *   The `get_drawio_icon_style()` helper performs case-insensitive lookup.
-11. **Diagram Storage (Async, inside agent)**: After diagram generation completes, the `HADRDiagramGeneratorAgent` calls `HADRDiagramStorage.aupload_diagram_bundle()` to upload all three artefacts (SVG, draw.io XML, PNG) per diagram in parallel via `asyncio.gather`, each with a 60 s timeout. GCS path structure:
+11. **Diagram Storage (in-process)**: `HADRDiagramStorage.aupload_diagram_bundle()` uploads all three artefacts (SVG, draw.io XML, PNG) per diagram in parallel via `asyncio.gather`, each with a 60 s timeout. GCS path structure:
     ```
     patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.svg
     patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.drawio
     patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.png
     ```
-12. **Tuple Key Serialisation**: Since JSON cannot serialise Python tuple keys, the `HADRDiagramGeneratorAgent` converts the `(strategy, phase)` tuple keys to `"Strategy|Phase"` string keys before returning the A2A response. The Orchestrator deserialises them back via `key.split("|", 1)` for use in `_format_hadr_sections()`.
-13. **URL Embedding**: The returned URL map (`{(strategy, phase) → {svg_url, drawio_url, png_url}}`) is passed to `_format_hadr_sections()` which embeds the diagram URLs as inline image references and draw.io download links in the HA/DR markdown.
+12. **URL Embedding**: The returned URL map (`{(strategy, phase) → {svg_url, drawio_url, png_url}}`) is passed to `_format_hadr_sections()` which embeds the diagram URLs as inline image references and draw.io download links in the HA/DR markdown.
 
 #### 4.9.5 DR Strategies Covered
 
@@ -1195,8 +1174,10 @@ sequenceDiagram
 | HA/DR Diagram GCS Bucket | `HADR_DIAGRAM_BUCKET` env var | `engen-hadr-diagrams` |
 | GCP Project ID | `PROJECT_ID` env var | Required |
 | Vertex AI Location | `LOCATION` env var | `us-central1` |
-| Diagram Concurrency | Hardcoded in `agenerate_all_diagrams` | `Semaphore(4)` |
-| Diagram Timeout (per diagram) | Hardcoded in `agenerate_all_diagrams` | `180` seconds |
+| Diagram Generation Mode | `use_ai_diagrams` constructor arg | `False` (programmatic) |
+| AI Diagram Model | `ai_model_name` constructor arg | `gemini-2.0-flash` |
+| AI SVG Max Tokens | Hardcoded in `_generate_single_diagram` | `4096` |
+| Diagram Concurrency (AI mode) | Hardcoded in `agenerate_all_diagrams` | `Semaphore(6)` |
 | Text Generation Timeout (per strategy) | Hardcoded in `agenerate_hadr_sections` | `120` seconds |
 | Upload Timeout (per artefact) | Hardcoded in `aupload_diagram_bundle` | `60` seconds |
 
@@ -1244,7 +1225,7 @@ The application interacts with specific Orchestrator tasks that correspond to th
 **1. Phase 1: Input & Document Generation**
    - **User Action**: Uploads an architecture diagram image and enters a title/prompt.
    - **API Call**: `POST /invoke` with task `phase1_generate_docs`, payload includes `user_id` and optional `workflow_id`.
-   - **System**: Orchestrator creates a `workflow_state` row, invokes Generator (Vision analysis), Retriever (donor lookup), Generator+Reviewer loop (content refinement, max 3 iterations), HA/DR agents via A2A HTTP (async parallel), and HA/DR Diagram Generator Agent via A2A HTTP. Saves state to `DOC_REVIEW` phase.
+   - **System**: Orchestrator creates a `workflow_state` row, runs the Phase 1 `SequentialAgent` in-process: VisionAnalysisStep → DonorRetrievalStep → LoopAgent (ContentDraftStep → HADRSectionsStep → FullDocReviewStep, max 3 iterations) → HADRDiagramStep (programmatic diagrams). Saves state to `DOC_REVIEW` phase.
    - **Result**: Returns sections (including HA/DR with embedded diagram URLs), full markdown content, and `workflow_id`. App stores `workflow_id` in localStorage and transitions to `DOC_REVIEW`.
 
 **2. Phase 2: Document Human Review**
@@ -1405,8 +1386,8 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 3. **Intelligent Retrieval**: Semantic search and vector similarity find the most relevant patterns
 4. **Multi-Agent Serving**: Specialized agents collaborate to produce high-quality documentation
 5. **HA/DR Documentation Generation**: Automated synthesis of pattern-level HA/DR sections grounded in service-level references and donor pattern examples
-6. **HA/DR Diagram Generation**: Automated production of SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG component diagrams for every DR strategy × lifecycle phase combination (12 diagrams per pattern)
-7. **Async Parallelism**: Production-grade performance via `asyncio.gather` with concurrency controls (`Semaphore`), per-operation timeouts, and thread offloading for all HA/DR operations
+6. **HA/DR Diagram Generation**: Automated production of SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG component diagrams for every DR strategy × lifecycle phase combination (12 diagrams per pattern). **Generated programmatically by default** from a structured `STATE_MATRIX` (zero Gemini calls, < 1 second); opt-in AI mode available for creative SVG layouts
+7. **ADK Workflow Orchestration (v3.0)**: Phase 1 doc generation uses in-process `SequentialAgent` + `LoopAgent` primitives with shared `WorkflowContext`, eliminating A2A HTTP overhead and enabling HA/DR quality improvement across refinement iterations
 8. **Real-Time Schema Grounding**: Live infrastructure lookups via GitHub MCP and AWS Service Catalog ensure generated artifacts always reflect actual module interfaces
 9. **Quality Assurance**: Reflection loop with multi-rubric automated validation ensures output meets production standards
 10. **React SPA**: Modern React 18 + Vite single-page application with chevron-style wizard, replacing the Streamlit prototype
@@ -1443,8 +1424,8 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 | **GitHub Integration** | ✅ Complete | 90% | Real-time module lookup (MCP + PyGithub) and automated code publishing (REST API). |
 | **AWS Integration** | ✅ Complete | 85% | Service Catalog product discovery via boto3 with in-memory caching. |
 | **HA/DR Ingestion** | ✅ Complete | 85% | Service-level HA/DR pipeline with hierarchical chunking and structured metadata. Dedicated Vertex AI Search data store. |
-| **HA/DR Generation** | ✅ Complete | 85% | Generates four DR strategy sections per pattern with donor one-shot + service-level grounding. Async parallel generation via `asyncio.gather` with 120 s timeout per strategy. Wrapped in `HADRRetrieverAgent` (port 9006) and `HADRGeneratorAgent` (port 9007), accessed via A2A HTTP. |
-| **HA/DR Diagrams** | ✅ Complete | 85% | 12 diagrams per pattern (SVG + draw.io XML with AWS/GCP icon shapes + PNG). Async parallel generation (`Semaphore(4)`, 180 s timeout) and parallel GCS upload (60 s timeout). Wrapped in `HADRDiagramGeneratorAgent` (port 9008) with `HADRDiagramStorage` encapsulated inside, accessed via A2A HTTP. |
+| **HA/DR Generation** | ✅ Complete | 90% | Generates four DR strategy sections per pattern with donor one-shot + service-level grounding. In v3.0, runs in-process as `HADRSectionsStep` inside the `LoopAgent` (no A2A HTTP). Async parallel generation via `asyncio.gather` with 120 s timeout per strategy. Full-document reviewer critiques core + HA/DR together. |
+| **HA/DR Diagrams** | ✅ Complete | 95% | 12 diagrams per pattern (SVG + draw.io XML with AWS/GCP icon shapes + PNG). **Programmatic by default** from `STATE_MATRIX` (zero Gemini calls, < 1s). Opt-in AI mode uses `gemini-2.0-flash`. In v3.0, runs in-process as `HADRDiagramStep` after the `LoopAgent`. Parallel GCS upload (60 s timeout). |
 | **Error Handling** | ✅ Complete | 90% | Retry logic, exponential backoff, and component-level error boundaries. HA/DR generation wrapped in non-blocking try/except. |
 | **Monitoring** | ⚠️ Partial | 60% | Basic logging and agent metrics; needs OpenTelemetry/Dashboards. |
 | **Testing** | ⚠️ Partial | 70% | Unit tests exist; end-to-end integration tests needed. |
