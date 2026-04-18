@@ -33,27 +33,41 @@ from core.pattern_synthesis.hadr_generator import HADRDocumentationGenerator
 from core.pattern_synthesis.hadr_diagram_generator import HADRDiagramGenerator
 from core.pattern_synthesis.hadr_diagram_storage import HADRDiagramStorage
 
+# Phase 2 core modules — artifact generation pipeline
+from core.pattern_synthesis.component_specification import ComponentSpecification
+from core.pattern_synthesis.artifact_generator import ArtifactGenerator as PatternArtifactGenerator
+from core.pattern_synthesis.artifact_validator import ArtifactValidator
+
 # Workflow step agents (ADK SequentialAgent / LoopAgent pattern)
 from agents.orchestrator.workflow_agents import (
+    # Phase 1 — Doc Generation
     VisionAnalysisStep,
     DonorRetrievalStep,
     PatternGenerateStep,
     HADRSectionsStep,
     FullDocReviewStep,
     HADRDiagramStep,
+    # Phase 2 — Artifact Generation
+    ComponentSpecStep,
+    ArtifactGenerateStep,
+    ArtifactValidateStep,
 )
 
 from config import Config
 
 class OrchestratorAgent(ADKAgent):
     """
-    Orchestrates the workflow using ADK SequentialAgent + LoopAgent
+    Orchestrates the full workflow using ADK SequentialAgent + LoopAgent
     instead of A2A HTTP calls.
 
     Phase 1 (Doc Generation):
       SequentialAgent → VisionAnalysis → DonorRetrieval
         → LoopAgent(Generate → HA/DR → Review, max_iterations=3)
         → HADRDiagramGeneration
+
+    Phase 2 (Artifact Generation):
+      SequentialAgent → ComponentSpec
+        → LoopAgent(ArtifactGenerate → ArtifactValidate, max_iterations=3)
 
     All sub-agents operate in-process via WorkflowContext — no HTTP
     overhead, no serialisation, no A2A timeout issues.
@@ -116,9 +130,40 @@ class OrchestratorAgent(ADKAgent):
             ],
         )
 
-        # ── A2A Client (retained for Phase 2 artifact agents only) ──────
-        from lib.a2a_client import A2AClient
-        self.client = A2AClient(agent_name=self.name)
+        # ── Phase 2 Core Modules (Artifact Generation) ──────────────────
+        self.component_spec_engine = ComponentSpecification(
+            project_id=Config.PROJECT_ID,
+            location=Config.LOCATION,
+        )
+        self.artifact_generator_engine = PatternArtifactGenerator(
+            project_id=Config.PROJECT_ID,
+            location=Config.LOCATION,
+        )
+        self.artifact_validator_engine = ArtifactValidator(
+            project_id=Config.PROJECT_ID,
+            location=Config.LOCATION,
+        )
+
+        # ── ADK Workflow: Phase 2 Artifact Generation ───────────────────
+        # LoopAgent: Generate artifacts → Validate (max 3 iterations)
+        self.artifact_refinement_loop = LoopAgent(
+            name="ArtifactRefinementLoop",
+            sub_agents=[
+                ArtifactGenerateStep(),
+                ArtifactValidateStep(),
+            ],
+            max_iterations=3,
+            exit_key="validation_passed",
+        )
+
+        # SequentialAgent: ComponentSpec → Loop(Generate → Validate)
+        self.phase2_workflow = SequentialAgent(
+            name="Phase2ArtifactWorkflow",
+            sub_agents=[
+                ComponentSpecStep(),
+                self.artifact_refinement_loop,
+            ],
+        )
 
         # ── Publishers ──────────────────────────────────────────────────
         sp_config = SharePointPageConfig.from_env()
@@ -320,49 +365,61 @@ class OrchestratorAgent(ADKAgent):
         return {"status": "publishing_started", "review_id": review_id, "workflow_id": workflow_id}
 
     async def run_phase2_code(self, payload):
-        """Phase 2: Component Spec -> Artifact Gen -> Validation. Returns artifacts for review."""
+        """
+        Phase 2: ComponentSpec → ArtifactGenerate → ArtifactValidate (loop).
+
+        Delegates the entire pipeline to the ADK Phase2ArtifactWorkflow
+        (SequentialAgent + LoopAgent).  All sub-agents operate in-process
+        via a shared WorkflowContext — no A2A HTTP calls.
+        """
         full_doc = payload.get("full_doc")
         workflow_id = payload.get("workflow_id")
-        
-        # 4. GENERATE ARTIFACTS
-        self.logger.info("--- Step 4: GENERATING ARTIFACTS ---")
-        spec_resp = await self.client.call_agent(Config.ARTIFACT_URL, "generate_component_spec", {"documentation": full_doc})
-        full_spec = spec_resp.get("result", {}).get("specifications", {})
-        
-        artifacts = {}
-        
-        max_retries = 3
-        retry_count = 0
-        validation_passed = False
-        validation_feedback = None
-        
-        while retry_count < max_retries and not validation_passed:
-            retry_count += 1
-            self.logger.info(f"--- Artifact Generation {retry_count} ---")
-            gen_payload = {"specification": full_spec, "documentation": full_doc}
-            if validation_feedback: gen_payload["critique"] = validation_feedback
-                
-            art_resp = await self.client.call_agent(Config.ARTIFACT_URL, "generate_artifact", gen_payload)
-            artifacts_result = art_resp.get("result", {}).get("artifacts", {})
-            
-            val_resp = await self.client.call_agent(Config.ARTIFACT_URL, "validate_artifact", {"artifacts": artifacts_result, "component_spec": full_spec})
-            val_result = val_resp.get("result", {}).get("validation_result", {})
-            
-            if val_result.get("status") == "PASS":
-                validation_passed = True
-                artifacts = artifacts_result
-            else:
-                validation_feedback = val_result.get("feedback")
-        
+
+        if not full_doc:
+            raise ValueError("Missing full_doc in payload")
+
+        # ── Build WorkflowContext ────────────────────────────────────────
+        ctx = WorkflowContext(
+            {
+                # Input data
+                "full_doc": full_doc,
+                # Core logic module references (prefixed with _ by convention)
+                "_component_spec_engine": self.component_spec_engine,
+                "_artifact_generator_engine": self.artifact_generator_engine,
+                "_artifact_validator_engine": self.artifact_validator_engine,
+            }
+        )
+
+        # ── Execute the Phase 2 workflow ─────────────────────────────────
+        self.logger.info(
+            "=== Starting Phase2ArtifactWorkflow ==="
+        )
+        ctx = await self.phase2_workflow.run(ctx)
+        self.logger.info(
+            "=== Phase2ArtifactWorkflow completed ==="
+        )
+
+        # ── Extract results from context ─────────────────────────────────
+        artifacts = ctx.get("artifacts") or {}
+        full_spec = ctx.get("component_spec") or {}
+        validation_result = ctx.get("validation_result") or {}
+
         review_id = str(uuid.uuid4())
         if self.db:
-             self.db.create_review_record(review_id, "Artifacts for " + str(len(artifacts)), "ARTIFACT", artifacts, "N/A")
+            self.db.create_review_record(
+                review_id,
+                "Artifacts for " + str(len(artifacts)),
+                "ARTIFACT",
+                artifacts,
+                "N/A",
+            )
 
         result = {
             "workflow_id": workflow_id,
             "review_id": review_id,
             "artifacts": artifacts,
-            "spec": full_spec
+            "spec": full_spec,
+            "validation": validation_result,
         }
 
         # ── Persist state → CODE_REVIEW ──

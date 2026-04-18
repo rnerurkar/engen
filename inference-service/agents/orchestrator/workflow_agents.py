@@ -1,12 +1,12 @@
 """
-ADK Workflow Step Agents — Phase 1 Doc Generation
-==================================================
+ADK Workflow Step Agents — Phase 1 & Phase 2
+=============================================
 Each class is a ``WorkflowAgent`` step that operates on a shared
-``WorkflowContext``.  They are composed into a ``SequentialAgent``
-(top-level) containing a ``LoopAgent`` (generate → HA/DR → review).
+``WorkflowContext``.  They are composed into ``SequentialAgent``
+(top-level) containing ``LoopAgent`` sub-workflows.
 
-Architecture
-~~~~~~~~~~~~
+Phase 1 — Doc Generation
+~~~~~~~~~~~~~~~~~~~~~~~~~
 DocGenerationWorkflow (SequentialAgent)
   ├─ VisionAnalysisStep           — Gemini Vision image description
   ├─ DonorRetrievalStep           — Vertex AI Search donor lookup
@@ -16,6 +16,14 @@ DocGenerationWorkflow (SequentialAgent)
   │    │     (parallel retrieval + donor extraction, then 4-strategy gen)
   │    └─ FullDocReviewStep       — reviews ENTIRE doc incl. HA/DR
   └─ HADRDiagramStep              — async diagram gen + GCS upload
+
+Phase 2 — Artifact Generation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ArtifactWorkflow (SequentialAgent)
+  ├─ ComponentSpecStep            — extract component spec from docs
+  └─ ArtifactRefinementLoop (LoopAgent, max 3, exit_key="validation_passed")
+       ├─ ArtifactGenerateStep    — generate IaC + boilerplate
+       └─ ArtifactValidateStep    — validate against quality rubric
 
 Performance Optimisations Applied
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -29,6 +37,8 @@ Performance Optimisations Applied
 5. HA/DR now inside the refinement loop so the reviewer critiques
    the full document (core + HA/DR) and the generator can fix any
    HA/DR issues on subsequent iterations.
+6. Phase 2 artifact gen/validate loop runs in-process just like
+   Phase 1 — no A2A HTTP calls, no serialisation overhead.
 """
 
 import asyncio
@@ -592,3 +602,180 @@ def _format_hadr_sections(
         parts.append(enriched_text)
 
     return "\n\n---\n\n".join(parts)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 2: Artifact Generation Workflow Steps
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Step 1: Component Specification Extraction
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class ComponentSpecStep(WorkflowAgent):
+    """
+    Extract a holistic component specification from the approved
+    pattern documentation.  Uses real-time lookups against GitHub
+    (Terraform modules) and AWS Service Catalog to enrich the spec
+    with authoritative interface definitions.
+
+    Reads:  full_doc, _component_spec_engine
+    Writes: component_spec
+    """
+
+    def __init__(self):
+        super().__init__(name="ComponentSpecStep")
+
+    async def run(self, ctx: WorkflowContext) -> WorkflowContext:
+        engine = ctx.get("_component_spec_engine")
+        full_doc = ctx.get("full_doc")
+
+        if not engine:
+            raise RuntimeError(
+                "ComponentSpecStep: _component_spec_engine not in context"
+            )
+        if not full_doc:
+            raise ValueError("ComponentSpecStep: full_doc is empty")
+
+        self.logger.info(
+            "Extracting component specification from documentation"
+        )
+        spec = await asyncio.to_thread(
+            engine.process_documentation, full_doc
+        )
+        ctx.set("component_spec", spec)
+
+        num_components = len(spec.get("components", []))
+        self.logger.info(
+            f"Component spec extracted: {num_components} components, "
+            f"execution_order={spec.get('execution_order', [])}"
+        )
+        return ctx
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Loop Step A: Artifact Generation
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class ArtifactGenerateStep(WorkflowAgent):
+    """
+    Generate IaC templates (Terraform / CloudFormation) and application
+    boilerplate code from the component specification and approved
+    documentation.
+
+    On iterations > 1, incorporates ``artifact_critique`` from the
+    previous validation round so the LLM can specifically address the
+    flagged issues.
+
+    Reads:  component_spec, full_doc, artifact_critique (optional),
+            _artifact_generator_engine
+    Writes: artifacts
+    """
+
+    def __init__(self):
+        super().__init__(name="ArtifactGenerateStep")
+
+    async def run(self, ctx: WorkflowContext) -> WorkflowContext:
+        engine = ctx.get("_artifact_generator_engine")
+        spec = ctx.get("component_spec")
+        full_doc = ctx.get("full_doc")
+        critique = ctx.get("artifact_critique")
+        iteration = ctx.get("loop_iteration", 1)
+
+        if not engine:
+            raise RuntimeError(
+                "ArtifactGenerateStep: _artifact_generator_engine "
+                "not in context"
+            )
+
+        self.logger.info(
+            f"Generating artifacts (iteration {iteration})"
+            + (f" — addressing critique" if critique else "")
+        )
+        artifacts = await asyncio.to_thread(
+            engine.generate_full_pattern_artifacts,
+            spec,
+            full_doc,
+            critique,
+        )
+        ctx.set("artifacts", artifacts)
+
+        # Log a summary of what was generated
+        iac_keys = list(artifacts.get("iac_templates", {}).keys())
+        boilerplate_keys = list(
+            artifacts.get("boilerplate_code", {}).keys()
+        )
+        self.logger.info(
+            f"Artifacts generated (iteration {iteration}): "
+            f"IaC={iac_keys}, boilerplate={boilerplate_keys}"
+        )
+        return ctx
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Loop Step B: Artifact Validation
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class ArtifactValidateStep(WorkflowAgent):
+    """
+    Validate generated artifacts against the component specification
+    and a strict quality rubric covering syntactic correctness,
+    completeness, integration wiring, security, and best practices.
+
+    Sets ``validation_passed`` = True in context when artifacts score
+    ≥ 85 with no Critical/High issues.  Otherwise stores the textual
+    feedback in ``artifact_critique`` so the next generation iteration
+    can address the specific issues.
+
+    Reads:  artifacts, component_spec, _artifact_validator_engine
+    Writes: validation_passed, artifact_critique, validation_result
+    """
+
+    def __init__(self):
+        super().__init__(name="ArtifactValidateStep")
+
+    async def run(self, ctx: WorkflowContext) -> WorkflowContext:
+        engine = ctx.get("_artifact_validator_engine")
+        artifacts = ctx.get("artifacts")
+        spec = ctx.get("component_spec")
+        iteration = ctx.get("loop_iteration", 1)
+
+        if not engine:
+            raise RuntimeError(
+                "ArtifactValidateStep: _artifact_validator_engine "
+                "not in context"
+            )
+
+        self.logger.info(f"Validating artifacts (iteration {iteration})")
+        result = await asyncio.to_thread(
+            engine.validate_artifacts, artifacts, spec
+        )
+
+        # Store full validation result for downstream consumers
+        ctx.set("validation_result", result)
+
+        passed = result.get("status") == "PASS"
+        ctx.set("validation_passed", passed)
+
+        if passed:
+            score = result.get("score", "N/A")
+            self.logger.info(
+                f"Artifacts PASSED validation "
+                f"(iteration {iteration}, score={score})"
+            )
+        else:
+            feedback = result.get("feedback", "")
+            score = result.get("score", "N/A")
+            num_issues = len(result.get("issues", []))
+            ctx.set("artifact_critique", feedback)
+            self.logger.info(
+                f"Artifacts need revision "
+                f"(iteration {iteration}, score={score}, "
+                f"{num_issues} issues): {feedback[:200]}"
+            )
+
+        return ctx
