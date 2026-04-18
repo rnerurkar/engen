@@ -190,3 +190,48 @@ After the loop finishes, the workflow continues with the final step in the Seque
 | Async publishing | SharePoint and GitHub publishes run as background tasks; the user proceeds immediately | Eliminates blocking waits |
 | GCS → SharePoint re-hosting | During publishing, GCS-hosted PNGs are downloaded and re-uploaded to SharePoint Site Assets | Diagrams render inline without external dependencies |
 | AlloyDB workflow persistence | Full state saved at every phase transition | Browser-close-safe; resume from any point |
+
+---
+
+## Running costs
+
+Every stage except HA/DR diagrams (programmatic, zero tokens) makes LLM calls to **Gemini 1.5 Pro** on Vertex AI. Below is what a **typical run** costs — 2 iterations of each refinement loop, HA/DR smart-skip active, for a 5-service architecture pattern.
+
+### LLM calls per run
+
+| Stage | Calls | Input tok | Output tok |
+|-------|------:|----------:|-----------:|
+| **Phase 1 — Doc Generation** | | | |
+| Vision Analysis | 1 | 1,500 | 150 |
+| Pattern Generation (×2) | 2 | 24,000 | 10,000 |
+| HA/DR Sections (4 strategies, ×1) | 4 | 20,000 | 8,000 |
+| Doc Review (×2) | 2 | 24,000 | 1,000 |
+| HA/DR Diagrams | 0 | 0 | 0 |
+| **Phase 2 — Code Generation** | | | |
+| Component Spec (keyword + extraction) | 2 | 8,700 | 2,020 |
+| Artifact Generation (×2) | 2 | 22,000 | 10,000 |
+| Artifact Validation (×2) | 2 | 20,000 | 2,000 |
+| **Total** | **15** | **120,200** | **33,170** |
+
+### Per-run cost by model
+
+Vertex AI on-demand pricing (April 2026). "Hybrid" = Gemini for Phase 1 + Claude for Phase 2 only.
+
+| Configuration | Phase 1 | Phase 2 | **Total** | vs. Baseline |
+|---------------|--------:|--------:|----------:|:------------:|
+| Gemini 1.5 Pro (default) | $0.18 | $0.13 | **$0.32** | — |
+| Claude Sonnet 4.6 (all) | $0.50 | $0.36 | **$0.86** | 2.7× |
+| Claude Opus 4.6 (all) | $0.83 | $0.60 | **$1.43** | 4.5× |
+| Hybrid — Gemini + Sonnet 4.6 | $0.18 | $0.36 | **$0.55** | 1.7× |
+| Hybrid — Gemini + Opus 4.6 | $0.18 | $0.60 | **$0.79** | 2.5× |
+
+### Monthly projection (LLM only)
+
+| Patterns / mo | Gemini 1.5 Pro | Hybrid (Sonnet) | Hybrid (Opus) |
+|--------------:|---------------:|----------------:|--------------:|
+| 20 | $6 | $11 | $16 |
+| 100 | $32 | $55 | $79 |
+| 500 | $158 | $273 | $394 |
+
+Infrastructure costs (AlloyDB, Cloud Run, Vertex AI Search, GCS) add a **fixed baseline of ~$190–$410 / month** regardless of model choice — at typical volumes the platform cost dominates, not the LLM spend. See the Design Document § 10 for the full breakdown.
+

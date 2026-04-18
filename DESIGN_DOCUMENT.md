@@ -1408,8 +1408,111 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 
 ---
 
+## 10. Cost Analysis
+
+This section provides a per-run and monthly cost breakdown for operating the Pattern Factory on Google Cloud. All prices are **Vertex AI standard on-demand rates** as of April 2026 and are quoted in USD per 1 million tokens.
+
+### 10.1 Model Pricing Reference
+
+| Model | Provider | Input ($/1 M tokens) | Output ($/1 M tokens) | Notes |
+|-------|----------|---------------------:|----------------------:|-------|
+| **Gemini 1.5 Pro** | Google | $1.25 | $5.00 | Current default for all stages. Character-based billing, converted at ~4 chars / token. |
+| **Gemini 2.0 Flash** | Google | $0.15 | $0.60 | Used only in opt-in AI diagram mode (default is programmatic / zero-LLM). |
+| **Claude Sonnet 4.6** | Anthropic (via Vertex AI) | $3.00 | $15.00 | Comparison model — strong code generation at mid-tier cost. |
+| **Claude Opus 4.6** | Anthropic (via Vertex AI) | $5.00 | $25.00 | Comparison model — highest quality, highest cost. |
+
+### 10.2 Token Volumes Per Stage (Typical Run — 5-Service Pattern)
+
+Estimates assume a **typical** run: 2 iterations of the Phase 1 content-refinement loop, 2 iterations of the Phase 2 artifact-refinement loop, and HA/DR sections regenerated on the first iteration only (the smart-skip optimisation saves 4 Gemini calls when the reviewer does not flag HA/DR).
+
+#### Phase 1 — Document Generation
+
+| Step | LLM Calls | Est. Input Tokens | Est. Output Tokens | Notes |
+|------|----------:|---------:|---------:|-------|
+| Vision Analysis | 1 | 1,500 | 150 | Architecture diagram image (~1,000–2,000 tok) + short prompt. `max_output_tokens=256`. |
+| Pattern Generation (×2 iter) | 2 | 24,000 | 10,000 | Donor HTML (5–15 K tok) + image + critique on iter 2. Heaviest single call. |
+| HA/DR Sections (×1 iter, 4 strategies) | 4 | 20,000 | 8,000 | One call per DR strategy. Skipped on iter 2 if reviewer does not flag HA/DR. |
+| Doc Review (×2 iter) | 2 | 24,000 | 1,000 | Full document + truncated donor (≤ 10 K chars). JSON critique output. |
+| HA/DR Diagrams | 0 | 0 | 0 | Default mode is **programmatic** — 12 SVG + draw.io + PNG in < 1 s, zero tokens. |
+| **Phase 1 Sub-total** | **9** | **69,500** | **19,150** | |
+
+#### Phase 2 — Artifact (IaC / Boilerplate) Generation
+
+| Step | LLM Calls | Est. Input Tokens | Est. Output Tokens | Notes |
+|------|----------:|---------:|---------:|-------|
+| Component Spec — keyword extraction | 1 | 700 | 20 | Lightweight; triggers real-time GitHub MCP + AWS SC lookups (no LLM). |
+| Component Spec — structured extraction | 1 | 8,000 | 2,000 | Full doc + real-time schema data → JSON component graph. |
+| Artifact Generation (×2 iter) | 2 | 22,000 | 10,000 | Golden samples + component spec + doc + critique on iter 2. |
+| Artifact Validation (×2 iter) | 2 | 20,000 | 2,000 | 6-point rubric scoring. Sets `validation_passed` on success. |
+| **Phase 2 Sub-total** | **6** | **50,700** | **14,020** | |
+
+| | **Total Calls** | **Total Input** | **Total Output** | **Grand Total Tokens** |
+|---|---:|---:|---:|---:|
+| **Combined** | **15** | **120,200** | **33,170** | **153,370** |
+
+### 10.3 Per-Run LLM Cost
+
+| Configuration | Phase 1 Cost | Phase 2 Cost | **Total LLM Cost** | vs. Baseline |
+|---------------|------------:|------------:|-------------------:|:------------:|
+| **Gemini 1.5 Pro** (current default) | $0.18 | $0.13 | **$0.32** | — |
+| **Claude Sonnet 4.6** (all stages) | $0.50 | $0.36 | **$0.86** | 2.7 × |
+| **Claude Opus 4.6** (all stages) | $0.83 | $0.60 | **$1.43** | 4.5 × |
+| **Hybrid A** — Gemini Phase 1 + Sonnet Phase 2 | $0.18 | $0.36 | **$0.55** | 1.7 × |
+| **Hybrid B** — Gemini Phase 1 + Opus Phase 2 | $0.18 | $0.60 | **$0.79** | 2.5 × |
+
+> **Reading the table**: Phase 2 (IaC / boilerplate code generation) is where Claude models add the most value — higher-quality Terraform, CloudFormation, and boilerplate code — while Phase 1 (document generation) is predominantly natural-language prose where Gemini 1.5 Pro performs well. The **Hybrid** configurations keep Phase 1 on Gemini and upgrade only Phase 2 to Claude, offering a balanced quality-cost trade-off.
+
+#### Diagramming Cost Note
+
+HA/DR diagrams are generated **programmatically** by default (zero LLM calls). If the opt-in AI-diagram mode is enabled (`use_ai_diagrams=True`, default model `gemini-2.0-flash`), generate SVG and draw.io XML for 12 diagrams adds ~12 LLM calls at Gemini 2.0 Flash rates — approximately **$0.003** per run (negligible). Switching AI-diagram generation to Claude Sonnet 4.6 or Opus 4.6 would increase this to ~$0.05–$0.08 per run for higher-fidelity SVG, but the programmatic mode already produces production-quality output with official AWS/GCP icon shapes, making this largely unnecessary.
+
+### 10.4 Monthly Projections (LLM Cost Only)
+
+| Patterns / Month | Gemini 1.5 Pro | Sonnet 4.6 | Opus 4.6 | Hybrid A (Sonnet) | Hybrid B (Opus) |
+|-----------------:|---------------:|-----------:|---------:|-------------------:|----------------:|
+| 20 | $6.32 | $17.16 | $28.64 | $10.90 | $15.76 |
+| 50 | $15.80 | $42.90 | $71.60 | $27.25 | $39.40 |
+| 100 | $31.60 | $85.80 | $143.20 | $54.50 | $78.80 |
+| 500 | $158.00 | $429.00 | $716.00 | $272.50 | $394.00 |
+
+### 10.5 GCP Infrastructure Costs (Fixed / Semi-Fixed)
+
+These costs are incurred regardless of the LLM model choice and represent the platform baseline.
+
+| Service | Purpose | Estimated Monthly Cost |
+|---------|---------|:----------------------:|
+| **AlloyDB** (db-f1-micro or equivalent) | Workflow state + review status persistence | $150 – $300 |
+| **Cloud Run** — inference-service | Orchestrator + ADK pipeline (scales to zero) | $30 – $80 |
+| **Cloud Run** — engen-ui | React SPA static hosting (scales to zero) | $5 – $15 |
+| **Vertex AI Search** | RAG retrieval — donor patterns + HA/DR data store | $2.50 / 1,000 queries (typically < $10) |
+| **GCS** | Golden samples, images, HA/DR diagram artefacts | $1 – $5 |
+| **Infrastructure Sub-total** | | **$190 – $410** |
+
+> At typical enterprise volumes (20–100 patterns / month), infrastructure costs **dominate** the total bill. LLM costs are a small fraction — even with Claude Opus 4.6, the LLM spend at 100 patterns/month ($143) is less than the AlloyDB baseline.
+
+### 10.6 Total Cost of Ownership Summary
+
+| Volume | Gemini 1.5 Pro Total | Hybrid A (Sonnet Phase 2) Total | Hybrid B (Opus Phase 2) Total |
+|:------:|:--------------------:|:-------------------------------:|:-----------------------------:|
+| 20 pat/mo | $196 – $416 | $201 – $421 | $206 – $426 |
+| 100 pat/mo | $222 – $442 | $245 – $465 | $269 – $489 |
+| 500 pat/mo | $348 – $568 | $463 – $683 | $584 – $804 |
+
+### 10.7 Recommendation
+
+| Scenario | Recommended Configuration | Rationale |
+|----------|--------------------------|-----------|
+| **Cost-optimised** | Gemini 1.5 Pro (all stages) | Lowest cost at $0.32/run. Suitable when generated IaC is reviewed by engineers before deployment. |
+| **Quality-optimised code** | Hybrid A — Gemini Phase 1 + Claude Sonnet 4.6 Phase 2 | Best quality-to-cost ratio for IaC and boilerplate. +72 % LLM cost for significantly better Terraform/CFN output. |
+| **Maximum code quality** | Hybrid B — Gemini Phase 1 + Claude Opus 4.6 Phase 2 | Top-tier code generation quality. +147 % LLM cost, justified when generated IaC is deployed with minimal human review. |
+| **Full Claude stack** | Claude Sonnet 4.6 or Opus 4.6 (all stages) | Only justified if Claude's prose quality for documentation is significantly preferred. The cost multiplier (2.7–4.5 ×) is hard to justify for natural-language-heavy Phase 1. |
+
+> **Note**: All models are currently **hardcoded** in source (`gemini-1.5-pro-preview-0409`). To enable model switching, refactor each core module to accept a `model_name` constructor parameter read from `Config` / environment variables. This also addresses the stale preview model ID.
+
+---
+
 **Document Control**  
-Last Updated: April 15, 2026  
+Last Updated: April 18, 2026  
 Review Cycle: Quarterly  
 Owner: EnGen Development Team  
 Classification: Internal Use
