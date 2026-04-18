@@ -1,6 +1,6 @@
 # EnGen: Architecture Pattern Documentation System
 
-**Document Version:** 3.0  
+**Document Version:** 4.0  
 **Date:** April 15, 2026  
 **Author:** EnGen Development Team  
 **Status:** Production Ready
@@ -13,7 +13,7 @@ EnGen is an intelligent system that automates the creation of high-quality archi
 
 1. **Ingestion Plane**: Extracts and indexes architecture patterns from SharePoint into a GCP-based knowledge graph
 2. **Service HA/DR Ingestion**: Ingests service-level High Availability and Disaster Recovery documentation into a dedicated data store with structured metadata for precise filtered retrieval
-3. **Serving Plane**: Uses a multi-agent system to analyze new architecture diagrams and generate comprehensive documentation — including HA/DR sections — using relevant donor patterns
+3. **Serving Plane**: Uses an ADK workflow agent system to analyze new architecture diagrams and generate comprehensive documentation — including HA/DR sections — using relevant donor patterns
 4. **Real-Time Component Resolution**: Queries live infrastructure sources (GitHub repositories via MCP and AWS Service Catalog) to ground generated artifacts in actual schemas
 
 ### Primary Goals
@@ -28,7 +28,7 @@ EnGen is an intelligent system that automates the creation of high-quality archi
 
 ## 2. High-Level Component Diagram
 
-This diagram represents the concrete implementation of the EnGen system, detailing the specific agents involved in the workflow.
+This diagram represents the concrete implementation of the EnGen system, detailing the workflow agents involved in the pipeline.
 
 ```mermaid
 graph TB
@@ -36,39 +36,38 @@ graph TB
         UI[React SPA<br/>Vite + Chevron Wizard]
     end
 
-    subgraph Serving["SERVING PLANE (Agent Swarm)"]
+    subgraph Serving["SERVING PLANE (Single-Process ADK Workflow)"]
         Orch[Orchestrator Agent<br/>- Workflow Coordinator]
         
-        subgraph Phase1["Phase 1: ADK Workflow (In-Process)"]
-            subgraph SeqAgent["SequentialAgent: Phase1DocGenerationWorkflow"]
-                VA[VisionAnalysisStep<br/>- Gemini Vision]
-                DR[DonorRetrievalStep<br/>- Vertex AI Search]
-                subgraph Loop["LoopAgent: ContentRefinementLoop (max 3)"]
-                    PG[PatternGenerateStep<br/>- Gemini Pro]
-                    HS[HADRSectionsStep<br/>- Parallel Retrieval]
-                    FDR[FullDocReviewStep<br/>- Quality Control]
-                end
-                HD[HADRDiagramStep<br/>- Programmatic SVG + draw.io + GCS]
+        subgraph Phase1["Phase 1: Doc Generation (SequentialAgent)"]
+            VA[VisionAnalysisStep<br/>- Gemini Vision]
+            DR[DonorRetrievalStep<br/>- Vertex AI Search]
+            subgraph Loop1["LoopAgent: ContentRefinementLoop (max 3)"]
+                PG[PatternGenerateStep<br/>- Gemini Pro]
+                HS[HADRSectionsStep<br/>- Parallel Retrieval]
+                FDR[FullDocReviewStep<br/>- Quality Control]
             end
-            VA --> DR --> Loop --> HD
+            HD[HADRDiagramStep<br/>- Programmatic SVG + draw.io + GCS]
+            VA --> DR --> Loop1 --> HD
             PG --> HS --> FDR
         end
 
-        subgraph Phase2["Phase 2: A2A HTTP"]
-            CompSpec[Component<br/>Specification Agent]
-            ArtGen[Artifact<br/>Generation Agent]
-            ArtVal[Artifact<br/>Validation Agent]
+        subgraph Phase2["Phase 2: Artifact Generation (SequentialAgent)"]
+            CompSpec[ComponentSpecStep<br/>- Real-Time Schema Resolution]
+            subgraph Loop2["LoopAgent: ArtifactRefinementLoop (max 3)"]
+                ArtGen[ArtifactGenerateStep<br/>- Golden Samples + Gemini]
+                ArtVal[ArtifactValidateStep<br/>- 6-Point Rubric]
+            end
+            CompSpec --> Loop2
+            ArtGen --> ArtVal
         end
         
         subgraph Governance["Governance"]
             Human[Human Verifier Agent<br/>- Approval Gate]
         end
 
-        Orch -->|WorkflowContext| SeqAgent
-        Orch -->|A2A| CompSpec
-        Orch -->|A2A| ArtGen
-        Orch -->|A2A| ArtVal
-        Orch -->|A2A| Human
+        Orch -->|WorkflowContext| Phase1
+        Orch -->|WorkflowContext| Phase2
     end
 
     subgraph RealTimeSources["Real-Time Component Sources"]
@@ -122,17 +121,17 @@ graph TB
 
 | Agent Name | Role | Primary Responsibility |
 |------------|------|------------------------|
-| **OrchestratorAgent** | Controller | Manages the end-to-end workflow via task-based BFF endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`, `resume_workflow`, `list_workflows`). **Phase 1 (doc generation)** is orchestrated entirely in-process using an ADK `SequentialAgent` containing a `LoopAgent` — no A2A HTTP calls. Core logic modules (PatternGenerator, VertexRetriever, PatternReviewer, ServiceHADRRetriever, HADRDocumentationGenerator, HADRDiagramGenerator, HADRDiagramStorage) are instantiated directly and shared across workflow steps via a `WorkflowContext`. **Phase 2 (artifact generation)** retains A2A HTTP calls to the ComponentSpecification, ArtifactGeneration, and ArtifactValidation agents. Persists workflow state to AlloyDB via `WorkflowStateManager` at every phase transition for resumable sessions. |
+| **OrchestratorAgent** | Controller | Manages the end-to-end workflow via task-based BFF endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`, `resume_workflow`, `list_workflows`). Both Phase 1 (doc generation) and Phase 2 (artifact generation) are orchestrated entirely in-process using ADK `SequentialAgent` + `LoopAgent` primitives — no HTTP calls between agents. Core logic modules are instantiated directly and shared across workflow steps via a `WorkflowContext`. Persists workflow state to AlloyDB via `WorkflowStateManager` at every phase transition for resumable sessions. |
 | **VisionAnalysisStep** | Analyser | ADK `WorkflowAgent` step that uses Gemini Vision (via `PatternGenerator.generate_search_description`) to produce a textual description of the architecture diagram. Runs in-process within the Phase 1 `SequentialAgent`. |
 | **DonorRetrievalStep** | Librarian | ADK `WorkflowAgent` step that performs hybrid search in Vertex AI Search (via `VertexRetriever.get_best_donor_pattern`) to find the best donor pattern. Runs in-process within the Phase 1 `SequentialAgent`. |
-| **PatternGenerateStep** | Creator | ADK `WorkflowAgent` step inside the `LoopAgent` that uses Gemini Pro (via `PatternGenerator.generate_pattern`) to generate core documentation sections, incorporating any critique from the reviewer on subsequent iterations. |
-| **HADRSectionsStep** | HA/DR Writer | ADK `WorkflowAgent` step inside the `LoopAgent` that generates pattern-level HA/DR sections. **Optimised**: runs service HA/DR retrieval and donor extraction in parallel via `asyncio.gather`, caches service names across iterations, and skips HA/DR regeneration on iterations > 1 if the reviewer did not flag the HA/DR section. |
-| **FullDocReviewStep** | Critic | ADK `WorkflowAgent` step inside the `LoopAgent` that reviews the **entire** document — including HA/DR sections — against quality rubrics and sets the `approved` flag. This is a key improvement: the reviewer now critiques HA/DR quality, enabling HA/DR refinement within the loop. |
-| **HADRDiagramStep** | HA/DR Visualiser & Storage | ADK `WorkflowAgent` step that runs **after** the `LoopAgent` to produce SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG fallback images for every DR strategy × lifecycle phase combination. **By default, diagrams are generated programmatically** from a structured `STATE_MATRIX` — zero Gemini calls, 12 diagrams in < 1 second, zero tokens. An opt-in AI mode (`use_ai_diagrams=True`, defaults to `gemini-2.0-flash`) is available for creative SVG layouts; draw.io XML is always programmatic. Uploads all artefacts to GCS and embeds URLs into the HA/DR sections. |
-| **ComponentSpecificationAgent** | Architect | Performs **real-time** lookups against GitHub repositories (via MCP Server or PyGithub fallback) and AWS Service Catalog to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. Accessed via A2A HTTP (Phase 2). |
-| **ArtifactGenerationAgent** | Engineer | Synthesizes IaC and Boilerplate using "Golden Sample" templates fetched from GCS. Accessed via A2A HTTP (Phase 2). |
-| **ArtifactValidationAgent** | QA | Validates generated code against a 6-point rubric: Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, and Best Practices. Accessed via A2A HTTP (Phase 2). |
-| **HumanVerifierAgent** | Gatekeeper | Provides governance gates with AlloyDB persistence and Pub/Sub notifications. Currently operates in **simulated auto-approval** mode; actual user approval is handled via the React SPA calling orchestrator endpoints directly. |
+| **PatternGenerateStep** | Creator | ADK `WorkflowAgent` step inside the Phase 1 `LoopAgent` that uses Gemini Pro (via `PatternGenerator.generate_pattern`) to generate core documentation sections, incorporating any critique from the reviewer on subsequent iterations. |
+| **HADRSectionsStep** | HA/DR Writer | ADK `WorkflowAgent` step inside the Phase 1 `LoopAgent` that generates pattern-level HA/DR sections. Runs service HA/DR retrieval and donor extraction in parallel via `asyncio.gather`, caches service names across iterations, and skips HA/DR regeneration on iterations > 1 if the reviewer did not flag the HA/DR section. |
+| **FullDocReviewStep** | Critic | ADK `WorkflowAgent` step inside the Phase 1 `LoopAgent` that reviews the **entire** document — including HA/DR sections — against quality rubrics and sets the `approved` flag. The reviewer critiques HA/DR quality, enabling HA/DR refinement within the loop. |
+| **HADRDiagramStep** | HA/DR Visualiser & Storage | ADK `WorkflowAgent` step that runs **after** the Phase 1 `LoopAgent` to produce SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG fallback images for every DR strategy × lifecycle phase combination. Diagrams are generated programmatically from a structured `STATE_MATRIX` — zero Gemini calls, 12 diagrams in < 1 second. An opt-in AI mode (`use_ai_diagrams=True`, defaults to `gemini-2.0-flash`) is available for creative SVG layouts; draw.io XML is always programmatic. Uploads all artefacts to GCS and embeds URLs into the HA/DR sections. |
+| **ComponentSpecStep** | Architect | ADK `WorkflowAgent` step in the Phase 2 `SequentialAgent` that performs **real-time** lookups against GitHub repositories (via MCP Server or PyGithub fallback) and AWS Service Catalog to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. |
+| **ArtifactGenerateStep** | Engineer | ADK `WorkflowAgent` step inside the Phase 2 `LoopAgent` that synthesizes IaC and Boilerplate using "Golden Sample" templates fetched from GCS. |
+| **ArtifactValidateStep** | QA | ADK `WorkflowAgent` step inside the Phase 2 `LoopAgent` that validates generated code against a 6-point rubric: Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, and Best Practices. Sets a `validation_passed` flag in the context on success. |
+| **HumanVerifierAgent** | Gatekeeper | Provides governance gates with AlloyDB persistence. User approval is handled via the React SPA calling orchestrator endpoints directly (`approve_docs`, `approve_code`). |
 
 ---
 
@@ -147,20 +146,7 @@ The Ingestion Plane handles the end-to-end processing of both unstructured conte
 3.  **Content Enrichment**: Injects AI-generated diagram descriptions directly into the HTML content to improve RAG retrieval accuracy.
 4.  **Managed Indexing**: Leverages Google Cloud Discovery Engine's "Unstructured Data with Metadata" model for simplified state management.
 5.  **Media Offloading**: Stores images reliably in GCS while updating HTML references to point to the permanent storage.
-
-> **Note (v2.0):** The Component Catalog Pipeline that previously indexed Terraform modules and Service Catalog products into Vertex AI Search has been deprecated. Component schema resolution is now performed **at inference time** via real-time lookups (see Section 3.5 and Section 4.8).
-
-> **Note (v2.1):** A new Service HA/DR Ingestion Pipeline has been added to index service-level HA/DR documentation into a dedicated Vertex AI Search data store. This enables the Serving Plane to generate grounded HA/DR sections for pattern documents (see Section 3.6 and Section 4.9).
-
-> **Note (v2.2):** HA/DR diagram generation was added, producing SVG + draw.io XML (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`) + PNG for every DR strategy × lifecycle phase combination. Async parallelism introduced for all HA/DR operations. *(Diagram generation approach superseded by v3.0 programmatic generation — see below.)*
-
-> **Note (v2.3):** HA/DR components were refactored from direct imports in the Orchestrator into proper **agent wrappers** (`HADRRetrieverAgent`, `HADRGeneratorAgent`, `HADRDiagramGeneratorAgent`) following the established Agent → Core logic → A2A HTTP delegation pattern. JSON tuple-key serialisation uses `"Strategy|Phase"` string keys. *(A2A HTTP delegation superseded by v3.0 in-process ADK workflow — see below. Standalone wrappers preserved for independent deployment.)*
-
-> **Note (v2.4):** The Streamlit front-end has been replaced by a **React 18 + Vite single-page application (SPA)** with a chevron-style 5-step wizard (Section 4.10). A **3-layer resumable workflow state persistence** strategy has been implemented: AlloyDB `workflow_state` table (backend), Orchestrator `resume_workflow` / `list_workflows` tasks (API), and browser `localStorage` pointer (frontend). Users can close the browser and resume from the last completed phase. The `WorkflowStateManager` class (`lib/workflow_state.py`) handles all CRUD operations on the `workflow_state` table.
-
-> **Note (v2.5):** The database backend has been migrated from **CloudSQL for PostgreSQL** to **AlloyDB for PostgreSQL**. AlloyDB is wire-compatible with PostgreSQL so all DDL schemas, JSONB columns, indexes, and SQL queries are unchanged. The migration affects only the connection layer: `AlloyDBManager` (in `lib/cloudsql_client.py`) uses the `google-cloud-alloydb-connector` library with AlloyDB Auth Proxy, replacing the Cloud SQL Auth Proxy connector. The `CloudSQLManager` class name is preserved as a backward-compatibility alias. AlloyDB instance URIs use the format `projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>`.
-
-> **Note (v3.0 — ADK Workflow Refactoring):** Phase 1 (doc generation) has been refactored from **A2A HTTP orchestration** to **ADK Workflow Agent orchestration** using `SequentialAgent` + `LoopAgent` primitives defined in `lib/adk_core.py`. All Phase 1 core logic modules (`PatternGenerator`, `VertexRetriever`, `PatternReviewer`, `ServiceHADRRetriever`, `HADRDocumentationGenerator`, `HADRDiagramGenerator`, `HADRDiagramStorage`) are now instantiated directly in the `OrchestratorAgent` and shared across workflow step agents via a `WorkflowContext` — eliminating all HTTP overhead, A2A timeout issues, and session management for Phase 1. The standalone HA/DR agent wrappers (`HADRRetrieverAgent`, `HADRGeneratorAgent`, `HADRDiagramGeneratorAgent` on ports 9006–9008) are preserved for independent deployment but are no longer called by the Orchestrator. **Key architectural change:** HA/DR section generation has been moved **inside** the `LoopAgent` refinement loop so the `FullDocReviewStep` now critiques the entire document (core + HA/DR), enabling HA/DR quality improvement across iterations. Performance optimisations applied: (1) parallel retrieval + donor extraction via `asyncio.gather` in `HADRSectionsStep`; (2) service name extraction cached in `WorkflowContext` (was called twice); (3) HA/DR regeneration skipped on re-iterations if reviewer did not flag it; (4) **HA/DR diagrams are now generated programmatically by default** from a structured `STATE_MATRIX` mapping each (strategy, phase) to deterministic `RegionStates` — zero Gemini calls, 12 diagrams in < 1 second, zero tokens consumed; draw.io XML is always programmatic (even in opt-in AI mode); an opt-in AI mode (`use_ai_diagrams=True`, model defaults to `gemini-2.0-flash`) is available for creative SVG layouts with reduced `max_output_tokens` (4096, down from 8192). Estimated end-to-end time savings: **~130–170 seconds** per pattern generation (text workflow) plus **~60–120 seconds** eliminated by programmatic diagrams. Phase 2 (artifact generation) retains A2A HTTP calls. See `agents/orchestrator/workflow_agents.py` for the step agent implementations.
+6.  **Real-Time Component Resolution**: Component schema resolution is performed at inference time via real-time lookups against GitHub (MCP + PyGithub) and AWS Service Catalog — ensuring the system always works with the latest module definitions.
 
 ### 3.2 End-to-End Sequence Diagram
 
@@ -243,53 +229,16 @@ For each pattern, the pipeline performs a linear sequence of transformations:
     *   **Metadata Mapping**: Maps SharePoint list fields (Title, Owner, Maturity, Status) to the pre-defined `struct_data` schema.
     *   **Upsert**: Calls `doc_client.write_document` with the enriched HTML as `content` and the metadata dictionary. This replaces any existing version of the document.
 
-### 3.4 Component Catalog Pipeline (Legacy)
+### 3.4 Real-Time Component Resolution
 
-> **Deprecation Notice (v2.0):** This pipeline has been superseded by real-time component resolution at inference time. The pipeline code has been preserved as `component_catalog_pipeline_legacy.py` for reference. See Section 3.5 for the replacement architecture.
-
-This pipeline was responsible for **structured data ingestion**. It constructed the "ground truth" for the infrastructure agents by indexing the strict interface definitions of available cloud resources into Vertex AI Search. This prevented the "hallucination" of non-existent Terraform variables or CloudFormation parameters.
-
-#### Data Sources (Legacy)
-1.  **GitHub Repository**: Source for raw Terraform modules (`.tf`).
-2.  **AWS Service Catalog**: Source for governed, pre-approved CloudFormation products.
-
-#### Execution Workflow (Legacy)
-
-1.  **Terraform Module Ingestion**:
-    *   **Repository Scanning**: Connects to the configured infrastructure repository using PyGithub.
-    *   **Module Discovery**: Crawls the `modules/` directory, looking for `variables.tf` files which define the public interface of a module.
-    *   **HCL Parsing**: Uses `python-hcl2` to parse the HashiCorp Configuration Language files.
-    *   **Schema Extraction**: Extracts variable names, types, default values, and descriptions.
-    *   **Indexing**: Creates a Vertex Search Document with `id="tf-{module_name}"` and category `Terraform Module`.
-
-2.  **Service Catalog Ingestion (AWS Integration)**:
-    *   **API Query**: Uses `boto3` to enumerate all products in the AWS Service Catalog.
-    *   **Artifact Resolution**: For each product, identifies the **Latest Provisioning Artifact** (Version) to ensure new deployments use modern standards.
-    *   **Parameter Extraction**: Calls `describe_provisioning_parameters` to retrieve the exact keys and constraints (AllowedValues, MinLength, etc.) required to provision the product.
-    *   **Schema Construction**: Builds a JSON schema explicitly labeled as `type: "service_catalog_product"` and containing the specific `ProvisioningArtifactId`.
-    *   **Indexing**: Creates a Vertex Search Document with `id="sc-{product_id}"` and category `Service Catalog Product`.
-
-3.  **Unified Indexing**:
-    *   All extracted schemas (Terraform and Service Catalog) were normalized into a common JSON structure.
-    *   They were uploaded to a dedicated "Component Catalog" data store in Vertex AI Search, separate from the unstructured document store.
-
-#### Why It Was Replaced
-
-The offline pipeline approach had several limitations:
--   **Staleness**: The indexed catalog could become out of date between pipeline runs.
--   **Scope**: Only modules in pre-configured repositories were available.
--   **Operational Overhead**: Required a separate pipeline execution and monitoring lifecycle.
-
-### 3.5 Real-Time Component Resolution (Current Architecture)
-
-The current architecture replaces the offline Component Catalog Pipeline with **on-demand, real-time lookups** performed at inference time by the `ComponentSpecificationAgent`. This ensures the system always works with the latest module definitions.
+The architecture uses **on-demand, real-time lookups** performed at inference time by the `ComponentSpecStep` workflow agent. This ensures the system always works with the latest module definitions.
 
 #### Architecture Overview
 
 ```mermaid
 graph LR
     subgraph "Inference Time (Real-Time)"
-        Agent[Component Specification Agent]
+        Agent[ComponentSpecStep<br/>WorkflowAgent]
         Sources[component_sources.py<br/>Type Normalization]
         
         Agent --> Sources
@@ -338,20 +287,20 @@ graph LR
 | AWS Profile | `AWS_PROFILE` env var | `default` |
 | GitHub PAT | `GITHUB_PERSONAL_ACCESS_TOKEN` env var | Required for MCP/PyGithub |
 
-### 3.6 Service HA/DR Ingestion Pipeline
+### 3.5 Service HA/DR Ingestion Pipeline
 
 The Service HA/DR Ingestion Pipeline processes service-level HA/DR documentation from SharePoint into a **dedicated** Vertex AI Search data store (`service-hadr-datastore`). Each service (e.g., Amazon RDS, AWS Lambda) has its own HA/DR documentation page that describes how the service behaves under different DR strategies during provisioning, failover, and failback scenarios.
 
 > **Key Difference from Pattern Ingestion (3.3):** This pipeline does not process architecture diagrams for visual analysis. Instead, it focuses on structured metadata extraction and hierarchical chunking by DR strategy and lifecycle phase.
 
-#### 3.6.1 Design Principles
+#### 3.5.1 Design Principles
 
 1.  **Hierarchical Chunking**: Content is split first by DR strategy heading, then by lifecycle phase heading, then by a sliding word-count window (1500 words, 200-word overlap). This preserves contextual boundaries.
 2.  **Rich Structured Metadata**: Every chunk carries `service_name`, `service_type` (Compute | Storage | Database | Network), `dr_strategy`, and `lifecycle_phase` fields. This enables precise metadata-filtered retrieval at inference time.
 3.  **HA/DR Diagram Handling**: HA/DR diagrams in the source pages are downloaded, stored in GCS, and replaced in the text with LLM-generated textual descriptions (using Gemini 1.5 Flash) so the visual knowledge is captured in the vector space.
 4.  **Separation of Concerns**: Uses a dedicated data store separate from the pattern document store. This prevents cross-contamination and enables independent scaling.
 
-#### 3.6.2 End-to-End Sequence Diagram
+#### 3.5.2 End-to-End Sequence Diagram
 
 ```mermaid
 sequenceDiagram
@@ -397,11 +346,11 @@ sequenceDiagram
     end
 ```
 
-#### 3.6.3 End-to-End Flow Description
+#### 3.5.3 End-to-End Flow Description
 
-1.  **Service Discovery**: The pipeline reads the service catalog from a **dedicated SharePoint List** (`SP_HADR_LIST_ID`) via the `SharePointClient.fetch_service_hadr_list()` method — mirroring how the pattern ingestion pipeline fetches its catalog via `fetch_pattern_list()`. Each list item provides the `service_name` (from the `ServiceName` column), `service_description` (`ServiceDescription`), `service_type` (`ServiceType` — Compute | Storage | Database | Network), and `page_url` (from the `HADRPageLink` hyperlink column) pointing to the service’s HA/DR documentation page in SharePoint. OData pagination is handled automatically.
+1.  **Service Discovery**: The pipeline reads the service catalog from a **dedicated SharePoint List** (`SP_HADR_LIST_ID`) via the `SharePointClient.fetch_service_hadr_list()` method. Each list item provides the `service_name` (from the `ServiceName` column), `service_description` (`ServiceDescription`), `service_type` (`ServiceType` — Compute | Storage | Database | Network), and `page_url` (from the `HADRPageLink` hyperlink column) pointing to the service's HA/DR documentation page in SharePoint. OData pagination is handled automatically.
 2.  **HTML Extraction**: For each service, the pipeline fetches the raw HTML body from the SharePoint page URL.
-3.  **HA/DR Diagram Processing**: Unlike the pattern pipeline (which targets the first two diagrams), this pipeline processes **all** `<img>` tags in the document:
+3.  **HA/DR Diagram Processing**: This pipeline processes **all** `<img>` tags in the document:
     *   Downloads the image from SharePoint.
     *   Sends it to **Gemini 1.5 Flash** with the prompt: *"Analyse this HA/DR architecture diagram. Describe the infrastructure components, their redundancy setup, replication flows, and failover mechanisms."*
     *   Uploads the original image to GCS under `services/{safe_name}/hadr-diagrams/diagram_{n}.png`.
@@ -475,11 +424,11 @@ sequenceDiagram
 
     The `diagram_gcs_urls` and `diagram_descriptions` fields link the chunk to the original HA/DR architecture diagrams that appeared in the same section of the SharePoint page. During ingestion, each `<img>` tag is processed by Gemini Vision to produce a text description; the original image is stored on GCS. At retrieval time, these fields are returned alongside the chunk text so that downstream generators can use the diagram descriptions as **visual one-shot context** when producing new HA/DR text and diagrams.
 
-    This structure enables the `HADRRetrieverAgent` (Section 4.9, wrapping `ServiceHADRRetriever` core logic) to issue targeted queries like *"retrieve all Failover chunks for Amazon RDS under the Warm Standby strategy"* using metadata-filtered hybrid search, returning only the most relevant passages — and their associated diagram references — without cross-contamination from other services or strategies.
+    This structure enables the `HADRSectionsStep` workflow agent to issue targeted queries like *"retrieve all Failover chunks for Amazon RDS under the Warm Standby strategy"* using metadata-filtered hybrid search, returning only the most relevant passages — and their associated diagram references — without cross-contamination from other services or strategies.
 
 6.  **Indexing**: Each chunk is upserted as a Document in the HA/DR data store using the Discovery Engine `CreateDocumentRequest` API.
 
-#### 3.6.4 Data Store Schema
+#### 3.5.4 Data Store Schema
 
 | Metadata Field | Type | Example | Purpose |
 |----------------|------|---------|----------|
@@ -492,7 +441,7 @@ sequenceDiagram
 | `diagram_gcs_urls` | List[String] | `["gs://…/diagram_3.png"]` | GCS paths to original HA/DR diagrams that appeared in this chunk's source section |
 | `diagram_descriptions` | List[String] | `["A Multi-AZ RDS deployment…"]` | AI-generated text descriptions of those diagrams (produced by Gemini Vision during ingestion) |
 
-#### 3.6.5 Configuration
+#### 3.5.5 Configuration
 
 | Setting | Source | Default |
 |---------|--------|---------|
@@ -504,37 +453,32 @@ sequenceDiagram
 
 ## 4. Serving Plane
 
-The Serving Plane uses a multi-agent system to analyze architecture diagrams, retrieve relevant "donor" patterns, generate comprehensive documentation including HA/DR sections, create Infrastructure-as-Code (IaC) artifacts, and publish the results to SharePoint after human verification.
+The Serving Plane uses an ADK workflow agent system to analyze architecture diagrams, retrieve relevant "donor" patterns, generate comprehensive documentation including HA/DR sections, create Infrastructure-as-Code (IaC) artifacts, and publish the results to SharePoint and GitHub after human verification. All agent logic runs **in a single Python process** — there are no inter-agent HTTP calls.
 
 ### 4.1 Design Principles
 
-1.  **Specialization**: Each agent has a single, well-defined responsibility (e.g., Retrieval, Generation, Review, Artifact Creation).
-2.  **Agent-to-Agent Communication (A2A)**: Standardized HTTP-based protocol with retry, timeout, and exponential backoff via `A2AClient`.
-3.  **Reflection Loop**: Iterative refinement (Generate -> Review -> Generate) until quality threshold met (max 3 iterations).
-4.  **Human-in-the-Loop**: User approval is collected via the React SPA wizard (chevron stepper) which calls orchestrator task endpoints directly (`approve_docs`, `approve_code`). The `HumanVerifierAgent` provides an additional governance layer with Pub/Sub notifications, currently operating in simulated auto-approval mode.
-5.  **Artifact Generation**: Automated creation of deployable code based on authoritative interfaces ("Golden Samples") from GCS.
-6.  **Real-Time Schema Grounding**: Component specifications are grounded in live infrastructure schemas fetched at inference time from GitHub (via MCP or PyGithub) and AWS Service Catalog, replacing the previous offline Vertex AI Search catalog approach.
+1.  **Specialization**: Each workflow step has a single, well-defined responsibility (e.g., Retrieval, Generation, Review, Artifact Creation).
+2.  **In-Process Orchestration**: All workflow steps run in the same process via ADK `SequentialAgent` + `LoopAgent` primitives, communicating through a shared `WorkflowContext` dictionary. No network serialization or HTTP overhead.
+3.  **Reflection Loop**: Iterative refinement (Generate → Review → Generate) until quality threshold met (max 3 iterations), implemented as `LoopAgent` with exit keys.
+4.  **Human-in-the-Loop**: User approval is collected via the React SPA wizard (chevron stepper) which calls orchestrator task endpoints directly (`approve_docs`, `approve_code`).
+5.  **Artifact Generation**: Automated creation of deployable code based on authoritative interfaces ("Golden Samples") from GCS, with validation against a 6-point rubric.
+6.  **Real-Time Schema Grounding**: Component specifications are grounded in live infrastructure schemas fetched at inference time from GitHub (via MCP or PyGithub) and AWS Service Catalog.
 7.  **Phase-Based Orchestration**: The workflow is split into discrete phases (`phase1_generate_docs`, `phase2_generate_code`) with explicit approval gates between them.
 8.  **Non-Blocking HA/DR Generation**: HA/DR section text generation executes **inside** the `LoopAgent` refinement loop (so the full-document reviewer critiques core + HA/DR together). HA/DR diagram generation executes **after** the loop completes. Both are wrapped in non-blocking try/except so that failures do not prevent the main pattern document from being returned.
-9.  **Programmatic Diagrams (v3.0)**: HA/DR diagrams are generated **programmatically by default** from a structured `STATE_MATRIX` — zero Gemini calls, 12 diagrams in < 1 second. An opt-in AI mode is available for creative SVG layouts (`use_ai_diagrams=True`, `gemini-2.0-flash`); draw.io XML is always programmatic. GCS upload uses `asyncio.gather` with 60 s per-upload timeout.
+9.  **Programmatic Diagrams**: HA/DR diagrams are generated **programmatically** from a structured `STATE_MATRIX` — zero Gemini calls, 12 diagrams in < 1 second. An opt-in AI mode is available for creative SVG layouts (`use_ai_diagrams=True`, `gemini-2.0-flash`); draw.io XML is always programmatic. GCS upload uses `asyncio.gather` with 60 s per-upload timeout.
 10. **Observability**: Centralized logging, metrics tracking, and health checks (liveness/readiness) via the `ADKAgent` framework.
 
-### 4.2 Agent Swarm Architecture
+### 4.2 Workflow Architecture
 
-The system consists of the following agents, orchestrating a complex workflow:
+The system runs as a single `OrchestratorAgent` process containing two ADK workflow pipelines:
 
-*   **Orchestrator Agent**: Workflow coordinator, traffic controller, state manager. Exposes phase-based endpoints.
-*   **Vision Agent**: "Eyes" of the system, converts pixels to technical descriptions (handled within Generator Agent).
-*   **Retrieval Agent**: "Memory", finds relevant prior art (RAG) via Vertex AI Search.
-*   **Generator Agent**: "Writer", drafts content using Gemini Vision (image analysis) and Gemini Pro (text generation) with donor context.
-*   **Reviewer Agent**: "Critic", evaluates quality using rubrics.
-*   **Component Specification Agent**: "Architect", resolves infrastructure schemas via real-time GitHub MCP and AWS Service Catalog lookups, producing a topologically-sorted dependency graph.
-*   **Artifact Generation Agent**: "Engineer", synthesizes both IaC and application reference code using Golden Sample templates.
-*   **Artifact Validation Agent**: "QA Engineer", validates generated code against a 6-point rubric (Syntax, Completeness, Integration, Security, Relevance, Best Practices).
-*   **Human Verifier Agent**: "Gatekeeper", manages the approval lifecycle with AlloyDB persistence and Pub/Sub notifications.
-*   **HA/DR Retriever Agent**: "HA/DR Librarian", performs hybrid retrieval (metadata filter + vector search) against a dedicated `service-hadr-datastore` to fetch service-level HA/DR documentation chunks. In v3.0, invoked as in-process `HADRSectionsStep` within the `LoopAgent` via `ServiceHADRRetriever` core logic (no A2A HTTP). Standalone agent wrapper on port 9006 preserved for independent deployment.
-*   **HA/DR Generator Agent**: "HA/DR Writer", synthesizes service-level HA/DR references with donor pattern examples to produce pattern-level HA/DR sections via Gemini 1.5 Pro. In v3.0, invoked as in-process `HADRSectionsStep` within the `LoopAgent` via `HADRDocumentationGenerator` core logic (no A2A HTTP). Standalone agent wrapper on port 9007 preserved for independent deployment.
-*   **HA/DR Diagram Generator Agent**: "HA/DR Visualiser & Storage Manager", produces SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG component diagrams for all 12 DR strategy × lifecycle phase combinations, then uploads artefacts to GCS and returns public URLs. In v3.0, invoked as in-process `HADRDiagramStep` after the `LoopAgent` via `HADRDiagramGenerator` + `HADRDiagramStorage` core logic (no A2A HTTP). **Diagrams are generated programmatically** by default from a `STATE_MATRIX` (zero Gemini calls); opt-in AI mode available. Standalone agent wrapper on port 9008 preserved for independent deployment.
+**Phase 1 — Document Generation** (`Phase1DocGenerationWorkflow`):
+-   `SequentialAgent` → VisionAnalysisStep → DonorRetrievalStep → `LoopAgent` (PatternGenerateStep → HADRSectionsStep → FullDocReviewStep, max 3, exit on "approved") → HADRDiagramStep
+
+**Phase 2 — Artifact Generation** (`Phase2ArtifactWorkflow`):
+-   `SequentialAgent` → ComponentSpecStep → `LoopAgent` (ArtifactGenerateStep → ArtifactValidateStep, max 3, exit on "validation_passed")
+
+Core logic modules (PatternGenerator, VertexRetriever, PatternReviewer, ComponentSpecification, PatternArtifactGenerator, ArtifactValidator, ServiceHADRRetriever, HADRDocumentationGenerator, HADRDiagramGenerator, HADRDiagramStorage) are instantiated once at startup and shared through the `WorkflowContext` — no network calls, no serialisation overhead.
 
 ### 4.3 High-Level Sequence Diagram
 
@@ -542,96 +486,69 @@ The system consists of the following agents, orchestrating a complex workflow:
 sequenceDiagram
     participant Client as React SPA
     participant Orch as Orchestrator Agent
-    participant Vision as Vision Agent
-    participant Ret as Retrieval Agent
-    participant Gen as Generator Agent
-    participant Rev as Reviewer Agent
-    participant Artifact as Artifact Gen Agent
-    participant GitMCP as GitHub MCP Client
-    participant SvcCat as Service Catalog Client
-    participant Validator as Artifact Val Agent
-    participant Verifier as Human Verifier
+    participant WCtx as WorkflowContext
     participant DB as AlloyDB
     participant Async as Async Workers
+    participant GitMCP as GitHub MCP Client
+    participant SvcCat as Service Catalog Client
 
     Client->>Orch: POST /invoke {task: "phase1_generate_docs", image, title, user_id}
     
-    Note over Orch,Ret: Step 1: Context
-    Orch->>Vision: analyze(image)
-    Vision-->>Orch: description
-    Orch->>Ret: find_donor(description)
-    Ret-->>Orch: donor_context
+    Note over Orch,WCtx: Phase 1: Doc Generation (SequentialAgent, all in-process)
+    Orch->>WCtx: Seed context (image, title, module refs)
+    Orch->>Orch: VisionAnalysisStep → Gemini Vision → description
+    Orch->>Orch: DonorRetrievalStep → Vertex AI Search → donor_context
 
-    Note over Orch,Rev: Step 2: Content Generation Loop (LoopAgent, Max 3)
-    loop Content + HA/DR refinement (in-process)
-        Orch->>Gen: generate_pattern(desc, donor)
-        Gen-->>Orch: draft_sections
-        Orch->>Orch: Extract service names (cached in WorkflowContext)
-        Orch->>Ret: In-process: ServiceHADRRetriever.aretrieve_all [N×4 parallel]
-        Ret-->>Orch: service_hadr_docs
-        Orch->>Gen: In-process: HADRDocumentationGenerator.agenerate [4 parallel, 120s]
-        Gen-->>Orch: hadr_sections{strategy→markdown}
-        Orch->>Orch: Merge HA/DR into generated_sections
-        Orch->>Rev: review_full_doc(draft + HA/DR)
-        Rev-->>Orch: {approved, critique}
+    loop ContentRefinementLoop (LoopAgent, max 3)
+        Orch->>Orch: PatternGenerateStep → Gemini Pro → draft_sections
+        Orch->>Orch: HADRSectionsStep → parallel retrieve + generate → HA/DR sections
+        Orch->>Orch: FullDocReviewStep → review full doc → approved / critique
     end
 
-    Note over Orch,Gen: Step 2b: HA/DR Diagram Generation (Programmatic, Non-Blocking)
-    Orch->>Orch: HADRDiagramGenerator: programmatic SVG + draw.io from STATE_MATRIX (12 diagrams, < 1s)
-    Orch->>Orch: HADRDiagramStorage: upload to GCS [12 parallel, 60s timeout]
-    Orch->>Orch: Embed diagram URLs in HA/DR sections
+    Orch->>Orch: HADRDiagramStep → programmatic SVG + draw.io (12 diagrams, < 1s)
+    Orch->>Orch: Upload to GCS, embed URLs in HA/DR sections
 
-    Note over Orch,Verifier: Step 3: User Approval (Pattern)
+    Note over Orch,Client: Phase 1 Complete → User Approval
     Orch-->>Client: Return sections + full_doc + workflow_id
     Client->>Client: Store workflow_id in localStorage
     Client->>Orch: POST /invoke {task: "approve_docs", workflow_id}
     
     par Async Publishing (Docs)
-        Orch->>Async: publish_docs_async(review_id="PID-1")
-        Async->>DB: Update Status (IN_PROGRESS)
+        Orch->>Async: publish_docs_async(review_id)
+        Async->>DB: Update Status (IN_PROGRESS → COMPLETED)
     and Continue Workflow
-        Client->>Orch: POST /invoke {task: "phase2_generate_code"}
-        Orch->>Artifact: generate_component_spec(doc)
+        Client->>Orch: POST /invoke {task: "phase2_generate_code", workflow_id}
     end
 
-    Note over Orch,Validator: Step 4: Pattern Synthesis (Real-Time Resolution)
-    
-    Artifact->>GitMCP: search_terraform_module(type)
-    GitMCP-->>Artifact: TerraformModuleSpec
-    Artifact->>SvcCat: search_product(type) [fallback]
-    SvcCat-->>Artifact: ServiceCatalogProductSpec
-    Artifact-->>Orch: ComponentSpecification (JSON)
-    
-    loop Artifact Validation (Max 3)
-        Orch->>Artifact: generate_artifact(spec, doc, critique?)
-        Artifact-->>Orch: artifacts (IaC + Boilerplate)
-        Orch->>Validator: validate_artifacts(artifacts, spec)
-        Validator-->>Orch: {status, score, issues, feedback}
-        alt Approved (PASS)
-             Orch->>Orch: Exit loop
-        else Issues Found (NEEDS_REVISION)
-             Orch->>Orch: Retry with feedback
-        end
+    Note over Orch,WCtx: Phase 2: Artifact Generation (SequentialAgent, all in-process)
+    Orch->>WCtx: Seed context (full_doc, module refs)
+    Orch->>Orch: ComponentSpecStep → real-time lookups
+    Orch->>GitMCP: search_terraform_module(type)
+    GitMCP-->>Orch: TerraformModuleSpec
+    Orch->>SvcCat: search_product(type) [fallback]
+    SvcCat-->>Orch: ServiceCatalogProductSpec
+
+    loop ArtifactRefinementLoop (LoopAgent, max 3)
+        Orch->>Orch: ArtifactGenerateStep → Golden Samples + Gemini → artifacts
+        Orch->>Orch: ArtifactValidateStep → 6-point rubric → PASS / NEEDS_REVISION
     end
 
-    Note over Orch,Verifier: Step 5: User Approval (Artifacts)
+    Note over Orch,Client: Phase 2 Complete → User Approval
     Orch-->>Client: Return artifact bundle
-    Client->>Orch: POST /invoke {task: "approve_code"}
+    Client->>Orch: POST /invoke {task: "approve_code", workflow_id}
 
-    Note over Orch,DB: Step 6: Non-Blocking Completion
-    
     par Async Publishing (Code)
-        Orch->>Async: publish_code_async(review_id="AID-2")
-        Async->>DB: Update Status (IN_PROGRESS)
+        Orch->>Async: publish_code_async(review_id)
+        Async->>DB: Update Status (IN_PROGRESS → COMPLETED)
     and Return Immediate Response
-        Orch-->>Client: {status: "processing", pattern_id: "PID-1", artifact_id: "AID-2"}
+        Orch-->>Client: {status: "processing", pattern_id, artifact_id}
     end
 
-    Note over Client,DB: Step 7: Client Polling via Orchestrator
+    Note over Client,DB: Client Polling via Orchestrator
     loop Poll Until Complete (every 3s)
-        Client->>Orch: POST /invoke {task: "get_publish_status"}
-        Orch->>DB: Check Status (PID-1, AID-2)
-        DB-->>Orch: {doc_url: "...", code_url: "..."}
+        Client->>Orch: POST /invoke {task: "get_publish_status", workflow_id}
+        Orch->>DB: Check Status
+        DB-->>Orch: {doc_url, code_url}
         Orch-->>Client: Status update
     end
 ```
@@ -639,11 +556,11 @@ sequenceDiagram
 ### 4.4 End-to-End Flow Description
 
 #### Phase 1: Contextualization
-1.  **Analysis**: The Orchestrator sends the input diagram to the `Generator Agent`. The agent uses Gemini Vision to extract a detailed technical description.
-2.  **Retrieval**: The Orchestrator uses this description to query the `Retriever Agent`. This agent performs a hybrid search (Vector + Keyword) in Vertex AI Search to find the best matching "Donor Pattern" to serve as a structural template.
+1.  **Analysis**: The `VisionAnalysisStep` uses Gemini Vision (via `PatternGenerator.generate_search_description`) to extract a detailed technical description from the input diagram.
+2.  **Retrieval**: The `DonorRetrievalStep` uses this description to perform a hybrid search (Vector + Keyword) in Vertex AI Search (via `VertexRetriever.get_best_donor_pattern`) to find the best matching "Donor Pattern" to serve as a structural template.
 
 #### Phase 2: Content Generation Loop (LoopAgent, In-Process)
-3.  **Drafting**: The `ContentDraftStep` invokes `PatternGenerator` with the diagram description and the donor pattern context. Gemini 1.5 Pro generates a first draft of the documentation (Problem, Solution, Architecture).
+3.  **Drafting**: The `PatternGenerateStep` invokes `PatternGenerator` with the diagram description and the donor pattern context. Gemini 1.5 Pro generates a first draft of the documentation (Problem, Solution, Architecture).
 4.  **HA/DR Section Generation (Inside Loop)**: The `HADRSectionsStep` executes within the same `LoopAgent` iteration:
     *   Extracts canonical service names from the generated documentation using regex matching against the `component_sources.py` alias dictionary (40+ mappings) and a curated list of common service names. Results are cached in `WorkflowContext`.
     *   Calls `ServiceHADRRetriever.aretrieve_all_services_hadr()` in-process to query the `service-hadr-datastore` via **hybrid retrieval** (metadata filter + vector search). All N × 4 queries are dispatched in parallel via `asyncio.gather`.
@@ -656,8 +573,8 @@ sequenceDiagram
 7.  **Non-Blocking Merge**: The generated HA/DR sections are merged into the `generated_sections` dictionary under the `HA/DR` key. If HA/DR generation fails for any reason, a placeholder message is inserted and the workflow continues normally — the main pattern document is never blocked by HA/DR failures.
 
 #### Phase 2b: HA/DR Diagram Generation & Storage (Programmatic, Non-Blocking)
-8.  **Programmatic Diagram Generation (Default)**: The `HADRDiagramStep` runs **after** the `LoopAgent` completes. By default, `HADRDiagramGenerator` produces all 12 diagrams (4 DR strategies × 3 lifecycle phases) **programmatically** from a structured `STATE_MATRIX` — a dictionary mapping each `(strategy, phase)` to a `RegionStates` dataclass specifying the exact state (Active, Standby, Scaled-Down, Not-Deployed) for core vs. non-core services in primary and DR regions. The `_is_data_service()` classifier distinguishes data services (databases, storage) from compute services. SVG is built by `_build_programmatic_svg()` and draw.io XML by `_build_programmatic_drawio()` (using the `DRAWIO_SERVICE_ICONS` registry). **Zero Gemini calls, < 1 second for all 12 diagrams, zero tokens consumed.**
-9.  **Opt-In AI Mode**: When `use_ai_diagrams=True`, SVG generation uses Gemini (`gemini-2.0-flash` by default, configurable via `ai_model_name`) with `max_output_tokens=4096`. Draw.io XML remains always programmatic even in AI mode (biggest token savings). AI mode uses `asyncio.gather` with `Semaphore(6)` concurrency control and per-diagram timeout.
+8.  **Programmatic Diagram Generation**: The `HADRDiagramStep` runs **after** the `LoopAgent` completes. `HADRDiagramGenerator` produces all 12 diagrams (4 DR strategies × 3 lifecycle phases) **programmatically** from a structured `STATE_MATRIX` — a dictionary mapping each `(strategy, phase)` to a `RegionStates` dataclass specifying the exact state (Active, Standby, Scaled-Down, Not-Deployed) for core vs. non-core services in primary and DR regions. The `_is_data_service()` classifier distinguishes data services (databases, storage) from compute services. SVG is built by `_build_programmatic_svg()` and draw.io XML by `_build_programmatic_drawio()` (using the `DRAWIO_SERVICE_ICONS` registry). **Zero Gemini calls, < 1 second for all 12 diagrams, zero tokens consumed.**
+9.  **Opt-In AI Mode**: When `use_ai_diagrams=True`, SVG generation uses Gemini (`gemini-2.0-flash` by default, configurable via `ai_model_name`) with `max_output_tokens=4096`. Draw.io XML remains always programmatic even in AI mode. AI mode uses `asyncio.gather` with `Semaphore(6)` concurrency control and per-diagram timeout.
 10. **SVG→PNG Conversion**: PNG fallback images are generated locally from the SVG content using `svglib` + `reportlab` (with `pycairo` shim on Windows). On Linux, `cairosvg` is the primary converter.
 11. **Diagram Storage**: `HADRDiagramStorage.aupload_diagram_bundle()` uploads all three artefacts per diagram to GCS in parallel with a 60 s timeout per upload.
 12. **URL Embedding**: The returned diagram URLs are embedded into the HA/DR markdown sections so that the rendered documentation contains inline SVG references and links to the editable draw.io files.
@@ -667,21 +584,20 @@ sequenceDiagram
 14. **Approval**: The React SPA calls the `approve_docs` task (passing the `workflow_id`). The Orchestrator updates AlloyDB review status, persists the workflow state to `CODE_GEN` via `WorkflowStateManager`, and receives a `review_id`.
 15. **Async Publishing**: It immediately spawns a background task to publish the documentation to SharePoint, using the `review_id` to track progress in AlloyDB. The workflow *does not wait* for this to finish but proceeds to artifact generation.
 
-#### Phase 4: Pattern Synthesis (Holistic Generation)
-16. **Real-Time Schema Resolution**: The `ComponentSpecificationAgent` extracts component keywords from the documentation, normalizes them using the `component_sources.py` alias dictionary (40+ mappings), and performs a two-tier real-time lookup:
+#### Phase 4: Pattern Synthesis (In-Process ADK Workflow)
+16. **Context Seeding**: The Orchestrator builds a new `WorkflowContext` containing the full document text, and references to the `ComponentSpecification`, `PatternArtifactGenerator`, and `ArtifactValidator` core logic modules.
+17. **Real-Time Schema Resolution**: The `ComponentSpecStep` extracts component keywords from the documentation, normalizes them using the `component_sources.py` alias dictionary (40+ mappings), and performs a two-tier real-time lookup:
     *   **Tier 1 (GitHub)**: Searches configured GitHub repositories via the MCP Server protocol (with PyGithub fallback) for matching Terraform modules, parsing `variables.tf` and `outputs.tf` files using `python-hcl2`.
     *   **Tier 2 (AWS)**: Falls back to AWS Service Catalog via `boto3` to find matching CloudFormation products with their provisioning parameters and constraints.
-17. **Comprehensive Specification**: It generates a structured dependency graph grounded in these real-world schemas, with topological ordering via `graphlib.TopologicalSorter` to determine execution order.
-18. **Golden Sample Injection**: The `ArtifactGenerationAgent` retrieves enterprise-approved "Golden Sample" IaC templates from GCS to use as few-shot examples.
-19. **Unified Generation**: The agent generates both the **Infrastructure as Code (Terraform)** and the **Reference Implementation (Boilerplate)** in a single context window.
-20. **Automated Validation Loop**:
-    *   **Validate**: The `ArtifactValidationAgent` checks the generated code against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices (Medium).
-    *   **Feedback**: If issues are found, the critique is fed back to the generator.
-    *   **Retry**: The generator attempts to fix the specific issues (max 3 retries).
+18. **Comprehensive Specification**: It generates a structured dependency graph grounded in these real-world schemas, with topological ordering via `graphlib.TopologicalSorter` to determine execution order. The specification is stored in the `WorkflowContext`.
+19. **Artifact Generation Loop**: The `ArtifactRefinementLoop` (`LoopAgent`, max 3 iterations) runs:
+    *   **ArtifactGenerateStep**: Retrieves enterprise-approved "Golden Sample" IaC templates from GCS, then generates both **Infrastructure as Code (Terraform)** and **Reference Implementation (Boilerplate)** in a single context window using Gemini.
+    *   **ArtifactValidateStep**: Checks the generated code against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices (Medium). Sets `validation_passed` in the context on success, or stores the critique for the next iteration.
+20. **Loop Exit**: The `LoopAgent` exits when `validation_passed` is set in the `WorkflowContext`, or after 3 iterations.
 
 #### Phase 5: Governance (Point 2) & Async Code Publishing
-21. **Artifact Verification**: The validated code bundle is sent to the `HumanVerifierAgent` for final expert review (or approved directly via the React SPA wizard).
-22. **Async Publishing**: On approval, the Orchestrator spawns a second background task to push the code to GitHub via the REST API (direct push to the configured branch). The workflow state is persisted to `PUBLISH` via `WorkflowStateManager`.
+21. **Artifact Verification**: The validated code bundle is sent back to the React SPA for the user to review and approve.
+22. **Async Publishing**: On approval, the Orchestrator spawns a background task to push the code to GitHub via the REST API (direct push to the configured branch). The workflow state is persisted to `PUBLISH` via `WorkflowStateManager`.
 23. **Immediate Return**: The Orchestrator returns a `processing` status to the client, along with the review IDs needed to track the background tasks.
 
 #### Phase 6: Client Polling
@@ -703,15 +619,16 @@ The final URLs (SharePoint page, GitHub commit) are **not** returned here but mu
 
 ### 4.6 Error Handling Strategy
 
-The Orchestrator implements robust error handling for both synchronous agent interactions and asynchronous background tasks:
+The Orchestrator implements robust error handling for both synchronous workflow steps and asynchronous background tasks:
 
--   **Vision/Retrieval/Generator Fails**: Orchestrator catches `A2AError`, retries 3x, and returns a structured error response if exhausted.
+-   **In-Process Step Failures**: All workflow steps run in the same process, so exceptions propagate immediately. The Orchestrator catches exceptions from each phase and returns a structured error response.
 -   **Validation Loop**: If artifact validation fails 3 times, the workflow halts and returns the validation errors for manual intervention.
 -   **Async Publishing Fails**: 
     -   If SharePoint or GitHub API calls fail, the background worker catches the exception.
     -   It updates the AlloyDB status to `FAILED`.
     -   The client polling mechanism sees the failure and can display an error message or retry button to the user.
 -   **HA/DR Generation Fails**: The entire HA/DR generation step (service name extraction, retrieval, generation) is wrapped in a top-level try/except. If any sub-step fails, a placeholder message ("*HA/DR section generation failed. Please complete manually.*") is inserted into the `generated_sections` dictionary and the workflow continues. The pattern document is never blocked by HA/DR failures.
+
 ### 4.7 Multi-Channel Publishing
 
 The system separates the publishing of documentation and implementation code into distinct, asynchronous workflows. This ensures that documentation is available immediately upon approval, while code generation (which takes longer) proceeds in parallel.
@@ -741,26 +658,25 @@ The SharePoint publishing process involves a complex conversion from Markdown to
 
 ### 4.8 Artifact Generation Workflow (Pattern Synthesis)
 
-This workflow implements a "Pattern Synthesis" approach. Instead of generating infrastructure components in isolation, the system treats the entire architectural pattern as a single unit of generation. This ensures that cross-component dependencies (e.g., a Cloud Run service needing the name of a Cloud SQL instance) are resolved correctly during the generation phase.
+This workflow implements a "Pattern Synthesis" approach. Instead of generating infrastructure components in isolation, the system treats the entire architectural pattern as a single unit of generation. This ensures that cross-component dependencies (e.g., a Cloud Run service needing the name of a Cloud SQL instance) are resolved correctly during the generation phase. The entire workflow runs **in-process** as the Phase 2 ADK `SequentialAgent` + `LoopAgent`.
 
 #### 4.8.1 System Components
 
 | Component | Responsibility |
 |-----------|----------------|
-| **OrchestratorAgent** | The central state machine that drives the workflow. It manages the lifecycle of the request, handles retries for validation failures, coordinates the **async handover** to publishers, and persists workflow state to AlloyDB via `WorkflowStateManager` at every phase transition for resumable sessions. Exposes task-based endpoints (`phase1_generate_docs`, `approve_docs`, `phase2_generate_code`, `approve_code`, `get_publish_status`, `resume_workflow`, `list_workflows`). |
-| **AlloyDBManager** | **State Store**. It acts as the single source of truth for the status of both human reviews and async publishing tasks. It allows the frontend to poll for completion without blocking the agent. |
-| **ComponentSpecification** | **Analyzer**. It parses the high-level design documentation and performs **real-time lookups** against GitHub repositories (via `GitHubMCPTerraformClient`) and AWS Service Catalog (via `ServiceCatalogClient`) to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. |
+| **OrchestratorAgent** | The central state machine that drives the workflow. Builds a `WorkflowContext` with the full document and references to core logic modules, then delegates to the `Phase2ArtifactWorkflow` (`SequentialAgent`). Manages the lifecycle of the request, persists workflow state to AlloyDB via `WorkflowStateManager` at every phase transition for resumable sessions. |
+| **AlloyDBManager** | **State Store**. Acts as the single source of truth for the status of both human reviews and async publishing tasks. Allows the frontend to poll for completion without blocking. |
+| **ComponentSpecification** | **Analyzer**. Invoked in-process by `ComponentSpecStep`. Parses the high-level design documentation and performs **real-time lookups** against GitHub repositories (via `GitHubMCPTerraformClient`) and AWS Service Catalog (via `ServiceCatalogClient`) to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. |
 | **GitHubMCPTerraformClient** | **Tier 1 Schema Source**. Searches configured GitHub repos for Terraform modules using the MCP Server protocol (with PyGithub REST API fallback). Parses `variables.tf` and `outputs.tf` using `python-hcl2`. Returns `TerraformModuleSpec` dataclasses. |
 | **ServiceCatalogClient** | **Tier 2 Schema Source** (Fallback). Queries AWS Service Catalog via `boto3` for CloudFormation products, extracts provisioning parameters and constraints. Returns `ServiceCatalogProductSpec` dataclasses. Caches results in-memory. |
-| **ArtifactGenerator** | **Synthesizer**. It fetches **"Golden Sample" IaC templates** from a GCS bucket to benchmark the generated code against organizational best practices. It then generates a holistic "Artifact Bundle" (IaC + Boilerplate) in a single consistent pass. |
-| **ArtifactValidator** | **Quality Gate**. It inspects the generated Artifact Bundle against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices Adherence (Medium). Scores 0-100 with PASS/NEEDS_REVISION verdicts. |
-| **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. Currently operates in simulated auto-approval mode; user approval is handled via the React SPA wizard. |
-| **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub) as a background task using direct REST API Git tree manipulation. |
+| **PatternArtifactGenerator** | **Synthesizer**. Invoked in-process by `ArtifactGenerateStep`. Fetches **"Golden Sample" IaC templates** from a GCS bucket to benchmark the generated code against organizational best practices. Generates a holistic "Artifact Bundle" (IaC + Boilerplate) in a single consistent pass. |
+| **ArtifactValidator** | **Quality Gate**. Invoked in-process by `ArtifactValidateStep`. Inspects the generated Artifact Bundle against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices Adherence (Medium). Scores 0-100 with PASS/NEEDS_REVISION verdicts. |
+| **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to GitHub as a background task using direct REST API Git tree manipulation. |
 | **SharePointPublisher** | **Docs Publisher**. Publishes design documentation to the enterprise SharePoint knowledge base as a background task. Converts Markdown to SharePoint modern page canvas layout with web parts, renders Mermaid diagrams via Kroki, and re-hosts GCS-stored HA/DR PNG diagrams to SharePoint Site Assets for inline rendering. |
 
 #### 4.8.2 Component Diagram
 
-The following diagram illustrates the structural relationships and information flow between the synthesis components, highlighting the async publishing path.
+The following diagram illustrates the structural relationships and information flow between the synthesis components, highlighting the in-process execution model.
 
 ```mermaid
 graph TD
@@ -774,10 +690,16 @@ graph TD
         WFS[(AlloyDB<br/>Workflow State)]
     end
 
-    subgraph "Pattern Synthesis Core"
-        CompSpec["Component<br/>Specification"]
-        ArtGen["Artifact<br/>Generator"]
-        ArtVal["Artifact<br/>Validator"]
+    subgraph "Phase 2 ADK Workflow (in-process)"
+        CompSpec["ComponentSpecStep<br/>(WorkflowAgent)"]
+        ArtGen["ArtifactGenerateStep<br/>(WorkflowAgent)"]
+        ArtVal["ArtifactValidateStep<br/>(WorkflowAgent)"]
+    end
+
+    subgraph "Core Logic Modules"
+        CompSpecEngine["ComponentSpecification"]
+        ArtGenEngine["PatternArtifactGenerator"]
+        ArtValEngine["ArtifactValidator"]
     end
 
     subgraph "Real-Time Component Sources"
@@ -810,47 +732,46 @@ graph TD
     PubDocs -->|Update State| DB
     PubCode -->|Update State| DB
     
-    GCS -->|Fetch Templates| ArtGen
-    GCS -->|Fetch Templates| ArtVal
+    GCS -->|Fetch Templates| ArtGenEngine
+    GCS -->|Fetch Templates| ArtValEngine
 
-    Orch -->|Doc Text| CompSpec
-    CompSpec -->|Normalize Types| CompSources
+    Orch -->|WorkflowContext| CompSpec
+    CompSpec -->|in-process| CompSpecEngine
+    CompSpecEngine -->|Normalize Types| CompSources
     CompSources -->|Tier 1 Lookup| GitMCP
     CompSources -->|Tier 2 Fallback| SvcCat
     GitMCP -->|Search & Parse| GitRepos
     SvcCat -->|Query Products| AWSSC
-    CompSpec -->|Specification JSON| Orch
 
-    Orch -->|Spec + Doc| ArtGen
-    ArtGen -->|Artifact Bundle| Orch
-
-    Orch -->|Artifact Bundle| ArtVal
-    ArtVal -->|Validation Result| Orch
+    CompSpec -->|Specification in context| ArtGen
+    ArtGen -->|in-process| ArtGenEngine
+    ArtGen -->|Artifacts in context| ArtVal
+    ArtVal -->|in-process| ArtValEngine
 ```
 
 #### 4.8.3 Sequence Diagram
 
-This sequence diagram details the lifecycle of a request from approved documentation to published artifacts, emphasizing the non-blocking nature of the operations.
+This sequence diagram details the lifecycle of a request from approved documentation to published artifacts, emphasizing the in-process execution model.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Client as React SPA
     participant Orch as Orchestrator Agent
-    participant Spec as Component Spec Agent
+    participant WCtx as WorkflowContext
+    participant CompStep as ComponentSpecStep
     participant GitMCP as GitHub MCP Client
     participant SvcCat as Service Catalog Client
-    participant Gen as Artifact Gen Agent
+    participant GenStep as ArtifactGenerateStep
     participant GCS as GCS Bucket
-    participant Val as Artifact Validator Agent
-    participant Human as Human Verifier
+    participant ValStep as ArtifactValidateStep
     participant DB as AlloyDB
     participant Async as Background Tasks
 
-    Note over Orch, Async: Phase 1: Pattern Approval & Async Doc Publishing
+    Note over Orch, Async: Phase 3: Pattern Approval & Async Doc Publishing
     
-    Orch->>Human: request_approval(pattern_text)
-    Human-->>Orch: APPROVED (ID: PID-1)
+    Client->>Orch: POST /invoke {task: "approve_docs", workflow_id}
+    Orch->>DB: Create review record (PID-1)
     
     par Fire & Forget
         Orch->>Async: publish_docs(PID-1)
@@ -858,41 +779,49 @@ sequenceDiagram
         Note right of Async: Uploads to SharePoint...
         Async->>DB: UPDATE status='COMPLETED' url='...'
     and Continue Execution
-        Orch->>Spec: generate_component_spec(pattern_text)
+        Client->>Orch: POST /invoke {task: "phase2_generate_code", workflow_id}
     end
     
-    Note over Orch, Async: Phase 2: Real-Time Schema Resolution & Holistic Synthesis
+    Note over Orch, ValStep: Phase 4: In-Process Artifact Generation (ADK Workflow)
 
-    Spec->>Spec: Extract keywords via LLM
-    Spec->>Spec: Normalize types (component_sources.py)
+    Orch->>WCtx: Seed context (full_doc, module refs)
+    
+    Orch->>CompStep: Run ComponentSpecStep (in-process)
+    CompStep->>CompStep: Extract keywords via LLM
+    CompStep->>CompStep: Normalize types (component_sources.py)
     
     loop For each component type
-        Spec->>GitMCP: search_terraform_module(type)
+        CompStep->>GitMCP: search_terraform_module(type)
         alt Module found in GitHub
-            GitMCP-->>Spec: TerraformModuleSpec (variables, outputs)
+            GitMCP-->>CompStep: TerraformModuleSpec (variables, outputs)
         else Not found — Fallback
-            GitMCP-->>Spec: None
-            Spec->>SvcCat: search_product(type)
-            SvcCat-->>Spec: ServiceCatalogProductSpec (parameters)
+            GitMCP-->>CompStep: None
+            CompStep->>SvcCat: search_product(type)
+            SvcCat-->>CompStep: ServiceCatalogProductSpec (parameters)
         end
     end
     
-    Spec->>Spec: Topological sort (graphlib)
-    Spec-->>Orch: ComponentSpecification (JSON)
+    CompStep->>CompStep: Topological sort (graphlib)
+    CompStep->>WCtx: Store ComponentSpecification
 
-    loop Quality Assurance Loop (Max 3 Retries)
-        Orch->>Gen: generate_artifact(spec, pattern_text)
-        Gen->>GCS: fetch_golden_samples(types)
-        GCS-->>Gen: approved_templates
-        Gen-->>Orch: ArtifactBundle
-        Orch->>Val: validate_artifact(artifacts)
-        Val-->>Orch: ValidationResult (score, PASS/NEEDS_REVISION)
+    Note over Orch, ValStep: ArtifactRefinementLoop (LoopAgent, max 3)
+    
+    loop Quality Assurance Loop (exit on validation_passed)
+        Orch->>GenStep: Run ArtifactGenerateStep (in-process)
+        GenStep->>GCS: fetch_golden_samples(types)
+        GCS-->>GenStep: approved_templates
+        GenStep->>WCtx: Store ArtifactBundle
+        
+        Orch->>ValStep: Run ArtifactValidateStep (in-process)
+        ValStep->>WCtx: Read ArtifactBundle
+        ValStep->>ValStep: 6-point rubric validation
+        ValStep->>WCtx: Store ValidationResult + set validation_passed (or critique)
     end
 
-    Note over Orch, Async: Phase 3: Artifact Approval & Async Code Publishing
+    Note over Orch, Async: Phase 5: Artifact Approval & Async Code Publishing
 
-    Orch->>Human: request_approval(artifacts)
-    Human-->>Orch: APPROVED (ID: AID-2)
+    Orch-->>Client: Return artifact bundle
+    Client->>Orch: POST /invoke {task: "approve_code", workflow_id}
 
     par Fire & Forget
         Orch->>Async: publish_code(AID-2)
@@ -903,61 +832,53 @@ sequenceDiagram
         Orch-->>Client: {status: "processing", p_id: "PID-1", a_id: "AID-2"}
     end
 
-    Note over Client, DB: Phase 4: Client-Side Polling
+    Note over Client, DB: Phase 6: Client-Side Polling
     
     loop Poll until both COMPLETED
-        Client->>Orch: GET /invoke {task: "get_publish_status"}
+        Client->>Orch: POST /invoke {task: "get_publish_status", workflow_id}
         Orch->>DB: SELECT status, url FROM reviews
-        DB-->>Orch: {doc_status: "COMPLETED", code_status: "IN_PROGRESS"}
+        DB-->>Orch: {doc_status, code_status}
         Orch-->>Client: Status update
     end
 ```
 
 **Step-by-Step Explanation:**
 
-1.  **Request Pattern Approval**: The `OrchestratorAgent` sends the generated markdown documentation to the `HumanVerifierAgent` for review (or the user approves directly via the React SPA wizard).
-2.  **Pattern Approved**: The human expert approves the content. The Verifier returns `APPROVED` status and a unique review ID (`PID-1`).
-3.  **Trigger Async Publish (Docs)**: The Orchestrator immediately spawns a background task (`asyncio.create_task`) to publish the docs, passing `PID-1`.
-4.  **Docs Status: IN_PROGRESS**: The background worker updates the `AlloyDBManager` setting the status of `PID-1` to `IN_PROGRESS`.
-5.  **Docs Status: COMPLETED**: After successfully uploading to SharePoint, the worker updates the status to `COMPLETED` and saves the Page URL.
-6.  **Generate Component Spec**: *Concurrently* with steps 3-5, the Orchestrator calls the `ComponentSpecificationAgent`.
-7.  **Keyword Extraction**: The agent uses Gemini 1.5 Pro to extract infrastructure component keywords from the documentation.
-8.  **Type Normalization**: Raw keywords are normalized to canonical component types using the `component_sources.py` alias dictionary (40+ mappings, e.g., "postgres" → `rds_instance`).
-9.  **Real-Time Schema Lookup (Tier 1 — GitHub)**: For each component type, the `GitHubMCPTerraformClient` searches configured repositories for matching Terraform modules. It uses the MCP Server protocol when available, falling back to PyGithub REST API. Found modules are parsed from `variables.tf` and `outputs.tf` using `python-hcl2`.
-10. **Real-Time Schema Lookup (Tier 2 — AWS)**: If no GitHub module is found for a component, the `ServiceCatalogClient` queries AWS Service Catalog via `boto3` for matching CloudFormation products, extracting provisioning parameters and constraints.
-11. **Return Specification**: The agent assembles all retrieved schemas and uses the LLM to produce a structured JSON dependency graph, topologically sorted via `graphlib.TopologicalSorter`.
-12. **Generate Artifact Bundle**: The Orchestrator calls the `ArtifactGenerationAgent` with the specification and pattern documentation.
-13. **Fetch Golden Samples**: The Generator fetches **approved IaC templates** (Golden Samples) from the GCS bucket to use as few-shot examples for the identified components.
-14. **Return Artifacts**: The generator produces a complete bundle containing Terraform and application code, strictly following the Golden Sample patterns.
-15. **Validate Artifacts**: The Orchestrator sends the bundle to the `ArtifactValidationAgent` for automated quality checks against a 6-point rubric (Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, Best Practices). Returns a score (0-100) and PASS/NEEDS_REVISION status.
-16. **Return Validation Result**: If FAIL, the loop repeats with critique feedback (max 3 retries).
-17. **Request Artifact Approval**: Once validated, the Orchestrator sends the code bundle to the `HumanVerifierAgent` for final sign-off (or the user approves via the React SPA wizard).
-18. **Artifact Approved**: The human expert approves the code. The Verifier returns `APPROVED` status and a unique review ID (`AID-2`).
-19. **Trigger Async Publish (Code)**: The Orchestrator immediately spawns a background task to publish the code, passing `AID-2`.
-20. **Code Status: IN_PROGRESS**: The background worker updates the `AlloyDBManager` setting the status of `AID-2` to `IN_PROGRESS`.
-21. **Code Status: COMPLETED**: After successfully pushing to GitHub via REST API (Git tree manipulation), the worker updates the status to `COMPLETED` and saves the Commit URL.
-22. **Return Immediate Response**: *Concurrently* with steps 19-21, the Orchestrator returns a response to the Client with `status: processing` and both IDs (`PID-1`, `AID-2`).
-23. **Poll Status**: The React SPA's `PublishStep` component polls the Orchestrator's `get_publish_status` task, which queries `AlloyDBManager` using the provided IDs.
-24. **Return Status**: The Orchestrator returns the current status (e.g., Docs=COMPLETED, Code=IN_PROGRESS) and any available URLs.
+1.  **Approve Documentation**: The user approves the generated documentation via the React SPA wizard.
+2.  **Trigger Async Publish (Docs)**: The Orchestrator immediately spawns a background task (`asyncio.create_task`) to publish the docs.
+3.  **Build Phase 2 Context**: The Orchestrator builds a `WorkflowContext` seeded with the full document text and references to `ComponentSpecification`, `PatternArtifactGenerator`, and `ArtifactValidator` core logic modules.
+4.  **ComponentSpecStep (In-Process)**: The `Phase2ArtifactWorkflow` `SequentialAgent` runs the `ComponentSpecStep` first.
+5.  **Keyword Extraction**: The step uses Gemini 1.5 Pro to extract infrastructure component keywords from the documentation.
+6.  **Type Normalization**: Raw keywords are normalized to canonical component types using the `component_sources.py` alias dictionary (40+ mappings, e.g., "postgres" → `rds_instance`).
+7.  **Real-Time Schema Lookup (Tier 1 — GitHub)**: For each component type, the `GitHubMCPTerraformClient` searches configured repositories for matching Terraform modules. Found modules are parsed from `variables.tf` and `outputs.tf` using `python-hcl2`.
+8.  **Real-Time Schema Lookup (Tier 2 — AWS)**: If no GitHub module is found for a component, the `ServiceCatalogClient` queries AWS Service Catalog via `boto3` for matching CloudFormation products.
+9.  **Return Specification**: The step assembles all retrieved schemas and uses the LLM to produce a structured JSON dependency graph, topologically sorted via `graphlib.TopologicalSorter`. The result is stored in the `WorkflowContext`.
+10. **ArtifactRefinementLoop**: The `LoopAgent` begins iterating.
+11. **ArtifactGenerateStep (In-Process)**: Reads the specification from the context, fetches Golden Sample templates from GCS, and generates a complete bundle containing Terraform and application code.
+12. **ArtifactValidateStep (In-Process)**: Validates the bundle against the 6-point rubric. On success, sets `validation_passed` in the context. On failure, stores the critique for the next iteration.
+13. **Loop Exit**: The `LoopAgent` exits when `validation_passed` is set or after 3 iterations.
+14. **Return Artifacts**: The Orchestrator extracts the artifacts from the `WorkflowContext` and returns them to the client.
+15. **Approve Artifacts**: The user approves the code via the React SPA wizard.
+16. **Trigger Async Publish (Code)**: The Orchestrator spawns a background task to push the code to GitHub via REST API.
+17. **Poll Status**: The React SPA polls `get_publish_status` until both docs and code publishing are complete.
 
 ### 4.9 HA/DR Documentation & Diagram Generation Workflow
 
-This workflow generates the High Availability / Disaster Recovery (HA/DR) section of a pattern document by synthesizing service-level HA/DR reference documentation with donor pattern examples, and produces visual component diagrams (SVG + draw.io XML + PNG) for every DR strategy × lifecycle phase combination. In v3.0, HA/DR section generation executes **inside** the `LoopAgent` refinement loop (as `HADRSectionsStep`), while diagram generation executes **after** the loop (as `HADRDiagramStep`). All core logic is invoked **in-process** — no A2A HTTP calls. Diagrams are generated **programmatically by default** from a structured `STATE_MATRIX`, with an opt-in AI mode available.
+This workflow generates the High Availability / Disaster Recovery (HA/DR) section of a pattern document by synthesizing service-level HA/DR reference documentation with donor pattern examples, and produces visual component diagrams (SVG + draw.io XML + PNG) for every DR strategy × lifecycle phase combination. HA/DR section generation executes **inside** the `LoopAgent` refinement loop (as `HADRSectionsStep`), while diagram generation executes **after** the loop (as `HADRDiagramStep`). All core logic is invoked **in-process** via shared `WorkflowContext`. Diagrams are generated **programmatically** from a structured `STATE_MATRIX`, with an opt-in AI mode available.
 
 #### 4.9.1 System Components
 
 | Component | Responsibility |
 |-----------|----------------|
-| **OrchestratorAgent** | Instantiates all HA/DR core logic modules (`ServiceHADRRetriever`, `HADRDocumentationGenerator`, `HADRDiagramGenerator`, `HADRDiagramStorage`) directly and shares them across workflow steps via `WorkflowContext`. Coordinates the HA/DR generation flow through in-process `WorkflowAgent` steps. No A2A HTTP calls for HA/DR operations. |
+| **OrchestratorAgent** | Instantiates all HA/DR core logic modules (`ServiceHADRRetriever`, `HADRDocumentationGenerator`, `HADRDiagramGenerator`, `HADRDiagramStorage`) directly and shares them across workflow steps via `WorkflowContext`. Coordinates the HA/DR generation flow through in-process `WorkflowAgent` steps. |
 | **HADRSectionsStep** (in-process) | ADK `WorkflowAgent` step running **inside** the `LoopAgent`. Extracts service names (cached in `WorkflowContext`), calls `ServiceHADRRetriever` for hybrid retrieval (metadata filter + vector search, N×4 parallel queries), calls `HADRDocumentationGenerator` for donor parsing and per-strategy text generation (4 parallel, 120 s timeout), and merges results into `generated_sections["HA/DR"]`. |
 | **HADRDiagramStep** (in-process) | ADK `WorkflowAgent` step running **after** the `LoopAgent`. Calls `HADRDiagramGenerator` to produce 12 diagrams programmatically (default) or via AI, then calls `HADRDiagramStorage` to upload to GCS. Embeds diagram URLs into HA/DR sections. |
-| **ServiceHADRRetriever** (core logic) | Queries the `service-hadr-datastore` in Vertex AI Search using hybrid retrieval (metadata filter + vector search). Returns chunks organized as `service_name → dr_strategy → [chunks]`. Each chunk carries structured metadata including `service_name`, `service_type`, `dr_strategy`, and `lifecycle_phase`. Methods: `aretrieve_service_hadr` (single), `aretrieve_all_services_hadr` (bulk — dispatches all N × 4 queries in parallel via `asyncio.gather`). |
-| **HADRDocumentationGenerator** (core logic) | Takes service-level HA/DR chunks, donor pattern HA/DR sections (one-shot), and pattern context. Generates one DR strategy section at a time via Gemini 1.5 Pro. Produces Markdown with per-phase summary tables showing each service's state. Methods: `agenerate_hadr_sections` (all 4 strategies in parallel via `asyncio.gather` with 120 s per-strategy timeout), `extract_donor_hadr_sections` (parses donor HTML using regex heading detection). |
-| **HADRDiagramGenerator** (core logic) | Produces SVG, draw.io XML (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`), and PNG fallback images for every DR strategy × lifecycle phase combination (4 × 3 = 12 diagrams). **Default mode (programmatic)**: Uses `STATE_MATRIX` — a dictionary mapping each `(strategy, phase)` to a `RegionStates` dataclass — to build deterministic SVG via `_build_programmatic_svg()` and draw.io XML via `_build_programmatic_drawio()`. Zero Gemini calls. **Opt-in AI mode** (`use_ai_diagrams=True`): SVG generated via Gemini (`gemini-2.0-flash` default, `max_output_tokens=4096`); draw.io XML is always programmatic even in AI mode. |
+| **ServiceHADRRetriever** (core logic) | Queries the `service-hadr-datastore` in Vertex AI Search using hybrid retrieval (metadata filter + vector search). Returns chunks organized as `service_name → dr_strategy → [chunks]`. Methods: `aretrieve_service_hadr` (single), `aretrieve_all_services_hadr` (bulk — dispatches all N × 4 queries in parallel via `asyncio.gather`). |
+| **HADRDocumentationGenerator** (core logic) | Takes service-level HA/DR chunks, donor pattern HA/DR sections (one-shot), and pattern context. Generates one DR strategy section at a time via Gemini 1.5 Pro. Produces Markdown with per-phase summary tables. Methods: `agenerate_hadr_sections` (all 4 strategies in parallel via `asyncio.gather` with 120 s per-strategy timeout), `extract_donor_hadr_sections` (parses donor HTML using regex heading detection). |
+| **HADRDiagramGenerator** (core logic) | Produces SVG, draw.io XML (with official AWS/GCP icon shapes from `DRAWIO_SERVICE_ICONS`), and PNG fallback images for every DR strategy × lifecycle phase combination (4 × 3 = 12 diagrams). **Default mode (programmatic)**: Uses `STATE_MATRIX` to build deterministic SVG via `_build_programmatic_svg()` and draw.io XML via `_build_programmatic_drawio()`. Zero Gemini calls. **Opt-in AI mode** (`use_ai_diagrams=True`): SVG generated via Gemini; draw.io XML is always programmatic. |
 | **HADRDiagramStorage** (core logic) | Uploads SVG + draw.io XML + PNG to GCS in parallel via `asyncio.gather`, 60 s timeout per upload. Returns URL map `{(strategy, phase) → {svg_url, drawio_url, png_url}}`. |
-| **Standalone Agent Wrappers** (ports 9006–9008) | `HADRRetrieverAgent`, `HADRGeneratorAgent`, `HADRDiagramGeneratorAgent` are preserved as standalone A2A HTTP agent wrappers for independent deployment and testing, but are **no longer called by the Orchestrator**. |
-| **Vertex AI Search (HA/DR Data Store)** | Dedicated data store containing service-level HA/DR documentation chunks with structured metadata for precise filtered retrieval. Populated by the Service HA/DR Ingestion Pipeline (Section 3.6). |
-| **GCS (Diagram Bucket)** | Stores diagram artefacts at path `patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.{svg,drawio,png}`. During SharePoint publishing, PNG files are **re-hosted to SharePoint Site Assets** (`GeneratedDiagrams/` folder) for inline rendering; SVG and draw.io files remain served from GCS as view/download links. |
+| **Vertex AI Search (HA/DR Data Store)** | Dedicated data store containing service-level HA/DR documentation chunks with structured metadata for precise filtered retrieval. Populated by the Service HA/DR Ingestion Pipeline (Section 3.5). |
+| **GCS (Diagram Bucket)** | Stores diagram artefacts at path `patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.{svg,drawio,png}`. During SharePoint publishing, PNG files are **re-hosted to SharePoint Site Assets** for inline rendering; SVG and draw.io files remain served from GCS as view/download links. |
 
 #### 4.9.2 Component Diagram
 
@@ -965,7 +886,7 @@ This workflow generates the High Availability / Disaster Recovery (HA/DR) sectio
 graph TD
     subgraph "Phase 1 SequentialAgent (in-process)"
         subgraph "LoopAgent (max 3 iterations)"
-            Draft[ContentDraftStep<br/>PatternGenerator]
+            Draft[PatternGenerateStep<br/>PatternGenerator]
             HADR_Step[HADRSectionsStep<br/>- Extract service names<br/>- Retrieve + Generate text]
             Review[FullDocReviewStep<br/>PatternReviewer]
         end
@@ -988,12 +909,6 @@ graph TD
 
     subgraph "Donor Context"
         DonorHTML[Donor Pattern HTML]
-    end
-
-    subgraph "Standalone Agents (preserved, not called by Orchestrator)"
-        RetAgent["HADRRetrieverAgent (port 9006)"]
-        GenAgent["HADRGeneratorAgent (port 9007)"]
-        DiagAgent["HADRDiagramGeneratorAgent (port 9008)"]
     end
 
     %% Text Generation Flow (in-process)
@@ -1142,7 +1057,7 @@ sequenceDiagram
     *   **SVG→PNG Conversion**: Local conversion using `svglib` + `reportlab` (with `pycairo` shim on Windows). Falls back to `cairosvg` on Linux.
     *   **Zero Gemini calls, < 1 second for all 12 diagrams, zero tokens consumed.**
 9.  **Opt-In AI Mode**: When `use_ai_diagrams=True`:
-    *   **SVG**: Generated via Gemini (`gemini-2.0-flash` default, configurable via `ai_model_name`). `max_output_tokens=4096` (reduced from 8192). Uses `asyncio.gather` with `Semaphore(6)` concurrency control.
+    *   **SVG**: Generated via Gemini (`gemini-2.0-flash` default, configurable via `ai_model_name`). `max_output_tokens=4096`. Uses `asyncio.gather` with `Semaphore(6)` concurrency control.
     *   **draw.io XML**: Always programmatic via `_build_programmatic_drawio()` — deterministic, zero tokens, always-valid XML.
     *   **Fallback**: On Gemini timeout or error, falls back to `_build_programmatic_svg()` automatically.
 10. **draw.io Icon Shape Registry**: The `DRAWIO_SERVICE_ICONS` dictionary maps 40+ cloud services to their official draw.io shape library identifiers:
@@ -1185,7 +1100,7 @@ sequenceDiagram
 
 ## 4.10 Client-Side Design: React SPA (Pattern Factory UI)
 
-The Pattern Factory UI is a **React 18 + Vite** single-page application that replaced the earlier Streamlit prototype. It implements a stateful 5-step chevron wizard that guides the user through the multi-stage artifact generation process. Unlike a traditional request-response interface, the app uses **React `useState`** as a client-side state machine to handle the Human-in-the-Loop (HITL) requirements for both documentation and code verification. Workflow state is persisted to **AlloyDB** via the `WorkflowStateManager` so users can close the browser and resume later.
+The Pattern Factory UI is a **React 18 + Vite** single-page application that implements a stateful 5-step chevron wizard guiding the user through the multi-stage artifact generation process. The app uses **React `useState`** as a client-side state machine to handle the Human-in-the-Loop (HITL) requirements for both documentation and code verification. Workflow state is persisted to **AlloyDB** via the `WorkflowStateManager` so users can close the browser and resume later.
 
 ### 4.10.1 State Management Architecture
 
@@ -1227,7 +1142,7 @@ The application interacts with specific Orchestrator tasks that correspond to th
 **1. Phase 1: Input & Document Generation**
    - **User Action**: Uploads an architecture diagram image and enters a title/prompt.
    - **API Call**: `POST /invoke` with task `phase1_generate_docs`, payload includes `user_id` and optional `workflow_id`.
-   - **System**: Orchestrator creates a `workflow_state` row, runs the Phase 1 `SequentialAgent` in-process: VisionAnalysisStep → DonorRetrievalStep → LoopAgent (ContentDraftStep → HADRSectionsStep → FullDocReviewStep, max 3 iterations) → HADRDiagramStep (programmatic diagrams). Saves state to `DOC_REVIEW` phase.
+   - **System**: Orchestrator creates a `workflow_state` row, runs the Phase 1 `SequentialAgent` in-process: VisionAnalysisStep → DonorRetrievalStep → LoopAgent (PatternGenerateStep → HADRSectionsStep → FullDocReviewStep, max 3 iterations) → HADRDiagramStep (programmatic diagrams). Saves state to `DOC_REVIEW` phase.
    - **Result**: Returns sections (including HA/DR with embedded diagram URLs), full markdown content, and `workflow_id`. App stores `workflow_id` in localStorage and transitions to `DOC_REVIEW`.
 
 **2. Phase 2: Document Human Review**
@@ -1239,7 +1154,7 @@ The application interacts with specific Orchestrator tasks that correspond to th
 **3. Phase 3: Code Generation & Validation**
    - **System Action**: Automatically triggers code generation on step mount.
    - **API Call**: `POST /invoke` with task `phase2_generate_code`, payload includes `workflow_id`.
-   - **System**: Orchestrator calls ComponentSpecificationAgent (real-time GitHub MCP + AWS Service Catalog lookups) → ArtifactGenerationAgent (Golden Sample injection) → ArtifactValidationAgent (6-point rubric, max 3 retries). Saves state to `CODE_REVIEW`.
+   - **System**: Orchestrator runs the Phase 2 `SequentialAgent` in-process: ComponentSpecStep (real-time GitHub MCP + AWS Service Catalog lookups) → LoopAgent (ArtifactGenerateStep → ArtifactValidateStep, max 3 iterations, exit on `validation_passed`). Saves state to `CODE_REVIEW`.
    - **Result**: Returns artifact bundle layout and `workflow_id`. App transitions to `CODE_REVIEW`.
 
 **4. Phase 4: Code Human Review**
@@ -1386,23 +1301,22 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 1. **Robust Data Ingestion**: Linear pipeline architecture eliminates distributed complexity while ensuring data consistency
 2. **Service HA/DR Ingestion**: Dedicated pipeline indexes service-level HA/DR documentation with rich structured metadata for precise filtered retrieval
 3. **Intelligent Retrieval**: Semantic search and vector similarity find the most relevant patterns
-4. **Multi-Agent Serving**: Specialized agents collaborate to produce high-quality documentation
-5. **HA/DR Documentation Generation**: Automated synthesis of pattern-level HA/DR sections grounded in service-level references and donor pattern examples
-6. **HA/DR Diagram Generation**: Automated production of SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG component diagrams for every DR strategy × lifecycle phase combination (12 diagrams per pattern). **Generated programmatically by default** from a structured `STATE_MATRIX` (zero Gemini calls, < 1 second); opt-in AI mode available for creative SVG layouts
-7. **ADK Workflow Orchestration (v3.0)**: Phase 1 doc generation uses in-process `SequentialAgent` + `LoopAgent` primitives with shared `WorkflowContext`, eliminating A2A HTTP overhead and enabling HA/DR quality improvement across refinement iterations
-8. **Real-Time Schema Grounding**: Live infrastructure lookups via GitHub MCP and AWS Service Catalog ensure generated artifacts always reflect actual module interfaces
-9. **Quality Assurance**: Reflection loop with multi-rubric automated validation ensures output meets production standards
-10. **React SPA**: Modern React 18 + Vite single-page application with chevron-style wizard, replacing the Streamlit prototype
-11. **Resumable Workflows**: 3-layer state persistence (AlloyDB `workflow_state` table + Orchestrator API + browser `localStorage`) allows users to close the browser and resume from the last completed phase
+4. **ADK Workflow Orchestration**: Both Phase 1 (doc generation) and Phase 2 (artifact generation) use in-process `SequentialAgent` + `LoopAgent` primitives with shared `WorkflowContext`, eliminating all inter-agent HTTP overhead
+5. **HA/DR Documentation Generation**: Automated synthesis of pattern-level HA/DR sections grounded in service-level references and donor pattern examples, with HA/DR quality improvement across refinement iterations
+6. **HA/DR Diagram Generation**: Automated production of SVG, draw.io XML (with official AWS/GCP icon shapes), and PNG component diagrams for every DR strategy × lifecycle phase combination (12 diagrams per pattern). Generated programmatically from a structured `STATE_MATRIX` (zero Gemini calls, < 1 second); opt-in AI mode available
+7. **Real-Time Schema Grounding**: Live infrastructure lookups via GitHub MCP and AWS Service Catalog ensure generated artifacts always reflect actual module interfaces
+8. **Quality Assurance**: Reflection loops with multi-rubric automated validation ensure output meets production standards
+9. **React SPA**: Modern React 18 + Vite single-page application with chevron-style wizard
+10. **Resumable Workflows**: 3-layer state persistence (AlloyDB `workflow_state` table + Orchestrator API + browser `localStorage`) allows users to close the browser and resume from the last completed phase
 
 ### Key Achievements
 
 - **Reliability**: Linear processing pipelines ensure consistent state without complex transaction management
 - **Freshness**: Real-time component resolution eliminates stale catalog data by querying live GitHub repos and AWS Service Catalog at inference time
-- **Efficiency**: Managed pipelines leveraging Vertex AI Discovery Engine reduce operational overhead
-- **Quality**: Reflection loop with 6-point automated validation rubric achieves production-grade artifact quality
-- **Resilience**: Retry logic, exponential backoff, and health checks (liveness/readiness) ensure 99%+ success rate
-- **Scalability**: Handles 1000+ patterns and concurrent agent requests
+- **Efficiency**: All workflow steps run in a single process — no HTTP overhead, no JSON serialisation, no inter-agent timeout issues
+- **Quality**: Reflection loops with 6-point automated validation rubric achieve production-grade artifact quality
+- **Resilience**: Retry logic, error boundaries, and health checks (liveness/readiness) ensure high success rates
+- **Scalability**: Handles 1000+ patterns and concurrent requests
 - **Integration**: Multi-channel publishing to SharePoint (docs) and GitHub (code) with async status tracking
 - **HA/DR Coverage**: Automated generation of HA/DR sections covering four DR strategies with per-phase summary tables, grounded in service-level documentation
 - **HA/DR Diagrams**: 12 visual component diagrams per pattern (SVG + draw.io with official AWS/GCP icons + PNG) stored on GCS
@@ -1415,20 +1329,19 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 | Component | Status | Readiness | Notes |
 |-----------|--------|-----------|-------|
 | **Ingestion Service** | ✅ Complete | 90% | Streamlined linear definition; leverages Vertex AI Search for pattern documents. |
-| **Component Catalog** | ✅ Refactored | 85% | Migrated from offline pipeline to real-time GitHub MCP + AWS Service Catalog lookups. Legacy pipeline preserved. |
-| **Inference Service** | ✅ Complete | 90% | Phase-based orchestrator with A2A communication, async publishing, and AlloyDB state management. |
-| **Streamlit App** | ✅ Replaced | — | Superseded by React SPA (v2.4). Legacy `streamlit_app.py` preserved for reference. |
+| **Component Resolution** | ✅ Complete | 85% | Real-time GitHub MCP + AWS Service Catalog lookups at inference time. |
+| **Inference Service** | ✅ Complete | 90% | Single-process ADK workflow orchestrator with async publishing and AlloyDB state management. |
 | **React SPA** | ✅ Complete | 90% | React 18 + Vite single-page application with chevron wizard, collapsible panels, Vite dev proxy, nginx prod proxy, Cloud Run deployment. |
-| **Workflow Persistence** | ✅ Complete | 85% | 3-layer resumable workflow: AlloyDB `workflow_state` table (JSONB), Orchestrator `resume_workflow` / `list_workflows` tasks, browser `localStorage` pointer. `WorkflowStateManager` in `lib/workflow_state.py`. |
-| **Pattern Synthesis** | ✅ Complete | 85% | Generates IaC/Code; validates against 6-point rubric with GCS golden samples. |
+| **Workflow Persistence** | ✅ Complete | 85% | 3-layer resumable workflow: AlloyDB `workflow_state` table (JSONB), Orchestrator `resume_workflow` / `list_workflows` tasks, browser `localStorage` pointer. |
+| **Pattern Synthesis** | ✅ Complete | 85% | In-process ADK workflow: ComponentSpecStep → LoopAgent(ArtifactGenerateStep → ArtifactValidateStep). Validates against 6-point rubric with GCS golden samples. |
 | **GCP Integration** | ✅ Complete | 95% | Vertex AI, AlloyDB, GCS, and Pub/Sub fully integrated. |
 | **SharePoint Integration**| ✅ Complete | 90% | Supports both ingestion and automated publishing with Mermaid diagram rendering via Kroki and GCS HA/DR PNG re-hosting to Site Assets for inline rendering. |
 | **GitHub Integration** | ✅ Complete | 90% | Real-time module lookup (MCP + PyGithub) and automated code publishing (REST API). |
 | **AWS Integration** | ✅ Complete | 85% | Service Catalog product discovery via boto3 with in-memory caching. |
 | **HA/DR Ingestion** | ✅ Complete | 85% | Service-level HA/DR pipeline with hierarchical chunking and structured metadata. Dedicated Vertex AI Search data store. |
-| **HA/DR Generation** | ✅ Complete | 90% | Generates four DR strategy sections per pattern with donor one-shot + service-level grounding. In v3.0, runs in-process as `HADRSectionsStep` inside the `LoopAgent` (no A2A HTTP). Async parallel generation via `asyncio.gather` with 120 s timeout per strategy. Full-document reviewer critiques core + HA/DR together. |
-| **HA/DR Diagrams** | ✅ Complete | 95% | 12 diagrams per pattern (SVG + draw.io XML with AWS/GCP icon shapes + PNG). **Programmatic by default** from `STATE_MATRIX` (zero Gemini calls, < 1s). Opt-in AI mode uses `gemini-2.0-flash`. In v3.0, runs in-process as `HADRDiagramStep` after the `LoopAgent`. Parallel GCS upload (60 s timeout). |
-| **Error Handling** | ✅ Complete | 90% | Retry logic, exponential backoff, and component-level error boundaries. HA/DR generation wrapped in non-blocking try/except. |
+| **HA/DR Generation** | ✅ Complete | 90% | Generates four DR strategy sections per pattern with donor one-shot + service-level grounding. Runs in-process as `HADRSectionsStep` inside the `LoopAgent`. Async parallel generation via `asyncio.gather` with 120 s timeout per strategy. |
+| **HA/DR Diagrams** | ✅ Complete | 95% | 12 diagrams per pattern (SVG + draw.io XML with AWS/GCP icon shapes + PNG). Programmatic from `STATE_MATRIX` (zero Gemini calls, < 1s). Opt-in AI mode uses `gemini-2.0-flash`. Runs in-process as `HADRDiagramStep` after the `LoopAgent`. |
+| **Error Handling** | ✅ Complete | 90% | In-process exception propagation, component-level error boundaries, HA/DR wrapped in non-blocking try/except. |
 | **Monitoring** | ⚠️ Partial | 60% | Basic logging and agent metrics; needs OpenTelemetry/Dashboards. |
 | **Testing** | ⚠️ Partial | 70% | Unit tests exist; end-to-end integration tests needed. |
 
@@ -1438,14 +1351,11 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 - Create end-to-end integration tests
 - Establish shared data contracts between services
 - Align configuration variables across services
-- Resolve `TaskStatus.FAILED_RETRYABLE` enum gap (used by `ArtifactValidationAgent` but not defined in `adk_core.py`)
 
 **Phase 4 - Production Hardening** (Weeks 3-4):
 - Implement distributed tracing (OpenTelemetry)
 - Add comprehensive metrics and telemetry
-- Implement service mesh for dynamic discovery
 - Add rate limiting for Vertex AI APIs
-- Replace simulated auto-approval in `HumanVerifierAgent` with real async approval workflow
 - Implement GitHub feature branch + PR workflow in `GitHubMCPPublisher`
 
 **Phase 5 - Optimization** (Weeks 5-6):
@@ -1470,54 +1380,36 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 - Full document (4 sections, 2 revisions avg): 90-120 seconds
 - HA/DR service retrieval: 2-4 seconds per service × strategy query
 - HA/DR section generation: 10-15 seconds per DR strategy (4 strategies total, running in parallel)
-- HA/DR diagram generation (SVG + draw.io + PNG): 15-25 seconds per diagram (12 diagrams, max 4 concurrent)
+- HA/DR diagram generation (SVG + draw.io + PNG): < 1 second for all 12 diagrams (programmatic mode)
 - HA/DR diagram GCS upload: 2-5 seconds per 3-artefact bundle (12 bundles, all parallel)
-- Full HA/DR generation (text + diagrams, end-to-end): 45-75 seconds for a typical 5-service pattern (async parallel vs. 120-180 s sequential)
+- Full HA/DR generation (text + diagrams, end-to-end): 45-75 seconds for a typical 5-service pattern (async parallel)
 
 **Resource Utilization**:
+- Inference Service: 4-6 GB RAM, 2-3 vCPU (single process)
 - Ingestion Service: 2-4 GB RAM, 1-2 vCPU
-- Agent Swarm: 4-6 GB RAM total, 2-3 vCPU per agent
 - GCP Storage: ~500 MB per pattern (images + embeddings + text)
-
-### Agent Service Ports
-
-| Agent | Port | Endpoint |
-|-------|------|----------|
-| Orchestrator | 9000 | `http://localhost:9000/invoke` |
-| Retriever | 9001 | `http://localhost:9001/invoke` |
-| Generator | 9002 | `http://localhost:9002/invoke` |
-| Reviewer | 9003 | `http://localhost:9003/invoke` |
-| Artifact (Unified) | 9004 | `http://localhost:9004/invoke` |
-| Human Verifier | 9005 | `http://localhost:9005/invoke` |
-| HA/DR Retriever | 9006 | `http://localhost:9006/invoke` |
-| HA/DR Generator | 9007 | `http://localhost:9007/invoke` |
-| HA/DR Diagram Generator | 9008 | `http://localhost:9008/invoke` |
 
 ### Key Dependencies
 
-| Package | Purpose | Added in |
-|---------|---------|----------|
-| `FastAPI` / `uvicorn` | Agent HTTP servers | v1.0 |
-| `pydantic` | Request/response models | v1.0 |
-| `aiohttp` | Async A2A communication | v1.0 |
-| `google-cloud-aiplatform` | Vertex AI (Gemini LLM) | v1.0 |
-| `google-cloud-discoveryengine` | Vertex AI Search (RAG + HA/DR data store) | v1.0 |
-| `google-cloud-storage` | GCS (golden samples, images, HA/DR diagrams) | v1.0 |
-| `google-cloud-pubsub` | Pub/Sub (notifications) | v1.0 |
-| `sqlalchemy` / `pg8000` | AlloyDB (state management) | v1.0 |
-| `msal` | SharePoint authentication | v1.0 |
-| `streamlit` | Frontend UI (legacy — replaced by React SPA) | v1.0 |
-| `react` | Frontend SPA framework (React 18) | **v2.4** |
-| `vite` | Frontend build tool and dev server | **v2.4** |
-| `beautifulsoup4` | HTML parsing (ingestion pipelines) | v1.0 |
-| `PyGithub` | GitHub API fallback for module discovery | **v2.0** |
-| `boto3` | AWS Service Catalog client | **v2.0** |
-| `python-hcl2` | Terraform HCL parsing | **v2.0** |
-| `python-dotenv` | Environment variable management | **v2.0** |
-| `svglib` | SVG parsing for PNG conversion | **v2.1** |
-| `reportlab` | PDF/PNG rendering engine (used by svglib) | **v2.1** |
-| `pycairo` | Cairo graphics bindings (SVG→PNG shim on Windows) | **v2.1** |
-| `cairosvg` | SVG→PNG conversion (Linux primary) | **v2.1** |
+| Package | Purpose |
+|---------|---------|
+| `FastAPI` / `uvicorn` | Orchestrator HTTP server |
+| `pydantic` | Request/response models |
+| `google-cloud-aiplatform` | Vertex AI (Gemini LLM) |
+| `google-cloud-discoveryengine` | Vertex AI Search (RAG + HA/DR data store) |
+| `google-cloud-storage` | GCS (golden samples, images, HA/DR diagrams) |
+| `google-cloud-alloydb-connector` | AlloyDB Auth Proxy connector |
+| `sqlalchemy` / `pg8000` | AlloyDB ORM and driver |
+| `msal` | SharePoint authentication |
+| `react` / `vite` | Frontend SPA framework and build tool |
+| `beautifulsoup4` | HTML parsing (ingestion pipelines) |
+| `PyGithub` | GitHub API fallback for module discovery |
+| `boto3` | AWS Service Catalog client |
+| `python-hcl2` | Terraform HCL parsing |
+| `python-dotenv` | Environment variable management |
+| `svglib` / `reportlab` | SVG parsing and PNG rendering |
+| `pycairo` | Cairo graphics bindings (SVG→PNG shim on Windows) |
+| `cairosvg` | SVG→PNG conversion (Linux primary) |
 
 ---
 

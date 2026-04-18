@@ -15,9 +15,9 @@ The Orchestrator is the central coordinator. It uses **ADK Workflow Agents** —
 
 All core logic modules (PatternGenerator, VertexRetriever, PatternReviewer, ServiceHADRRetriever, HADRDocumentationGenerator, HADRDiagramGenerator, HADRDiagramStorage) are instantiated once and shared through the context — no network calls, no serialisation overhead.
 
-For code generation, the Orchestrator communicates with the artifact agents over **A2A (Agent-to-Agent) HTTP calls** since those run as separate services.
+For code generation (Phase 2), the Orchestrator uses a second ADK workflow — also running entirely **in the same process**. A `SequentialAgent` runs component specification first, then a `LoopAgent` iterates artifact generation → validation until the code passes (up to 3 times).
 
-Here is the workflow graph:
+Here are the workflow graphs:
 
 ```
 Phase1DocGenerationWorkflow (SequentialAgent)
@@ -38,6 +38,17 @@ Phase1DocGenerationWorkflow (SequentialAgent)
   │     └── FullDocReviewStep     ← Review FULL doc (core + HA/DR) → approved / critique
   │
   └── HADRDiagramStep             ← Build 12 diagrams programmatically (< 1s) → upload to GCS
+
+
+Phase2ArtifactWorkflow (SequentialAgent)
+  │
+  ├── ComponentSpecStep           ← Real-time GitHub MCP + AWS Service Catalog lookups
+  │
+  └── ArtifactRefinementLoop (LoopAgent, max 3 iterations, exit when "validation_passed")
+        │
+        ├── ArtifactGenerateStep  ← Gemini Pro + Golden Samples → IaC + Boilerplate
+        │
+        └── ArtifactValidateStep  ← 6-point rubric → PASS / NEEDS_REVISION
 ```
 
 ---
@@ -121,16 +132,16 @@ After the loop finishes, the workflow continues with the final step in the Seque
 
 ## Phase 4 — Build the actual code
 
-20. While docs are being published in the background, the Orchestrator starts code generation using **A2A HTTP** calls to the artifact agents (which run as separate services).
-21. First, it calls the **Component Specification Agent**, which reads the documentation and extracts component keywords (e.g., "Cloud SQL", "Cloud Run", "Load Balancer"). It normalises them to standard names using an alias dictionary.
-22. For each component, the agent does a **real-time lookup** to find the actual infrastructure schema:
+20. While docs are being published in the background, the Orchestrator starts code generation using the **Phase 2 ADK workflow** — a second `SequentialAgent` that runs entirely in the same process, sharing a `WorkflowContext` just like Phase 1.
+21. First, the **ComponentSpecStep** runs. It reads the documentation and extracts component keywords (e.g., "Cloud SQL", "Cloud Run", "Load Balancer"). It normalises them to standard names using an alias dictionary.
+22. For each component, the step does a **real-time lookup** to find the actual infrastructure schema:
     - **First**, it checks GitHub for matching Terraform modules (reads `variables.tf` and `outputs.tf` to understand inputs/outputs).
     - **If not found** on GitHub, it falls back to AWS Service Catalog to find matching CloudFormation products.
-23. The agent assembles all of this into a **structured dependency graph** — a map of "Component A depends on Component B" — sorted in the correct order to build them.
-24. Next, the **Artifact Generation Agent** takes this specification. It also fetches **"Golden Sample" templates** from a GCS bucket — pre-approved infrastructure-as-code files that serve as examples of how the company wants things built.
-25. Using the specification + golden samples + documentation, the agent generates a complete **Artifact Bundle**: Terraform files for infrastructure AND application boilerplate code — all in one pass so cross-references between components are correct.
-26. The **Artifact Validation Agent** checks the generated code against a **6-point checklist**: syntax correctness, completeness, integration wiring, security, boilerplate relevance, and best practices. It gives a score out of 100 and either PASS or NEEDS_REVISION.
-27. If it fails, the critique goes back to the generator to fix the specific issues. This **generate → validate → fix loop** runs up to 3 times.
+23. The step assembles all of this into a **structured dependency graph** — a map of "Component A depends on Component B" — sorted in the correct order to build them. The specification is stored in the `WorkflowContext`.
+24. Next, the **ArtifactRefinementLoop** (a `LoopAgent`) begins. The **ArtifactGenerateStep** takes the specification from the context. It also fetches **"Golden Sample" templates** from a GCS bucket — pre-approved infrastructure-as-code files that serve as examples of how the company wants things built.
+25. Using the specification + golden samples + documentation, the step generates a complete **Artifact Bundle**: Terraform files for infrastructure AND application boilerplate code — all in one pass so cross-references between components are correct.
+26. The **ArtifactValidateStep** checks the generated code against a **6-point checklist**: syntax correctness, completeness, integration wiring, security, boilerplate relevance, and best practices. It gives a score out of 100 and either PASS or NEEDS_REVISION.
+27. If it fails, the critique goes back to the generator to fix the specific issues. This **generate → validate → fix loop** runs up to 3 times. The `LoopAgent` exits when the `validation_passed` key is set in the `WorkflowContext`.
 
 ---
 
@@ -155,7 +166,7 @@ After the loop finishes, the workflow continues with the final step in the Seque
 
 ## What happens if something goes wrong?
 
-- If a Phase 2 A2A agent call fails, the Orchestrator **retries up to 3 times** with linear backoff. Phase 1 steps run in-process, so there are no network failures to retry — exceptions propagate immediately and the workflow reports the error.
+- All workflow steps (Phase 1 and Phase 2) run in-process, so there are no network failures between agents — exceptions propagate immediately and the workflow reports the error.
 - If artifact validation fails 3 times in a row, the workflow **stops and shows the errors** for manual intervention.
 - If background publishing to SharePoint or GitHub fails, the AlloyDB status is set to **"FAILED"** and the polling UI shows an error message.
 - If HA/DR text generation fails inside the loop, it **does not stop the workflow**. The step catches the exception and inserts a placeholder message ("*HA/DR section generation failed. Please complete manually.*"). The main document is never blocked by HA/DR failures.
@@ -169,7 +180,7 @@ After the loop finishes, the workflow continues with the final step in the Seque
 
 | Technique | What it does | Impact |
 |---|---|---|
-| In-process workflow execution | Phase 1 runs all steps in the same Python process — no HTTP, no JSON serialisation, no timeouts | Eliminates network overhead entirely |
+| In-process workflow execution | Both Phase 1 and Phase 2 run all steps in the same Python process — no HTTP, no JSON serialisation, no timeouts | Eliminates network overhead entirely for both phases |
 | Parallel HA/DR retrieval + donor extraction | `asyncio.gather` runs service HA/DR lookup and donor section extraction simultaneously | Saves ~5–10 seconds per iteration |
 | Service name caching | Extracted once from the document and stored in context; reused by HA/DR text gen and diagram gen | Avoids redundant processing |
 | Selective HA/DR regeneration | On loop iterations 2–3, HA/DR is only regenerated if the reviewer specifically flagged it | Saves 4× Gemini calls when only core sections need fixing |
