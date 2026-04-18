@@ -303,47 +303,6 @@ SVG_ONE_SHOT_EXAMPLE = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8
   <line x1="200" y1="125" x2="445" y2="125" stroke="#333" stroke-width="1.5" marker-end="url(#arrowhead)"/>
 </svg>"""
 
-# One-shot draw.io XML example (uses AWS icon shapes)
-DRAWIO_ONE_SHOT_EXAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="draw.io">
-  <diagram name="Backup and Restore - Initial Provisioning" id="diag1">
-    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1">
-      <root>
-        <mxCell id="0"/>
-        <mxCell id="1" parent="0"/>
-        <!-- Primary Region container -->
-        <mxCell id="2" value="Primary Region" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="30" y="50" width="350" height="400" as="geometry"/>
-        </mxCell>
-        <!-- Service: Amazon RDS (Active) — uses AWS RDS icon -->
-        <mxCell id="3" value="Amazon RDS&#xa;[Active]" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;whiteSpace=wrap;fillColor=#4CAF50;fontColor=#232F3E;strokeColor=#388E3C;fontStyle=1;fontSize=11;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;align=center;" vertex="1" parent="1">
-          <mxGeometry x="80" y="100" width="60" height="60" as="geometry"/>
-        </mxCell>
-        <!-- State badge for Primary RDS -->
-        <mxCell id="3b" value="Active" style="text;fontSize=10;fontStyle=2;fontColor=#388E3C;align=center;" vertex="1" parent="1">
-          <mxGeometry x="70" y="165" width="80" height="18" as="geometry"/>
-        </mxCell>
-        <!-- DR Region container -->
-        <mxCell id="4" value="DR Region" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="420" y="50" width="350" height="400" as="geometry"/>
-        </mxCell>
-        <!-- Service: Amazon RDS (Not-Deployed) — uses AWS RDS icon -->
-        <mxCell id="5" value="Amazon RDS&#xa;[Not-Deployed]" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;whiteSpace=wrap;fillColor=#9E9E9E;fontColor=#232F3E;strokeColor=#757575;fontStyle=1;fontSize=11;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;align=center;opacity=50;" vertex="1" parent="1">
-          <mxGeometry x="470" y="100" width="60" height="60" as="geometry"/>
-        </mxCell>
-        <!-- State badge for DR RDS -->
-        <mxCell id="5b" value="Not-Deployed" style="text;fontSize=10;fontStyle=2;fontColor=#757575;align=center;" vertex="1" parent="1">
-          <mxGeometry x="455" y="165" width="90" height="18" as="geometry"/>
-        </mxCell>
-        <!-- Arrow -->
-        <mxCell id="6" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="3" target="5" parent="1">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-      </root>
-    </mxGraphModel>
-  </diagram>
-</mxfile>"""
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Generator class
@@ -352,7 +311,10 @@ DRAWIO_ONE_SHOT_EXAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
 class HADRDiagramGenerator:
     """
     Generates component-level SVG diagrams and draw.io XML files for every
-    combination of DR strategy and lifecycle phase using Gemini.
+    combination of DR strategy and lifecycle phase.
+
+    draw.io XML is always built programmatically from the STATE_MATRIX.
+    SVG is programmatic by default; opt-in AI mode uses Gemini for SVG only.
     """
 
     def __init__(
@@ -1130,100 +1092,7 @@ Start with <svg and end with </svg>.
             logger.error(f"SVG generation failed: {e}")
             return ""
 
-    # ─── draw.io XML generation via Gemini ───────────────────────────────
 
-    def _generate_drawio(
-        self,
-        pattern_name: str,
-        services: List[str],
-        dr_strategy: str,
-        lifecycle_phase: str,
-        phase_description: str,
-        pattern_context: Dict[str, Any],
-        reference_diagram_descriptions: str = "",
-    ) -> str:
-        """Ask Gemini to produce draw.io-compatible XML."""
-        services_list = "\n".join(f"  - {s}" for s in services)
-        state_guide = self._state_guide(dr_strategy, lifecycle_phase)
-
-        ref_diag_section = ""
-        if reference_diagram_descriptions:
-            ref_diag_section = f"""
-{reference_diagram_descriptions}
-
-Use the above reference diagram descriptions to guide your layout: which
-services appear in which region, how replication arrows flow, and which
-components are active vs. standby.
-"""
-
-        prompt = f"""
-Generate a draw.io XML file (mxfile format) for the following HA/DR component diagram.
-
-# Pattern
-Name: {pattern_name}
-Services:
-{services_list}
-
-# DR Strategy: {dr_strategy}
-# Lifecycle Phase: {lifecycle_phase}
-
-# Phase Description
-{phase_description if phase_description else "(Generate appropriate states based on DR strategy and lifecycle phase.)"}
-
-# State Guide
-{state_guide}
-{ref_diag_section}
-# Colour Palette for Service States
-{json.dumps(STATE_COLORS, indent=2)}
-
-# Service Icon Shape Registry (draw.io built-in AWS 4.0 + GCP shape libraries)
-{json.dumps(DRAWIO_SERVICE_ICONS, indent=2)}
-
-# Layout Rules
-1. Two container shapes side-by-side: "Primary Region" (fillColor=#dae8fc)
-   and "DR Region" (fillColor=#fff2cc).
-2. Inside each container, add a cell for EVERY service in the pattern.
-3. **Use the official cloud-provider icon shape** from the registry above
-   for each service. Set the cell style to include the `shape=...;resIcon=...`
-   fragment from the registry. If a service is not in the registry, fall back
-   to a plain `rounded=1;whiteSpace=wrap;` rectangle.
-4. Set each icon cell size to width="60" height="60" so the icon renders.
-   Place the service name as a label below the icon using
-   `labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;align=center;`.
-5. Tint the icon's `fillColor` using the state colour from the palette.
-   For "Not-Deployed" or "Scaled-Down" states, also add `opacity=50;`.
-6. Add a small text cell below each icon showing the state label
-   (e.g., "Active", "Standby") in the matching state colour,
-   styled as `text;fontSize=10;fontStyle=2;` (italic).
-7. Include the service name and state in the cell value, e.g.
-   "Amazon RDS&#10;[Active]" (use &#10; for newline).
-8. Add edge cells between Primary ↔ DR service pairs showing the
-   replication/failover mechanism as a label.
-9. Set the diagram name to "{dr_strategy} - {lifecycle_phase}".
-
-# One-Shot Example
-{DRAWIO_ONE_SHOT_EXAMPLE}
-
-Output ONLY the raw XML. Do NOT wrap it in markdown code fences.
-Start with <?xml or <mxfile and end with </mxfile>.
-"""
-        try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=GenerationConfig(
-                    temperature=0.2,
-                    max_output_tokens=4096,
-                ),
-            )
-            xml_text = self._strip_code_fences(response.text.strip())
-            # Basic validation: must contain <mxfile
-            if "<mxfile" not in xml_text:
-                logger.warning("draw.io XML missing <mxfile> — using fallback")
-                return self._fallback_drawio(dr_strategy, lifecycle_phase, services)
-            return xml_text
-        except Exception as e:
-            logger.error(f"draw.io generation failed: {e}")
-            return self._fallback_drawio(dr_strategy, lifecycle_phase, services)
 
     # ─── SVG validation & fix ────────────────────────────────────────────
 
@@ -1452,60 +1321,4 @@ Start with <?xml or <mxfile and end with </mxfile>.
   <text x="670" y="112" text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="#333">DR Region</text>
 </svg>"""
 
-    @staticmethod
-    def _fallback_drawio(
-        dr_strategy: str, lifecycle_phase: str, services: List[str]
-    ) -> str:
-        """Generate a minimal placeholder draw.io XML with cloud-provider icons."""
-        cells = []
-        cell_id = 10
-        y_pos = 100
 
-        for svc in services[:8]:
-            icon_style = get_drawio_icon_style(svc)
-            if icon_style:
-                # Use the official icon shape with grey tint for unknown state
-                style = (
-                    f"{icon_style}whiteSpace=wrap;fillColor=#BDBDBD;"
-                    f"fontColor=#232F3E;strokeColor=#757575;fontStyle=1;"
-                    f"fontSize=11;labelPosition=center;"
-                    f"verticalLabelPosition=bottom;verticalAlign=top;"
-                    f"align=center;opacity=50;"
-                )
-                width, height = 60, 60
-            else:
-                # Plain rectangle fallback for unrecognised services
-                style = (
-                    "rounded=1;whiteSpace=wrap;fillColor=#BDBDBD;"
-                    "fontColor=#ffffff;strokeColor=#757575;"
-                )
-                width, height = 160, 45
-            cells.append(
-                f'        <mxCell id="{cell_id}" value="{svc}&#10;[Unknown]" '
-                f'style="{style}" vertex="1" parent="1">\n'
-                f'          <mxGeometry x="60" y="{y_pos}" width="{width}" height="{height}" as="geometry"/>\n'
-                f'        </mxCell>'
-            )
-            cell_id += 1
-            y_pos += 80 if icon_style else 60
-
-        cells_str = "\n".join(cells)
-
-        return f"""<?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="draw.io">
-  <diagram name="{dr_strategy} - {lifecycle_phase}" id="fallback">
-    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1">
-      <root>
-        <mxCell id="0"/>
-        <mxCell id="1" parent="0"/>
-        <mxCell id="2" value="Primary Region" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="30" y="50" width="350" height="{y_pos + 30}" as="geometry"/>
-        </mxCell>
-{cells_str}
-        <mxCell id="100" value="DR Region" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="420" y="50" width="350" height="{y_pos + 30}" as="geometry"/>
-        </mxCell>
-      </root>
-    </mxGraphModel>
-  </diagram>
-</mxfile>"""

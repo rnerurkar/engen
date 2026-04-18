@@ -1143,7 +1143,7 @@ sequenceDiagram
     *   **Zero Gemini calls, < 1 second for all 12 diagrams, zero tokens consumed.**
 9.  **Opt-In AI Mode**: When `use_ai_diagrams=True`:
     *   **SVG**: Generated via Gemini (`gemini-2.0-flash` default, configurable via `ai_model_name`). `max_output_tokens=4096` (reduced from 8192). Uses `asyncio.gather` with `Semaphore(6)` concurrency control.
-    *   **draw.io XML**: Always programmatic via `_build_programmatic_drawio()` — this is the biggest token savings since draw.io prompts included the full `DRAWIO_SERVICE_ICONS` dictionary (~2500 tokens) plus one-shot examples.
+    *   **draw.io XML**: Always programmatic via `_build_programmatic_drawio()` — deterministic, zero tokens, always-valid XML.
     *   **Fallback**: On Gemini timeout or error, falls back to `_build_programmatic_svg()` automatically.
 10. **draw.io Icon Shape Registry**: The `DRAWIO_SERVICE_ICONS` dictionary maps 40+ cloud services to their official draw.io shape library identifiers:
     *   **AWS** (22 services): Uses `shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.{service};` pattern.
