@@ -1,48 +1,88 @@
-# EnGen: Architecture Pattern Documentation System
+# EnGen: Architecture Pattern Documentation & Artifact Generation
 
-**Status:** Production Ready  
-**Version:** 1.0  
-**Date:** December 11, 2025
+**Version:** 2.0  
+**Date:** April 2026
 
-EnGen is an intelligent system that automates the creation of high-quality architecture documentation by leveraging AI and existing architecture patterns.
+EnGen is an AI-powered system that automates the creation of architecture documentation and Infrastructure as Code (IaC) artifacts by analysing architecture diagrams and leveraging existing patterns.
 
 ## Overview
 
-EnGen uses a two-plane architecture to transform architecture diagrams into comprehensive documentation:
+EnGen uses a two-plane architecture:
 
-1. **Ingestion Plane** - Extracts and indexes architecture patterns from SharePoint into a GCP-based knowledge graph
-2. **Serving Plane** - Uses a multi-agent system to analyze new diagrams and generate documentation using relevant donor patterns
+1. **Ingestion Plane** — Extracts and indexes architecture patterns from SharePoint into a GCP-based knowledge graph (Vertex AI Search, GCS)
+2. **Inference Plane** — A single orchestrator process runs two ADK workflow pipelines that analyse diagrams, generate documentation, and produce IaC artifacts
 
 ## Key Features
 
-✅ **Automated Documentation** - Generate architecture documentation from diagrams with minimal human intervention  
-✅ **Knowledge Reuse** - Leverage existing patterns to ensure consistency and quality  
-✅ **Atomic Transactions** - Two-phase commit ensures all-or-nothing ingestion across semantic, visual, and content streams  
-✅ **Multi-Agent Collaboration** - Specialized agents (Vision, Retrieval, Writer, Reviewer) work together with iterative refinement  
-✅ **Quality Assurance** - Reflection loop with automated review achieves 90+ quality scores  
-✅ **Production Ready** - Retry logic, health checks, metrics, and comprehensive error handling
+- **Automated Documentation** — Generate architecture documentation from diagrams with minimal human intervention
+- **Knowledge Reuse** — Leverage existing donor patterns for consistency and quality
+- **HA/DR Coverage** — Automated HA/DR documentation across 4 DR strategies x 3 lifecycle phases with programmatic diagrams (SVG, draw.io XML, PNG)
+- **IaC Artifact Generation** — Produce Terraform / CloudFormation templates and application boilerplate from approved documentation
+- **Quality Assurance** — Iterative refinement loops with automated review and validation
+- **Resumable Workflows** — AlloyDB-backed state persistence for browser/session recovery
+- **Publishing** — Fire-and-forget publishing to SharePoint (docs) and GitHub (code)
 
 ## Architecture
 
 ### Ingestion Service
-- **SharePoint Integration** - OAuth authentication, page extraction, image download
-- **Three Parallel Streams** - Semantic (Discovery Engine), Visual (Vector Search), Content (Firestore)
-- **Transaction Manager** - Two-phase commit with prepare/commit/rollback pattern
-- **GCP Stack** - Vertex AI, Discovery Engine, Vector Search, Firestore, Cloud Storage
+- **SharePoint Integration** — OAuth authentication, page extraction, image download
+- **Vertex AI Search Pipeline** — Document chunks with metadata ingested into Discovery Engine
+- **Service HA/DR Pipeline** — Per-service HA/DR documentation with diagram extraction
+- **GCP Stack** — Vertex AI, Discovery Engine, Cloud Storage
 
-### Serving Service
-- **Orchestrator Agent** - Workflow coordination and traffic control (Port 8080)
-- **Vision Agent** - Architecture diagram interpretation using Gemini Vision (Port 8081)
-- **Retrieval Agent** - Semantic search for donor patterns (Port 8082)
-- SharePoint Publishing: The Orchestrator uses `SharePointPublisher` to create modern pages.
-	- Markdown conversion: Python-Markdown with extensions (`fenced_code`, `tables`, `sane_lists`, `codehilite`, `toc`).
-	- Sanitization: Bleach allowlist for tags/attributes/protocols ensures safe HTML.
-	- Web part schema: Content is embedded as a Text web part using `properties.inlineHtml`.
-	- Dependencies: see `serving-service/requirements.txt` (includes `markdown`, `bleach`).
+### Inference Service — ADK Workflow Architecture
 
-- **Writer Agent** - Documentation section generation (Port 8083)
-- **Reviewer Agent** - Quality evaluation and feedback (Port 8084)
-- **A2A Communication** - Standardized agent-to-agent protocol with retry and timeout
+All agents run **in-process** via ADK `SequentialAgent` and `LoopAgent` — no HTTP/A2A overhead, no inter-service serialisation, no timeout issues.
+
+**Phase 1 — Document Generation:**
+```
+Phase1DocGenerationWorkflow (SequentialAgent)
+  ├─ VisionAnalysisStep       — Gemini Vision image description
+  ├─ DonorRetrievalStep       — Vertex AI Search donor lookup
+  ├─ ContentRefinementLoop (LoopAgent, max 3, exit_key="approved")
+  │    ├─ PatternGenerateStep  — core doc generation (Gemini Pro)
+  │    ├─ HADRSectionsStep     — HA/DR retrieval + generation (parallel)
+  │    └─ FullDocReviewStep    — reviews full doc incl. HA/DR
+  └─ HADRDiagramStep           — async diagram gen + GCS upload
+```
+
+**Phase 2 — Artifact Generation:**
+```
+Phase2ArtifactWorkflow (SequentialAgent)
+  ├─ ComponentSpecStep         — extract component spec from docs
+  └─ ArtifactRefinementLoop (LoopAgent, max 3, exit_key="validation_passed")
+       ├─ ArtifactGenerateStep — generate IaC + boilerplate
+       └─ ArtifactValidateStep — validate against quality rubric
+```
+
+### Core Modules
+
+| Module | Purpose |
+|--------|---------|
+| `core/generator.py` | Pattern documentation generation via Gemini Pro |
+| `core/retriever.py` | Vertex AI Search donor pattern retrieval |
+| `core/reviewer.py` | Automated document quality review |
+| `core/pattern_synthesis/component_specification.py` | Real-time component spec extraction (GitHub + Service Catalog) |
+| `core/pattern_synthesis/artifact_generator.py` | IaC / boilerplate generation with golden samples |
+| `core/pattern_synthesis/artifact_validator.py` | Artifact validation against quality rubric |
+| `core/pattern_synthesis/hadr_generator.py` | HA/DR documentation generation (4 strategies) |
+| `core/pattern_synthesis/hadr_diagram_generator.py` | Programmatic SVG + draw.io + PNG diagram generation |
+| `core/pattern_synthesis/hadr_diagram_storage.py` | GCS upload for diagram bundles |
+| `core/pattern_synthesis/service_hadr_retriever.py` | Per-service HA/DR retrieval from Vertex AI Search |
+
+### Support Libraries
+
+| Module | Purpose |
+|--------|---------|
+| `lib/adk_core.py` | ADK framework: `ADKAgent`, `WorkflowAgent`, `SequentialAgent`, `LoopAgent`, `WorkflowContext` |
+| `lib/sharepoint_publisher.py` | SharePoint modern page publishing with diagram re-hosting |
+| `lib/github_publisher.py` | GitHub repository code publishing via MCP |
+| `lib/cloudsql_client.py` | AlloyDB connection management |
+| `lib/workflow_state.py` | Resumable workflow state persistence |
+| `lib/component_sources.py` | Component type aliases and normalisation |
+| `lib/github_mcp_client.py` | GitHub MCP / PyGithub Terraform module lookup |
+| `lib/service_catalog_client.py` | AWS Service Catalog product lookup |
+| `lib/visualizer.py` | Diagram rendering utilities |
 
 ## Quick Start
 
@@ -54,166 +94,117 @@ EnGen uses a two-plane architecture to transform architecture diagrams into comp
 ### Installation
 
 ```bash
-# Clone repository
 git clone https://github.com/rnerurkar/engen.git
 cd engen
 
-# Install ingestion service dependencies
-cd ingestion-service
-pip install -r requirements.txt
-
-# Install serving service dependencies
-cd ../serving-service
+# Install inference service dependencies
+cd inference-service
 pip install -r requirements.txt
 ```
 
 ### Configuration
 
-Set required environment variables:
-
 ```bash
-# GCP Configuration
+# GCP
 export GCP_PROJECT_ID="your-project-id"
 export GCP_LOCATION="us-central1"
 
-# SharePoint Configuration
+# Vertex AI Search
+export VERTEX_DATA_STORE_ID="your-datastore-id"
+export SERVICE_HADR_DS_ID="your-hadr-datastore-id"
+
+# AlloyDB
+export ALLOYDB_INSTANCE="projects/.../instances/..."
+export DB_USER="postgres"
+export DB_PASS="your-password"
+
+# SharePoint (for publishing)
 export SHAREPOINT_TENANT_ID="your-tenant-id"
 export SHAREPOINT_CLIENT_ID="your-client-id"
 export SHAREPOINT_CLIENT_SECRET="your-secret"
 export SHAREPOINT_SITE_ID="your-site-id"
-
-# Vertex AI Configuration
-export DISCOVERY_ENGINE_DATASTORE="your-datastore-id"
-export VECTOR_INDEX_ENDPOINT="your-endpoint-id"
-export VECTOR_DEPLOYED_INDEX_ID="your-deployed-index-id"
 ```
 
-### Running the Services
+### Running
 
-**Ingestion Service:**
 ```bash
-cd ingestion-service
-python main.py
-```
-
-**Serving Service (Agent Swarm):**
-```bash
-cd serving-service
-
-# Deploy to Cloud Run
-./deploy_swarm.sh
-
-# Or run locally (each agent in separate terminal)
-python agents/vision/main.py
-python agents/retrieval/main.py
-python agents/writer/main.py
-python agents/reviewer/main.py
+# Inference service (single process — all agents in-process)
+cd inference-service
 python agents/orchestrator/main.py
+
+# Streamlit UI (optional)
+streamlit run streamlit_app.py
 ```
-
-## Documentation
-
-📘 **[Complete Architecture & Design Document](DESIGN_DOCUMENT.md)** - Comprehensive system design with sequence diagrams, flow descriptions, and implementation details
-
-Additional documentation:
-- [Design Critique v3.1](ingestion-service/DESIGN_CRITIQUE.md) - Issue tracking and status
-- [Critical Issues Log](ingestion-service/CRITICAL_ISSUES.md) - Known issues and resolutions
-- [ADK Implementation Summary](serving-service/IMPLEMENTATION_SUMMARY.md) - Agent framework overview
-- [ADK Quick Reference](serving-service/QUICK_REFERENCE.md) - Usage examples and patterns
-- [ADK & A2A Review](serving-service/REVIEW_ADK_A2A.md) - Detailed technical review
 
 ## Project Structure
 
 ```
 engen/
-├── DESIGN_DOCUMENT.md              # Complete architecture documentation
-├── ingestion-service/              # ETL pipeline for pattern ingestion
-│   ├── main.py                     # Entry point
-│   ├── config.py                   # Configuration management
-│   ├── transaction_manager.py      # Two-phase commit coordinator
+├── README.md
+├── DESIGN_DOCUMENT.md                  # Complete architecture documentation
+├── PATTERN_FACTORY_WALKTHROUGH.md      # End-to-end walkthrough
+├── inference-service/
+│   ├── config.py                       # Configuration
+│   ├── streamlit_app.py                # Streamlit UI
+│   ├── agents/
+│   │   └── orchestrator/
+│   │       ├── main.py                 # OrchestratorAgent entry point
+│   │       └── workflow_agents.py      # Phase 1 + Phase 2 workflow steps
+│   ├── core/
+│   │   ├── generator.py               # Pattern generation
+│   │   ├── retriever.py               # Donor retrieval
+│   │   ├── reviewer.py                # Quality review
+│   │   └── pattern_synthesis/
+│   │       ├── component_specification.py
+│   │       ├── artifact_generator.py
+│   │       ├── artifact_validator.py
+│   │       ├── hadr_generator.py
+│   │       ├── hadr_diagram_generator.py
+│   │       ├── hadr_diagram_storage.py
+│   │       └── service_hadr_retriever.py
+│   └── lib/
+│       ├── adk_core.py                 # ADK framework
+│       ├── sharepoint_publisher.py     # SharePoint publishing
+│       ├── github_publisher.py         # GitHub code publishing
+│       ├── cloudsql_client.py          # AlloyDB client
+│       ├── workflow_state.py           # Workflow state persistence
+│       ├── component_sources.py        # Component type mappings
+│       ├── github_mcp_client.py        # GitHub Terraform lookups
+│       ├── service_catalog_client.py   # AWS Service Catalog lookups
+│       └── visualizer.py              # Diagram rendering
+├── ingestion-service/
+│   ├── config.py
 │   ├── clients/
-│   │   └── sharepoint.py           # SharePoint integration
-│   └── processors/
-│       ├── semantic.py             # Stream A: Discovery Engine
-│       ├── visual.py               # Stream B: Vector Search
-│       └── content.py              # Stream C: Firestore sections
-├── serving-service/                # Agent swarm for document generation
-│   ├── lib/                        # Shared ADK framework
-│   │   ├── adk_core.py             # Agent base class with lifecycle
-│   │   ├── a2a_client.py           # Agent-to-agent communication
-│   │   ├── prompts.py              # Centralized prompt templates
-│   │   └── config.py               # Service configuration
-│   ├── agents/                     # Agent implementations
-│   │   ├── orchestrator/           # Workflow coordinator
-│   │   ├── vision/                 # Diagram analysis
-│   │   ├── retrieval/              # Pattern matching
-│   │   ├── writer/                 # Content generation
-│   │   └── reviewer/               # Quality assurance
-│   ├── examples/                   # Example implementations
-│   └── deploy_swarm.sh             # Cloud Run deployment script
-└── README.md                       # This file
+│   │   └── sharepoint.py
+│   └── pipelines/
+│       ├── vertex_search_pipeline.py
+│       └── service_hadr_pipeline.py
+└── engen-ui/                           # SPA frontend (Vite + React)
+    ├── src/
+    │   ├── App.jsx
+    │   └── api/orchestrator.js
+    └── package.json
 ```
-
-## Performance Metrics
-
-**Ingestion:**
-- Average pattern ingestion: 15-20 seconds
-- Throughput: 3-4 patterns per minute
-- Success rate: 98.5% (with retry logic)
-
-**Document Generation:**
-- Vision analysis: 3-5 seconds per diagram
-- Pattern retrieval: 1-2 seconds
-- Section generation: 8-12 seconds per section
-- Review: 4-6 seconds per draft
-- Full document (4 sections, 2 revisions avg): 90-120 seconds
 
 ## Technology Stack
 
 - **Language:** Python 3.13
-- **AI/ML:** Vertex AI (Gemini 1.5 Pro, Discovery Engine, Vector Search)
-- **Data Storage:** Firestore, Cloud Storage
+- **AI/ML:** Vertex AI (Gemini 1.5 Pro, Discovery Engine)
+- **Workflow:** ADK SequentialAgent / LoopAgent (in-process)
+- **Data Storage:** AlloyDB, Cloud Storage
 - **API Framework:** FastAPI + Uvicorn
-- **Async Runtime:** asyncio, aiohttp
-- **Authentication:** MSAL (Microsoft Authentication Library)
+- **Frontend:** React + Vite (SPA), Streamlit (dev UI)
+- **Publishing:** SharePoint (MSAL), GitHub (MCP / PyGithub)
 
-## Production Readiness
+## Documentation
 
-| Component | Status | Readiness |
-|-----------|--------|-----------|
-| Ingestion Service | ✅ Complete | 90% |
-| Serving Service | ✅ Complete | 85% |
-| GCP Integration | ✅ Complete | 95% |
-| Error Handling | ✅ Complete | 90% |
-| Monitoring | ⚠️ Partial | 60% |
-| Testing | ⚠️ Partial | 70% |
-
-**All CRITICAL and HIGH priority issues resolved** (as of Dec 10, 2025)
-
-## Development
-
-### Running Tests
-```bash
-# A2A communication tests
-cd serving-service
-python examples/test_a2a_communication.py
-```
-
-### Contributing
-1. Create a feature branch
-2. Make your changes
-3. Update documentation
-4. Submit a pull request
+- [Design Document](DESIGN_DOCUMENT.md) — Complete system architecture
+- [Pattern Factory Walkthrough](PATTERN_FACTORY_WALKTHROUGH.md) — End-to-end workflow walkthrough
+- [SPA Design & Deployment](SPA_DESIGN_AND_DEPLOYMENT.md) — Frontend architecture
+- [Ingestion Pipelines Walkthrough](INGESTION_PIPELINES_WALKTHROUGH.md) — Data ingestion details
+- [Deployment Guide](DEPLOYMENT_GUIDE.md) — Cloud Run deployment instructions
 
 ## Repository
 
 **GitHub:** https://github.com/rnerurkar/engen  
 **Branch:** main
-
-## License
-
-Internal Use - EnGen Development Team
-
-## Contact
-
-For questions or support, please refer to the comprehensive [Design Document](DESIGN_DOCUMENT.md) or contact the EnGen Development Team.
