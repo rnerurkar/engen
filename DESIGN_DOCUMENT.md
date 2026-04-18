@@ -62,10 +62,6 @@ graph TB
             ArtGen --> ArtVal
         end
         
-        subgraph Governance["Governance"]
-            Human[Human Verifier Agent<br/>- Approval Gate]
-        end
-
         Orch -->|WorkflowContext| Phase1
         Orch -->|WorkflowContext| Phase2
     end
@@ -131,7 +127,6 @@ graph TB
 | **ComponentSpecStep** | Architect | ADK `WorkflowAgent` step in the Phase 2 `SequentialAgent` that performs **real-time** lookups against GitHub repositories (via MCP Server or PyGithub fallback) and AWS Service Catalog to extract a structured dependency graph grounded in actual infrastructure schemas. Uses `component_sources.py` for type normalization. |
 | **ArtifactGenerateStep** | Engineer | ADK `WorkflowAgent` step inside the Phase 2 `LoopAgent` that synthesizes IaC and Boilerplate using "Golden Sample" templates fetched from GCS. |
 | **ArtifactValidateStep** | QA | ADK `WorkflowAgent` step inside the Phase 2 `LoopAgent` that validates generated code against a 6-point rubric: Syntactic Correctness, Completeness, Integration Wiring, Security, Boilerplate Relevance, and Best Practices. Sets a `validation_passed` flag in the context on success. |
-| **HumanVerifierAgent** | Gatekeeper | Provides governance gates with AlloyDB persistence. User approval is handled via the React SPA calling orchestrator endpoints directly (`approve_docs`, `approve_code`). |
 
 ---
 
