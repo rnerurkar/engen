@@ -132,8 +132,10 @@ export SHAREPOINT_SITE_ID="your-site-id"
 cd inference-service
 python agents/orchestrator/main.py
 
-# Streamlit UI (optional)
-streamlit run streamlit_app.py
+# React SPA frontend (dev mode)
+cd engen-ui
+npm install
+npm run dev
 ```
 
 ## Project Structure
@@ -193,7 +195,7 @@ engen/
 - **Workflow:** ADK SequentialAgent / LoopAgent (in-process)
 - **Data Storage:** AlloyDB, Cloud Storage
 - **API Framework:** FastAPI + Uvicorn
-- **Frontend:** React + Vite (SPA), Streamlit (dev UI)
+- **Frontend:** React 18 + Vite (SPA)
 - **Publishing:** SharePoint (MSAL), GitHub (MCP / PyGithub)
 
 ## Documentation
