@@ -338,7 +338,82 @@ class MarkdownToSharePointConverter:
                 continue
                 
         return current_text
-    
+
+    async def process_gcs_images(
+        self,
+        markdown_text: str,
+        site_assets_uploader_func,
+    ) -> str:
+        """
+        Find markdown image references pointing to GCS (storage.googleapis.com),
+        download the image, upload it to SharePoint Site Assets via the callback,
+        and rewrite the URL so SharePoint renders the image natively.
+
+        draw.io / SVG links that are plain hyperlinks (not ``![]()``) are left
+        untouched — they remain as GCS download links.
+
+        Pattern matched:  ``![alt text](https://storage.googleapis.com/.../*.png)``
+
+        Args:
+            markdown_text: The full markdown content.
+            site_assets_uploader_func: Async callback ``(image_bytes, filename) -> sp_url``.
+        """
+        import re
+        import urllib.parse
+
+        # Match only Markdown image syntax (![...](url)) whose URL targets GCS PNG files.
+        gcs_img_pattern = re.compile(
+            r'(!\[([^\]]*)\])'
+            r'\((https://storage\.googleapis\.com/[^)]+\.png)\)',
+            re.IGNORECASE,
+        )
+
+        matches = list(gcs_img_pattern.finditer(markdown_text))
+        if not matches:
+            return markdown_text
+
+        logger.info(f"Found {len(matches)} GCS PNG image(s) to re-host to SharePoint.")
+
+        current_text = markdown_text
+
+        for idx, match in enumerate(matches):
+            full_md_image = match.group(0)   # ![alt](gcs_url)
+            alt_text = match.group(2)         # alt text
+            gcs_url = match.group(3)          # https://storage.googleapis.com/...
+
+            try:
+                # 1. Download PNG bytes from GCS public URL
+                logger.info(f"Downloading GCS image {idx + 1}/{len(matches)}: {gcs_url[:120]}...")
+                async with aiohttp.ClientSession() as dl_session:
+                    async with dl_session.get(gcs_url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        if resp.status != 200:
+                            logger.warning(
+                                f"GCS download failed ({resp.status}) for {gcs_url[:120]}, keeping original URL."
+                            )
+                            continue
+                        png_bytes = await resp.read()
+
+                # 2. Derive a stable, unique filename from the GCS path
+                path_part = urllib.parse.urlparse(gcs_url).path  # /bucket/path/phase.png
+                safe_name = re.sub(r'[^\w.\-]', '_', path_part.lstrip('/'))
+                # Truncate if excessively long, keep extension
+                if len(safe_name) > 120:
+                    safe_name = safe_name[:110] + '_' + hashlib.md5(gcs_url.encode()).hexdigest()[:8] + '.png'
+
+                # 3. Upload to SharePoint Site Assets
+                sp_url = await site_assets_uploader_func(png_bytes, safe_name)
+                logger.info(f"Re-hosted GCS image to SharePoint: {sp_url}")
+
+                # 4. Rewrite the Markdown image reference
+                replacement = f"![{alt_text}]({sp_url})"
+                current_text = current_text.replace(full_md_image, replacement, 1)
+
+            except Exception as e:
+                logger.error(f"Failed to re-host GCS image {idx}: {e}")
+                continue
+
+        return current_text
+
     def _generate_web_part_id(self) -> str:
         """
         Generate unique web part instance ID.
@@ -423,11 +498,12 @@ class MarkdownToSharePointConverter:
             if bleach is not None:
                 allowed_tags = [
                     'h1','h2','h3','h4','h5','h6','p','strong','em','ul','ol','li',
-                    'code','pre','blockquote','a','table','thead','tbody','tr','th','td',
+                    'code','pre','blockquote','a','img','table','thead','tbody','tr','th','td',
                     'hr','br','span','div'
                 ]
                 allowed_attrs = {
                     'a': ['href','title','target','rel'],
+                    'img': ['src','alt','width','height','style'],
                     'code': ['class'],
                     'span': ['class'],
                     'div': ['class']
@@ -1430,14 +1506,23 @@ class SharePointPublisher:
                 
                 processed_sections = {}
                 for sec_name, sec_content in sections_with_metadata.items():
-                    # Process diagrams if present
-                    if "```mermaid" in sec_content:
-                        logger.info(f"Processing diagrams in section: {sec_name}")
-                        processed_sections[sec_name] = await self.converter.process_markdown_diagrams(
-                            sec_content, uploader_wrapper
+                    current_content = sec_content
+
+                    # Process Mermaid code-fence diagrams → render via Kroki → upload to SP
+                    if "```mermaid" in current_content:
+                        logger.info(f"Processing Mermaid diagrams in section: {sec_name}")
+                        current_content = await self.converter.process_markdown_diagrams(
+                            current_content, uploader_wrapper
                         )
-                    else:
-                        processed_sections[sec_name] = sec_content
+
+                    # Process GCS-hosted PNG images → download → upload to SP
+                    if "storage.googleapis.com/" in current_content:
+                        logger.info(f"Processing GCS images in section: {sec_name}")
+                        current_content = await self.converter.process_gcs_images(
+                            current_content, uploader_wrapper
+                        )
+
+                    processed_sections[sec_name] = current_content
 
                 # Step 1: Ensure target folder exists (optional)
                 if self.config.target_folder:

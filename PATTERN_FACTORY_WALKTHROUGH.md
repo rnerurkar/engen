@@ -99,7 +99,7 @@ After the loop finishes, the workflow continues with the final step in the Seque
 12. Each SVG is locally converted to a **PNG** fallback image (using `svglib` + `reportlab` on Windows, or `cairosvg` on Linux).
 13. In programmatic mode, all 12 diagrams complete in **under 1 second** with zero AI calls. In AI mode, generation is parallelised with a Semaphore(6) cap and a 3-minute timeout per diagram — timeouts fall back to the programmatic builder automatically.
 14. All three files per diagram (SVG, draw.io XML, PNG) are uploaded to a **GCS bucket** in parallel, organized by pattern name, strategy, and phase — e.g., `patterns/my-pattern/hadr-diagrams/warm-standby/failover.svg`. All uploads run in parallel with a 1-minute timeout each.
-15. The diagram URLs are embedded directly into the HA/DR markdown sections, so the final documentation includes inline images and download links for the editable draw.io files. The SequentialAgent's work is done — control returns to the Orchestrator with the complete document in the `WorkflowContext`.
+15. The diagram URLs are embedded directly into the HA/DR markdown sections as `![alt](png_url)` inline images and `[Edit in draw.io](drawio_url)` download links. At this point the URLs still point to GCS. The SequentialAgent's work is done — control returns to the Orchestrator with the complete document in the `WorkflowContext`.
 
 ---
 
@@ -108,7 +108,11 @@ After the loop finishes, the workflow continues with the final step in the Seque
 16. The Orchestrator extracts the final documentation — including all HA/DR sections with embedded diagram images — from the `WorkflowContext` and sends it back to the React SPA for the user to read. The pattern documentation and the HA/DR sections are shown in **collapsible expander panels** so they're easy to navigate.
 17. If the user is happy, they click **"Approve & Continue."**
 18. The app calls the Orchestrator's `approve_docs` task (passing the `workflow_id`). The Orchestrator saves the approval in the **AlloyDB database** and updates the workflow state to `CODE_GEN` so the user can resume from here if they close the browser.
-19. The Orchestrator immediately kicks off a **background task** to publish the documentation to SharePoint (the company's knowledge base). It does *not* wait for this to finish — it moves on right away. The background worker updates the database as it goes: first to "IN_PROGRESS", then to "COMPLETED" with the SharePoint page URL.
+19. The Orchestrator immediately kicks off a **background task** to publish the documentation to SharePoint (the company's knowledge base). It does *not* wait for this to finish — it moves on right away. During publishing, the `SharePointPublisher` processes each document section:
+    - **Mermaid diagrams** (` ```mermaid ` blocks) are rendered to PNG via the Kroki service, uploaded to SharePoint Site Assets (`GeneratedDiagrams/` folder), and the markdown is rewritten with the SharePoint image URL.
+    - **GCS-hosted HA/DR PNGs** (`![alt](https://storage.googleapis.com/…)`) are downloaded, uploaded to SharePoint Site Assets, and the markdown URL is rewritten — so diagrams render inline on the SharePoint page instead of depending on external GCS URLs. SVG view links and draw.io download links remain as GCS hyperlinks.
+    - The processed markdown is then converted to HTML and assembled into SharePoint web parts.
+    The background worker updates the database as it goes: first to "IN_PROGRESS", then to "COMPLETED" with the SharePoint page URL.
 
 ---
 

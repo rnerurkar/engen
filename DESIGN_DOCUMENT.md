@@ -732,10 +732,12 @@ The SharePoint publishing process involves a complex conversion from Markdown to
 **Key Steps:**
 1.  **Authentication**: Uses MSAL with Client Credentials flow to get a Graph API token.
 2.  **Page Creation**: Creates a draft page in the `SitePages` library.
-3.  **Conversion**: Parses markdown into HTML (using `python-markdown`), sanitizes it (using `bleach`), and wraps it in SharePoint text web parts.
-4.  **Canvas Layout**: Constructs the JSON layout structure (`horizontalSections`, `columns`, `webparts`).
-5.  **Publishing**: PATCHes the page content and POSTs to the `/publish` endpoint.
-6.  **Status Update**: Updates AlloyDB with the final page URL.
+3.  **Mermaid Diagram Rendering**: `process_markdown_diagrams()` finds ` ```mermaid ` code blocks, renders them to PNG via the Kroki service, uploads the PNG to the SharePoint Site Assets library (`GeneratedDiagrams/` folder), and rewrites the markdown to reference the SharePoint-hosted image URL.
+4.  **GCS Image Re-hosting**: `process_gcs_images()` finds markdown image references (`![alt](https://storage.googleapis.com/…/*.png)`) pointing to GCS-hosted HA/DR diagram PNGs, downloads each PNG, uploads it to the SharePoint Site Assets library (`GeneratedDiagrams/` folder), and rewrites the markdown URL to the SharePoint-hosted copy. SVG view links and draw.io download links remain as GCS hyperlinks — only `![](url)` image syntax is targeted.
+5.  **Conversion**: Parses markdown into HTML (using `python-markdown`), sanitizes it (using `bleach` with `img` in `allowed_tags`), and wraps it in SharePoint text web parts.
+6.  **Canvas Layout**: Constructs the JSON layout structure (`horizontalSections`, `columns`, `webparts`).
+7.  **Publishing**: PATCHes the page content and POSTs to the `/publish` endpoint.
+8.  **Status Update**: Updates AlloyDB with the final page URL.
 
 ### 4.8 Artifact Generation Workflow (Pattern Synthesis)
 
@@ -754,7 +756,7 @@ This workflow implements a "Pattern Synthesis" approach. Instead of generating i
 | **ArtifactValidator** | **Quality Gate**. It inspects the generated Artifact Bundle against a 6-point rubric: Syntactic Correctness (Critical), Completeness (Critical), Integration Wiring (Critical), Security (High), Boilerplate Functional Relevance (Medium), Best Practices Adherence (Medium). Scores 0-100 with PASS/NEEDS_REVISION verdicts. |
 | **HumanVerifierAgent** | **Human-in-the-Loop**. It provides a governance layer, allowing a human expert to review the validated artifacts before they are published to downstream systems. Currently operates in simulated auto-approval mode; user approval is handled via the React SPA wizard. |
 | **GitHubMCPPublisher** | **Code Publisher**. Pushes the generated code to a version control system (GitHub) as a background task using direct REST API Git tree manipulation. |
-| **SharePointPublisher** | **Docs Publisher**. Updates the enterprise knowledge base with the design documentation as a background task. Converts Markdown to SharePoint modern page canvas layout with web parts, rendering Mermaid diagrams via Kroki. |
+| **SharePointPublisher** | **Docs Publisher**. Publishes design documentation to the enterprise SharePoint knowledge base as a background task. Converts Markdown to SharePoint modern page canvas layout with web parts, renders Mermaid diagrams via Kroki, and re-hosts GCS-stored HA/DR PNG diagrams to SharePoint Site Assets for inline rendering. |
 
 #### 4.8.2 Component Diagram
 
@@ -955,7 +957,7 @@ This workflow generates the High Availability / Disaster Recovery (HA/DR) sectio
 | **HADRDiagramStorage** (core logic) | Uploads SVG + draw.io XML + PNG to GCS in parallel via `asyncio.gather`, 60 s timeout per upload. Returns URL map `{(strategy, phase) → {svg_url, drawio_url, png_url}}`. |
 | **Standalone Agent Wrappers** (ports 9006–9008) | `HADRRetrieverAgent`, `HADRGeneratorAgent`, `HADRDiagramGeneratorAgent` are preserved as standalone A2A HTTP agent wrappers for independent deployment and testing, but are **no longer called by the Orchestrator**. |
 | **Vertex AI Search (HA/DR Data Store)** | Dedicated data store containing service-level HA/DR documentation chunks with structured metadata for precise filtered retrieval. Populated by the Service HA/DR Ingestion Pipeline (Section 3.6). |
-| **GCS (Diagram Bucket)** | Stores diagram artefacts at path `patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.{svg,drawio,png}`. Serves public URLs for embedding in SharePoint pages and documentation. |
+| **GCS (Diagram Bucket)** | Stores diagram artefacts at path `patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.{svg,drawio,png}`. During SharePoint publishing, PNG files are **re-hosted to SharePoint Site Assets** (`GeneratedDiagrams/` folder) for inline rendering; SVG and draw.io files remain served from GCS as view/download links. |
 
 #### 4.9.2 Component Diagram
 
@@ -1154,7 +1156,7 @@ sequenceDiagram
     patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.drawio
     patterns/{pattern_name}/hadr-diagrams/{strategy}/{phase}.png
     ```
-12. **URL Embedding**: The returned URL map (`{(strategy, phase) → {svg_url, drawio_url, png_url}}`) is passed to `_format_hadr_sections()` which embeds the diagram URLs as inline image references and draw.io download links in the HA/DR markdown.
+12. **URL Embedding**: The returned URL map (`{(strategy, phase) → {svg_url, drawio_url, png_url}}`) is passed to `_format_hadr_sections()` which embeds the diagram URLs as inline image references (`![alt](png_url)`) and draw.io download links (`[Edit in draw.io](drawio_url)`) in the HA/DR markdown. During SharePoint publishing, the `process_gcs_images()` method downloads each GCS-hosted PNG and re-hosts it to the SharePoint Site Assets library so diagrams render inline on the SharePoint page; SVG view links and draw.io download links remain as GCS URLs.
 
 #### 4.9.5 DR Strategies Covered
 
@@ -1420,7 +1422,7 @@ EnGen represents a production-ready implementation of a knowledge-augmented docu
 | **Workflow Persistence** | ✅ Complete | 85% | 3-layer resumable workflow: AlloyDB `workflow_state` table (JSONB), Orchestrator `resume_workflow` / `list_workflows` tasks, browser `localStorage` pointer. `WorkflowStateManager` in `lib/workflow_state.py`. |
 | **Pattern Synthesis** | ✅ Complete | 85% | Generates IaC/Code; validates against 6-point rubric with GCS golden samples. |
 | **GCP Integration** | ✅ Complete | 95% | Vertex AI, AlloyDB, GCS, and Pub/Sub fully integrated. |
-| **SharePoint Integration**| ✅ Complete | 90% | Supports both ingestion and automated publishing with Mermaid diagram rendering via Kroki. |
+| **SharePoint Integration**| ✅ Complete | 90% | Supports both ingestion and automated publishing with Mermaid diagram rendering via Kroki and GCS HA/DR PNG re-hosting to Site Assets for inline rendering. |
 | **GitHub Integration** | ✅ Complete | 90% | Real-time module lookup (MCP + PyGithub) and automated code publishing (REST API). |
 | **AWS Integration** | ✅ Complete | 85% | Service Catalog product discovery via boto3 with in-memory caching. |
 | **HA/DR Ingestion** | ✅ Complete | 85% | Service-level HA/DR pipeline with hierarchical chunking and structured metadata. Dedicated Vertex AI Search data store. |
