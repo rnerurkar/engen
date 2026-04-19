@@ -1,0 +1,86 @@
+sequenceDiagram
+    autonumber
+    participant Client as React SPA
+    participant Orch as Orchestrator Agent
+    participant WCtx as WorkflowContext
+    participant CompStep as ComponentSpecStep
+    participant GitMCP as GitHub MCP Client
+    participant SvcCat as Service Catalog Client
+    participant GenStep as ArtifactGenerateStep
+    participant GCS as GCS Bucket
+    participant ValStep as ArtifactValidateStep
+    participant DB as AlloyDB
+    participant Async as Background Tasks
+
+    Note over Orch, Async: Phase 3: Pattern Approval & Async Doc Publishing
+    
+    Client->>Orch: POST /invoke {task: "approve_docs", workflow_id}
+    Orch->>DB: Create review record (PID-1)
+    
+    par Fire & Forget
+        Orch->>Async: publish_docs(PID-1)
+        Async->>DB: UPDATE status='IN_PROGRESS'
+        Note right of Async: Uploads to SharePoint...
+        Async->>DB: UPDATE status='COMPLETED' url='...'
+    and Continue Execution
+        Client->>Orch: POST /invoke {task: "phase2_generate_code", workflow_id}
+    end
+    
+    Note over Orch, ValStep: Phase 4: In-Process Artifact Generation (ADK Workflow)
+
+    Orch->>WCtx: Seed context (full_doc, module refs)
+    
+    Orch->>CompStep: Run ComponentSpecStep (in-process)
+    CompStep->>CompStep: Extract keywords via LLM
+    CompStep->>CompStep: Normalize types (component_sources.py)
+    
+    loop For each component type
+        CompStep->>GitMCP: search_terraform_module(type)
+        alt Module found in GitHub
+            GitMCP-->>CompStep: TerraformModuleSpec (variables, outputs)
+        else Not found — Fallback
+            GitMCP-->>CompStep: None
+            CompStep->>SvcCat: search_product(type)
+            SvcCat-->>CompStep: ServiceCatalogProductSpec (parameters)
+        end
+    end
+    
+    CompStep->>CompStep: Topological sort (graphlib)
+    CompStep->>WCtx: Store ComponentSpecification
+
+    Note over Orch, ValStep: ArtifactRefinementLoop (LoopAgent, max 3)
+    
+    loop Quality Assurance Loop (exit on validation_passed)
+        Orch->>GenStep: Run ArtifactGenerateStep (in-process)
+        GenStep->>GCS: fetch_golden_samples(types)
+        GCS-->>GenStep: approved_templates
+        GenStep->>WCtx: Store ArtifactBundle
+        
+        Orch->>ValStep: Run ArtifactValidateStep (in-process)
+        ValStep->>WCtx: Read ArtifactBundle
+        ValStep->>ValStep: 6-point rubric validation
+        ValStep->>WCtx: Store ValidationResult + set validation_passed (or critique)
+    end
+
+    Note over Orch, Async: Phase 5: Artifact Approval & Async Code Publishing
+
+    Orch-->>Client: Return artifact bundle
+    Client->>Orch: POST /invoke {task: "approve_code", workflow_id}
+
+    par Fire & Forget
+        Orch->>Async: publish_code(AID-2)
+        Async->>DB: UPDATE status='IN_PROGRESS'
+        Note right of Async: Pushes to GitHub (REST API)...
+        Async->>DB: UPDATE status='COMPLETED' url='...'
+    and Return Immediate Result
+        Orch-->>Client: {status: "processing", p_id: "PID-1", a_id: "AID-2"}
+    end
+
+    Note over Client, DB: Phase 6: Client-Side Polling
+    
+    loop Poll until both COMPLETED
+        Client->>Orch: POST /invoke {task: "get_publish_status", workflow_id}
+        Orch->>DB: SELECT status, url FROM reviews
+        DB-->>Orch: {doc_status, code_status}
+        Orch-->>Client: Status update
+    end

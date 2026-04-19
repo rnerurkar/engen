@@ -1,0 +1,52 @@
+graph TD
+    subgraph "Phase 1 SequentialAgent (in-process)"
+        subgraph "LoopAgent (max 3 iterations)"
+            Draft[PatternGenerateStep<br/>PatternGenerator]
+            HADR_Step[HADRSectionsStep<br/>- Extract service names<br/>- Retrieve + Generate text]
+            Review[FullDocReviewStep<br/>PatternReviewer]
+        end
+        DiagStep[HADRDiagramStep<br/>- Programmatic SVG + draw.io<br/>from STATE_MATRIX]
+    end
+
+    subgraph "Core Logic (shared via WorkflowContext)"
+        Retriever[ServiceHADRRetriever]
+        Generator[HADRDocumentationGenerator]
+        DiagGen[HADRDiagramGenerator<br/>- STATE_MATRIX<br/>- _build_programmatic_svg<br/>- _build_programmatic_drawio<br/>- DRAWIO_SERVICE_ICONS]
+        DiagStore[HADRDiagramStorage]
+        PNGConv[SVG→PNG<br/>svglib + reportlab]
+    end
+
+    subgraph "External Services"
+        HADRDS[(Vertex AI Search<br/>service-hadr-datastore)]
+        GeminiText[Gemini 1.5 Pro<br/>Text Generation]
+        DiagGCS[(GCS Bucket<br/>hadr-diagrams)]
+    end
+
+    subgraph "Donor Context"
+        DonorHTML[Donor Pattern HTML]
+    end
+
+    %% Text Generation Flow (in-process)
+    Draft -->|doc_text| HADR_Step
+    HADR_Step -->|in-process| Retriever
+    Retriever -->|metadata filter + vector| HADRDS
+    HADRDS -->|service→strategy→chunks| Retriever
+
+    DonorHTML -->|in-process| Generator
+    Generator -->|donor_hadr_sections| HADR_Step
+
+    HADR_Step -->|in-process| Generator
+    Generator -->|prompt per strategy| GeminiText
+    GeminiText -->|markdown section| Generator
+
+    HADR_Step -->|merged doc| Review
+    Review -->|critique/approve| Draft
+
+    %% Diagram Generation Flow (in-process, programmatic by default)
+    DiagStep -->|in-process| DiagGen
+    DiagGen -->|programmatic SVG + draw.io| DiagGen
+    DiagGen -->|SVG bytes| PNGConv
+    PNGConv -->|PNG bytes| DiagGen
+    DiagStep -->|in-process| DiagStore
+    DiagStore -->|upload SVG+XML+PNG| DiagGCS
+    DiagGCS -->|public URLs| DiagStore

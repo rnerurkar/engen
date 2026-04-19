@@ -1,0 +1,68 @@
+graph TD
+    subgraph "Client Layer"
+        UI[React SPA]
+    end
+
+    subgraph "Orchestration Layer"
+        Orch[Orchestrator Agent]
+        DB[(AlloyDB<br/>State Store)]
+        WFS[(AlloyDB<br/>Workflow State)]
+    end
+
+    subgraph "Phase 2 ADK Workflow (in-process)"
+        CompSpec["ComponentSpecStep<br/>(WorkflowAgent)"]
+        ArtGen["ArtifactGenerateStep<br/>(WorkflowAgent)"]
+        ArtVal["ArtifactValidateStep<br/>(WorkflowAgent)"]
+    end
+
+    subgraph "Core Logic Modules"
+        CompSpecEngine["ComponentSpecification"]
+        ArtGenEngine["PatternArtifactGenerator"]
+        ArtValEngine["ArtifactValidator"]
+    end
+
+    subgraph "Real-Time Component Sources"
+        CompSources["component_sources.py<br/>Type Normalization"]
+        GitMCP["GitHub MCP Client<br/>(MCP + PyGithub fallback)"]
+        SvcCat["Service Catalog Client<br/>(boto3)"]
+    end
+
+    subgraph "Async Workers"
+        PubDocs[SharePoint<br/>Publisher]
+        PubCode[GitHub<br/>Publisher]
+    end
+
+    subgraph "External Resources"
+        GCS[GCS Bucket<br/>Golden Samples]
+        GitRepos[GitHub Terraform<br/>Repositories]
+        AWSSC[AWS Service<br/>Catalog]
+    end
+
+    %% Data Flow
+    UI -->|Start| Orch
+    UI -.->|Poll Status via Orch| DB
+    UI -.->|Resume via Orch| WFS
+
+    Orch -->|Update State| DB
+    Orch -->|Save Phase| WFS
+    Orch -->|Trigger Async| PubDocs
+    Orch -->|Trigger Async| PubCode
+
+    PubDocs -->|Update State| DB
+    PubCode -->|Update State| DB
+    
+    GCS -->|Fetch Templates| ArtGenEngine
+    GCS -->|Fetch Templates| ArtValEngine
+
+    Orch -->|WorkflowContext| CompSpec
+    CompSpec -->|in-process| CompSpecEngine
+    CompSpecEngine -->|Normalize Types| CompSources
+    CompSources -->|Tier 1 Lookup| GitMCP
+    CompSources -->|Tier 2 Fallback| SvcCat
+    GitMCP -->|Search & Parse| GitRepos
+    SvcCat -->|Query Products| AWSSC
+
+    CompSpec -->|Specification in context| ArtGen
+    ArtGen -->|in-process| ArtGenEngine
+    ArtGen -->|Artifacts in context| ArtVal
+    ArtVal -->|in-process| ArtValEngine

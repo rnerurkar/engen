@@ -1,0 +1,21 @@
+graph LR
+    subgraph "Inference Time (Real-Time)"
+        Agent[ComponentSpecStep<br/>WorkflowAgent]
+        Sources[component_sources.py<br/>Type Normalization]
+        
+        Agent --> Sources
+        Sources --> GitMCP[GitHub MCP Client]
+        Sources --> AWSSC[Service Catalog Client]
+    end
+    
+    subgraph "Tier 1: GitHub"
+        GitMCP -->|MCP Protocol| MCPServer[GitHub MCP Server]
+        GitMCP -->|Fallback| PyGithub[PyGithub REST API]
+        MCPServer --> Repos[Terraform Repos<br/>variables.tf / outputs.tf]
+        PyGithub --> Repos
+    end
+    
+    subgraph "Tier 2: AWS"
+        AWSSC -->|boto3| SC[AWS Service Catalog]
+        SC --> Products[CloudFormation Products<br/>Parameters & Constraints]
+    end

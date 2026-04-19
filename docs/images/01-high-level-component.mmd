@@ -1,0 +1,80 @@
+graph TB
+    subgraph ClientLayer["Client Layer"]
+        UI[React SPA<br/>Vite + Chevron Wizard]
+    end
+
+    subgraph Serving["SERVING PLANE (Single-Process ADK Workflow)"]
+        Orch[Orchestrator Agent<br/>- Workflow Coordinator]
+        
+        subgraph Phase1["Phase 1: Doc Generation (SequentialAgent)"]
+            VA[VisionAnalysisStep<br/>- Gemini Vision]
+            DR[DonorRetrievalStep<br/>- Vertex AI Search]
+            subgraph Loop1["LoopAgent: ContentRefinementLoop (max 3)"]
+                PG[PatternGenerateStep<br/>- Gemini Pro]
+                HS[HADRSectionsStep<br/>- Parallel Retrieval]
+                FDR[FullDocReviewStep<br/>- Quality Control]
+            end
+            HD[HADRDiagramStep<br/>- Programmatic SVG + draw.io + GCS]
+            VA --> DR --> Loop1 --> HD
+            PG --> HS --> FDR
+        end
+
+        subgraph Phase2["Phase 2: Artifact Generation (SequentialAgent)"]
+            CompSpec[ComponentSpecStep<br/>- Real-Time Schema Resolution]
+            subgraph Loop2["LoopAgent: ArtifactRefinementLoop (max 3)"]
+                ArtGen[ArtifactGenerateStep<br/>- Golden Samples + Gemini]
+                ArtVal[ArtifactValidateStep<br/>- 6-Point Rubric]
+            end
+            CompSpec --> Loop2
+            ArtGen --> ArtVal
+        end
+        
+        Orch -->|WorkflowContext| Phase1
+        Orch -->|WorkflowContext| Phase2
+    end
+
+    subgraph RealTimeSources["Real-Time Component Sources"]
+        GitHubMCP[GitHub MCP Server<br/>Terraform Modules]
+        AWSSC[AWS Service Catalog<br/>CloudFormation Products]
+    end
+
+    subgraph Async["Async Workers"]
+        PubDocs[SharePoint<br/>Publisher]
+        PubCode[GitHub<br/>Publisher]
+    end
+    
+    subgraph State["State Management"]
+        DB[(AlloyDB<br/>Job Status)]
+        WFS[(AlloyDB<br/>Workflow State)]
+    end
+
+    subgraph Ingestion["INGESTION PLANE (Managed Pipelines)"]
+        SP[SharePoint Client]
+        SPPipe[SharePoint<br/>Pipeline]
+        VertexAI[Vertex AI<br/>Discovery Engine]
+        HADRPipe[Service HA/DR<br/>Pipeline]
+        HADRDS[HA/DR Data Store<br/>Vertex AI Search]
+        
+        SP --> SPPipe
+        SP --> HADRPipe
+        SPPipe --> VertexAI
+        HADRPipe --> HADRDS
+    end
+
+    subgraph DiagramStorage["Diagram Artefacts"]
+        DiagGCS[GCS Bucket<br/>hadr-diagrams]
+    end
+    
+    HS -->|Direct Call| HADRDS
+    HD -->|SVG + draw.io + PNG + Upload| DiagGCS
+
+    UI --> Orch
+    UI -.->|Poll via Orch| DB
+    UI -.->|Resume via Orch| WFS
+    Orch -->|Save Phase| WFS
+    Orch -->|Fire & Forget| PubDocs
+    Orch -->|Fire & Forget| PubCode
+    CompSpec -->|Real-Time Lookup| GitHubMCP
+    CompSpec -->|Fallback Lookup| AWSSC
+    PubDocs --> DB
+    PubCode --> DB

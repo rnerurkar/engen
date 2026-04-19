@@ -1,0 +1,41 @@
+sequenceDiagram
+    participant Pipeline as Service HA/DR Pipeline
+    participant SP as SharePoint Client
+    participant Gemini as Gemini 1.5 Flash
+    participant GCS as Cloud Storage
+    participant ES as Vertex AI Search<br/>(HA/DR Data Store)
+
+    Pipeline->>SP: fetch_service_hadr_list()
+    SP-->>Pipeline: service_list[] (from SP_HADR_LIST_ID)
+
+    loop For each service
+        Pipeline->>SP: fetch_page_html(service.page_url)
+        SP-->>Pipeline: raw_html
+
+        Note over Pipeline,GCS: Image Processing Phase
+        loop For each <img> tag
+            Pipeline->>SP: download_image(src)
+            SP-->>Pipeline: image_bytes
+
+            Pipeline->>Gemini: describe_diagram(image_bytes)
+            Gemini-->>Pipeline: text_description
+
+            Pipeline->>GCS: upload_blob(services/{name}/hadr-diagrams/)
+            GCS-->>Pipeline: OK
+
+            Pipeline->>Pipeline: Replace <img> with description text
+        end
+
+        Note over Pipeline,ES: Hierarchical Chunking Phase
+        Pipeline->>Pipeline: Extract plain text from HTML
+        Pipeline->>Pipeline: Split by DR Strategy heading
+        Pipeline->>Pipeline: Split each strategy by Lifecycle Phase heading
+        Pipeline->>Pipeline: Window-chunk each phase (1500w / 200w overlap)
+
+        Note over Pipeline,ES: Indexing Phase
+        loop For each chunk
+            Pipeline->>Pipeline: Attach struct_data metadata
+            Pipeline->>ES: create_document(id, content, struct_data)
+            ES-->>Pipeline: 200 OK
+        end
+    end

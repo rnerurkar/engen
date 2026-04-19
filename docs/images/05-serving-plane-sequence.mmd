@@ -1,0 +1,68 @@
+sequenceDiagram
+    participant Client as React SPA
+    participant Orch as Orchestrator Agent
+    participant WCtx as WorkflowContext
+    participant DB as AlloyDB
+    participant Async as Async Workers
+    participant GitMCP as GitHub MCP Client
+    participant SvcCat as Service Catalog Client
+
+    Client->>Orch: POST /invoke {task: "phase1_generate_docs", image, title, user_id}
+    
+    Note over Orch,WCtx: Phase 1: Doc Generation (SequentialAgent, all in-process)
+    Orch->>WCtx: Seed context (image, title, module refs)
+    Orch->>Orch: VisionAnalysisStep → Gemini Vision → description
+    Orch->>Orch: DonorRetrievalStep → Vertex AI Search → donor_context
+
+    loop ContentRefinementLoop (LoopAgent, max 3)
+        Orch->>Orch: PatternGenerateStep → Gemini Pro → draft_sections
+        Orch->>Orch: HADRSectionsStep → parallel retrieve + generate → HA/DR sections
+        Orch->>Orch: FullDocReviewStep → review full doc → approved / critique
+    end
+
+    Orch->>Orch: HADRDiagramStep → programmatic SVG + draw.io (12 diagrams, < 1s)
+    Orch->>Orch: Upload to GCS, embed URLs in HA/DR sections
+
+    Note over Orch,Client: Phase 1 Complete → User Approval
+    Orch-->>Client: Return sections + full_doc + workflow_id
+    Client->>Client: Store workflow_id in localStorage
+    Client->>Orch: POST /invoke {task: "approve_docs", workflow_id}
+    
+    par Async Publishing (Docs)
+        Orch->>Async: publish_docs_async(review_id)
+        Async->>DB: Update Status (IN_PROGRESS → COMPLETED)
+    and Continue Workflow
+        Client->>Orch: POST /invoke {task: "phase2_generate_code", workflow_id}
+    end
+
+    Note over Orch,WCtx: Phase 2: Artifact Generation (SequentialAgent, all in-process)
+    Orch->>WCtx: Seed context (full_doc, module refs)
+    Orch->>Orch: ComponentSpecStep → real-time lookups
+    Orch->>GitMCP: search_terraform_module(type)
+    GitMCP-->>Orch: TerraformModuleSpec
+    Orch->>SvcCat: search_product(type) [fallback]
+    SvcCat-->>Orch: ServiceCatalogProductSpec
+
+    loop ArtifactRefinementLoop (LoopAgent, max 3)
+        Orch->>Orch: ArtifactGenerateStep → Golden Samples + Gemini → artifacts
+        Orch->>Orch: ArtifactValidateStep → 6-point rubric → PASS / NEEDS_REVISION
+    end
+
+    Note over Orch,Client: Phase 2 Complete → User Approval
+    Orch-->>Client: Return artifact bundle
+    Client->>Orch: POST /invoke {task: "approve_code", workflow_id}
+
+    par Async Publishing (Code)
+        Orch->>Async: publish_code_async(review_id)
+        Async->>DB: Update Status (IN_PROGRESS → COMPLETED)
+    and Return Immediate Response
+        Orch-->>Client: {status: "processing", pattern_id, artifact_id}
+    end
+
+    Note over Client,DB: Client Polling via Orchestrator
+    loop Poll Until Complete (every 3s)
+        Client->>Orch: POST /invoke {task: "get_publish_status", workflow_id}
+        Orch->>DB: Check Status
+        DB-->>Orch: {doc_url, code_url}
+        Orch-->>Client: Status update
+    end

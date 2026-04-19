@@ -30,88 +30,10 @@ EnGen is an intelligent system that automates the creation of high-quality archi
 
 This diagram represents the concrete implementation of the EnGen system, detailing the workflow agents involved in the pipeline.
 
-```mermaid
-graph TB
-    subgraph ClientLayer["Client Layer"]
-        UI[React SPA<br/>Vite + Chevron Wizard]
-    end
-
-    subgraph Serving["SERVING PLANE (Single-Process ADK Workflow)"]
-        Orch[Orchestrator Agent<br/>- Workflow Coordinator]
-        
-        subgraph Phase1["Phase 1: Doc Generation (SequentialAgent)"]
-            VA[VisionAnalysisStep<br/>- Gemini Vision]
-            DR[DonorRetrievalStep<br/>- Vertex AI Search]
-            subgraph Loop1["LoopAgent: ContentRefinementLoop (max 3)"]
-                PG[PatternGenerateStep<br/>- Gemini Pro]
-                HS[HADRSectionsStep<br/>- Parallel Retrieval]
-                FDR[FullDocReviewStep<br/>- Quality Control]
-            end
-            HD[HADRDiagramStep<br/>- Programmatic SVG + draw.io + GCS]
-            VA --> DR --> Loop1 --> HD
-            PG --> HS --> FDR
-        end
-
-        subgraph Phase2["Phase 2: Artifact Generation (SequentialAgent)"]
-            CompSpec[ComponentSpecStep<br/>- Real-Time Schema Resolution]
-            subgraph Loop2["LoopAgent: ArtifactRefinementLoop (max 3)"]
-                ArtGen[ArtifactGenerateStep<br/>- Golden Samples + Gemini]
-                ArtVal[ArtifactValidateStep<br/>- 6-Point Rubric]
-            end
-            CompSpec --> Loop2
-            ArtGen --> ArtVal
-        end
-        
-        Orch -->|WorkflowContext| Phase1
-        Orch -->|WorkflowContext| Phase2
-    end
-
-    subgraph RealTimeSources["Real-Time Component Sources"]
-        GitHubMCP[GitHub MCP Server<br/>Terraform Modules]
-        AWSSC[AWS Service Catalog<br/>CloudFormation Products]
-    end
-
-    subgraph Async["Async Workers"]
-        PubDocs[SharePoint<br/>Publisher]
-        PubCode[GitHub<br/>Publisher]
-    end
-    
-    subgraph State["State Management"]
-        DB[(AlloyDB<br/>Job Status)]
-        WFS[(AlloyDB<br/>Workflow State)]
-    end
-
-    subgraph Ingestion["INGESTION PLANE (Managed Pipelines)"]
-        SP[SharePoint Client]
-        SPPipe[SharePoint<br/>Pipeline]
-        VertexAI[Vertex AI<br/>Discovery Engine]
-        HADRPipe[Service HA/DR<br/>Pipeline]
-        HADRDS[HA/DR Data Store<br/>Vertex AI Search]
-        
-        SP --> SPPipe
-        SP --> HADRPipe
-        SPPipe --> VertexAI
-        HADRPipe --> HADRDS
-    end
-
-    subgraph DiagramStorage["Diagram Artefacts"]
-        DiagGCS[GCS Bucket<br/>hadr-diagrams]
-    end
-    
-    HS -->|Direct Call| HADRDS
-    HD -->|SVG + draw.io + PNG + Upload| DiagGCS
-
-    UI --> Orch
-    UI -.->|Poll via Orch| DB
-    UI -.->|Resume via Orch| WFS
-    Orch -->|Save Phase| WFS
-    Orch -->|Fire & Forget| PubDocs
-    Orch -->|Fire & Forget| PubCode
-    CompSpec -->|Real-Time Lookup| GitHubMCP
-    CompSpec -->|Fallback Lookup| AWSSC
-    PubDocs --> DB
-    PubCode --> DB
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/01-high-level-component.mmd -o docs/images/01-high-level-component.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![High-Level Component Diagram](docs/images/01-high-level-component.png)
 
 ### 2.1 Agent Responsibilities
 
@@ -145,47 +67,10 @@ The Ingestion Plane handles the end-to-end processing of both unstructured conte
 
 ### 3.2 End-to-End Sequence Diagram
 
-```mermaid
-sequenceDiagram
-    participant Pipeline as Vertex Search Pipeline
-    participant SP as SharePoint Client
-    participant Gemini as Gemini 1.5 Flash
-    participant GCS as Cloud Storage
-    participant ES as Vertex Search (Discovery Engine)
-
-    Pipeline->>SP: fetch_pattern_list()
-    SP-->>Pipeline: patterns[] (Metadata)
-
-    loop For each pattern
-        Pipeline->>SP: fetch_page_html(url)
-        SP-->>Pipeline: raw_html
-        
-        Note over Pipeline,GCS: Image Processing Phase
-        Pipeline->>Pipeline: Extract <img> tags limit=2
-        
-        loop For each image
-            Pipeline->>SP: download_image(src)
-            SP-->>Pipeline: image_bytes
-            
-            par Parallel Analysis & Upload
-                Pipeline->>Gemini: generate_content(image + prompt)
-                Gemini-->>Pipeline: text_description
-            and
-                Pipeline->>GCS: upload_blob(image)
-                GCS-->>Pipeline: public_url
-            end
-            
-            Pipeline->>Pipeline: Update HTML <img> src & alt
-        end
-        
-        Note over Pipeline,ES: Enrichment & Indexing
-        Pipeline->>Pipeline: _enrich_html_content(html + descriptions)
-        Pipeline->>Pipeline: Map metadata to struct_data
-        
-        Pipeline->>ES: write_document(id, content=html, struct_data)
-        ES-->>Pipeline: 200 OK
-    end
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/02-ingestion-sequence.mmd -o docs/images/02-ingestion-sequence.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![Ingestion Pipeline Sequence Diagram](docs/images/02-ingestion-sequence.png)
 
 ### 3.3 End-to-End Flow Description: Vertex Search Pipeline
 
@@ -230,29 +115,10 @@ The architecture uses **on-demand, real-time lookups** performed at inference ti
 
 #### Architecture Overview
 
-```mermaid
-graph LR
-    subgraph "Inference Time (Real-Time)"
-        Agent[ComponentSpecStep<br/>WorkflowAgent]
-        Sources[component_sources.py<br/>Type Normalization]
-        
-        Agent --> Sources
-        Sources --> GitMCP[GitHub MCP Client]
-        Sources --> AWSSC[Service Catalog Client]
-    end
-    
-    subgraph "Tier 1: GitHub"
-        GitMCP -->|MCP Protocol| MCPServer[GitHub MCP Server]
-        GitMCP -->|Fallback| PyGithub[PyGithub REST API]
-        MCPServer --> Repos[Terraform Repos<br/>variables.tf / outputs.tf]
-        PyGithub --> Repos
-    end
-    
-    subgraph "Tier 2: AWS"
-        AWSSC -->|boto3| SC[AWS Service Catalog]
-        SC --> Products[CloudFormation Products<br/>Parameters & Constraints]
-    end
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/03-component-resolution.mmd -o docs/images/03-component-resolution.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![Real-Time Component Resolution Architecture](docs/images/03-component-resolution.png)
 
 #### Component Resolution Flow
 
@@ -297,49 +163,10 @@ The Service HA/DR Ingestion Pipeline processes service-level HA/DR documentation
 
 #### 3.5.2 End-to-End Sequence Diagram
 
-```mermaid
-sequenceDiagram
-    participant Pipeline as Service HA/DR Pipeline
-    participant SP as SharePoint Client
-    participant Gemini as Gemini 1.5 Flash
-    participant GCS as Cloud Storage
-    participant ES as Vertex AI Search<br/>(HA/DR Data Store)
-
-    Pipeline->>SP: fetch_service_hadr_list()
-    SP-->>Pipeline: service_list[] (from SP_HADR_LIST_ID)
-
-    loop For each service
-        Pipeline->>SP: fetch_page_html(service.page_url)
-        SP-->>Pipeline: raw_html
-
-        Note over Pipeline,GCS: Image Processing Phase
-        loop For each <img> tag
-            Pipeline->>SP: download_image(src)
-            SP-->>Pipeline: image_bytes
-
-            Pipeline->>Gemini: describe_diagram(image_bytes)
-            Gemini-->>Pipeline: text_description
-
-            Pipeline->>GCS: upload_blob(services/{name}/hadr-diagrams/)
-            GCS-->>Pipeline: OK
-
-            Pipeline->>Pipeline: Replace <img> with description text
-        end
-
-        Note over Pipeline,ES: Hierarchical Chunking Phase
-        Pipeline->>Pipeline: Extract plain text from HTML
-        Pipeline->>Pipeline: Split by DR Strategy heading
-        Pipeline->>Pipeline: Split each strategy by Lifecycle Phase heading
-        Pipeline->>Pipeline: Window-chunk each phase (1500w / 200w overlap)
-
-        Note over Pipeline,ES: Indexing Phase
-        loop For each chunk
-            Pipeline->>Pipeline: Attach struct_data metadata
-            Pipeline->>ES: create_document(id, content, struct_data)
-            ES-->>Pipeline: 200 OK
-        end
-    end
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/04-hadr-ingestion-sequence.mmd -o docs/images/04-hadr-ingestion-sequence.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![Service HA/DR Ingestion Sequence Diagram](docs/images/04-hadr-ingestion-sequence.png)
 
 #### 3.5.3 End-to-End Flow Description
 
@@ -477,76 +304,10 @@ Core logic modules (PatternGenerator, VertexRetriever, PatternReviewer, Componen
 
 ### 4.3 High-Level Sequence Diagram
 
-```mermaid
-sequenceDiagram
-    participant Client as React SPA
-    participant Orch as Orchestrator Agent
-    participant WCtx as WorkflowContext
-    participant DB as AlloyDB
-    participant Async as Async Workers
-    participant GitMCP as GitHub MCP Client
-    participant SvcCat as Service Catalog Client
-
-    Client->>Orch: POST /invoke {task: "phase1_generate_docs", image, title, user_id}
-    
-    Note over Orch,WCtx: Phase 1: Doc Generation (SequentialAgent, all in-process)
-    Orch->>WCtx: Seed context (image, title, module refs)
-    Orch->>Orch: VisionAnalysisStep → Gemini Vision → description
-    Orch->>Orch: DonorRetrievalStep → Vertex AI Search → donor_context
-
-    loop ContentRefinementLoop (LoopAgent, max 3)
-        Orch->>Orch: PatternGenerateStep → Gemini Pro → draft_sections
-        Orch->>Orch: HADRSectionsStep → parallel retrieve + generate → HA/DR sections
-        Orch->>Orch: FullDocReviewStep → review full doc → approved / critique
-    end
-
-    Orch->>Orch: HADRDiagramStep → programmatic SVG + draw.io (12 diagrams, < 1s)
-    Orch->>Orch: Upload to GCS, embed URLs in HA/DR sections
-
-    Note over Orch,Client: Phase 1 Complete → User Approval
-    Orch-->>Client: Return sections + full_doc + workflow_id
-    Client->>Client: Store workflow_id in localStorage
-    Client->>Orch: POST /invoke {task: "approve_docs", workflow_id}
-    
-    par Async Publishing (Docs)
-        Orch->>Async: publish_docs_async(review_id)
-        Async->>DB: Update Status (IN_PROGRESS → COMPLETED)
-    and Continue Workflow
-        Client->>Orch: POST /invoke {task: "phase2_generate_code", workflow_id}
-    end
-
-    Note over Orch,WCtx: Phase 2: Artifact Generation (SequentialAgent, all in-process)
-    Orch->>WCtx: Seed context (full_doc, module refs)
-    Orch->>Orch: ComponentSpecStep → real-time lookups
-    Orch->>GitMCP: search_terraform_module(type)
-    GitMCP-->>Orch: TerraformModuleSpec
-    Orch->>SvcCat: search_product(type) [fallback]
-    SvcCat-->>Orch: ServiceCatalogProductSpec
-
-    loop ArtifactRefinementLoop (LoopAgent, max 3)
-        Orch->>Orch: ArtifactGenerateStep → Golden Samples + Gemini → artifacts
-        Orch->>Orch: ArtifactValidateStep → 6-point rubric → PASS / NEEDS_REVISION
-    end
-
-    Note over Orch,Client: Phase 2 Complete → User Approval
-    Orch-->>Client: Return artifact bundle
-    Client->>Orch: POST /invoke {task: "approve_code", workflow_id}
-
-    par Async Publishing (Code)
-        Orch->>Async: publish_code_async(review_id)
-        Async->>DB: Update Status (IN_PROGRESS → COMPLETED)
-    and Return Immediate Response
-        Orch-->>Client: {status: "processing", pattern_id, artifact_id}
-    end
-
-    Note over Client,DB: Client Polling via Orchestrator
-    loop Poll Until Complete (every 3s)
-        Client->>Orch: POST /invoke {task: "get_publish_status", workflow_id}
-        Orch->>DB: Check Status
-        DB-->>Orch: {doc_url, code_url}
-        Orch-->>Client: Status update
-    end
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/05-serving-plane-sequence.mmd -o docs/images/05-serving-plane-sequence.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![Serving Plane End-to-End Sequence Diagram](docs/images/05-serving-plane-sequence.png)
 
 ### 4.4 End-to-End Flow Description
 
@@ -673,169 +434,19 @@ This workflow implements a "Pattern Synthesis" approach. Instead of generating i
 
 The following diagram illustrates the structural relationships and information flow between the synthesis components, highlighting the in-process execution model.
 
-```mermaid
-graph TD
-    subgraph "Client Layer"
-        UI[React SPA]
-    end
-
-    subgraph "Orchestration Layer"
-        Orch[Orchestrator Agent]
-        DB[(AlloyDB<br/>State Store)]
-        WFS[(AlloyDB<br/>Workflow State)]
-    end
-
-    subgraph "Phase 2 ADK Workflow (in-process)"
-        CompSpec["ComponentSpecStep<br/>(WorkflowAgent)"]
-        ArtGen["ArtifactGenerateStep<br/>(WorkflowAgent)"]
-        ArtVal["ArtifactValidateStep<br/>(WorkflowAgent)"]
-    end
-
-    subgraph "Core Logic Modules"
-        CompSpecEngine["ComponentSpecification"]
-        ArtGenEngine["PatternArtifactGenerator"]
-        ArtValEngine["ArtifactValidator"]
-    end
-
-    subgraph "Real-Time Component Sources"
-        CompSources["component_sources.py<br/>Type Normalization"]
-        GitMCP["GitHub MCP Client<br/>(MCP + PyGithub fallback)"]
-        SvcCat["Service Catalog Client<br/>(boto3)"]
-    end
-
-    subgraph "Async Workers"
-        PubDocs[SharePoint<br/>Publisher]
-        PubCode[GitHub<br/>Publisher]
-    end
-
-    subgraph "External Resources"
-        GCS[GCS Bucket<br/>Golden Samples]
-        GitRepos[GitHub Terraform<br/>Repositories]
-        AWSSC[AWS Service<br/>Catalog]
-    end
-
-    %% Data Flow
-    UI -->|Start| Orch
-    UI -.->|Poll Status via Orch| DB
-    UI -.->|Resume via Orch| WFS
-
-    Orch -->|Update State| DB
-    Orch -->|Save Phase| WFS
-    Orch -->|Trigger Async| PubDocs
-    Orch -->|Trigger Async| PubCode
-
-    PubDocs -->|Update State| DB
-    PubCode -->|Update State| DB
-    
-    GCS -->|Fetch Templates| ArtGenEngine
-    GCS -->|Fetch Templates| ArtValEngine
-
-    Orch -->|WorkflowContext| CompSpec
-    CompSpec -->|in-process| CompSpecEngine
-    CompSpecEngine -->|Normalize Types| CompSources
-    CompSources -->|Tier 1 Lookup| GitMCP
-    CompSources -->|Tier 2 Fallback| SvcCat
-    GitMCP -->|Search & Parse| GitRepos
-    SvcCat -->|Query Products| AWSSC
-
-    CompSpec -->|Specification in context| ArtGen
-    ArtGen -->|in-process| ArtGenEngine
-    ArtGen -->|Artifacts in context| ArtVal
-    ArtVal -->|in-process| ArtValEngine
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/06-phase2-component.mmd -o docs/images/06-phase2-component.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![Phase 2 Artifact Synthesis Component Diagram](docs/images/06-phase2-component.png)
 
 #### 4.8.3 Sequence Diagram
 
 This sequence diagram details the lifecycle of a request from approved documentation to published artifacts, emphasizing the in-process execution model.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Client as React SPA
-    participant Orch as Orchestrator Agent
-    participant WCtx as WorkflowContext
-    participant CompStep as ComponentSpecStep
-    participant GitMCP as GitHub MCP Client
-    participant SvcCat as Service Catalog Client
-    participant GenStep as ArtifactGenerateStep
-    participant GCS as GCS Bucket
-    participant ValStep as ArtifactValidateStep
-    participant DB as AlloyDB
-    participant Async as Background Tasks
-
-    Note over Orch, Async: Phase 3: Pattern Approval & Async Doc Publishing
-    
-    Client->>Orch: POST /invoke {task: "approve_docs", workflow_id}
-    Orch->>DB: Create review record (PID-1)
-    
-    par Fire & Forget
-        Orch->>Async: publish_docs(PID-1)
-        Async->>DB: UPDATE status='IN_PROGRESS'
-        Note right of Async: Uploads to SharePoint...
-        Async->>DB: UPDATE status='COMPLETED' url='...'
-    and Continue Execution
-        Client->>Orch: POST /invoke {task: "phase2_generate_code", workflow_id}
-    end
-    
-    Note over Orch, ValStep: Phase 4: In-Process Artifact Generation (ADK Workflow)
-
-    Orch->>WCtx: Seed context (full_doc, module refs)
-    
-    Orch->>CompStep: Run ComponentSpecStep (in-process)
-    CompStep->>CompStep: Extract keywords via LLM
-    CompStep->>CompStep: Normalize types (component_sources.py)
-    
-    loop For each component type
-        CompStep->>GitMCP: search_terraform_module(type)
-        alt Module found in GitHub
-            GitMCP-->>CompStep: TerraformModuleSpec (variables, outputs)
-        else Not found — Fallback
-            GitMCP-->>CompStep: None
-            CompStep->>SvcCat: search_product(type)
-            SvcCat-->>CompStep: ServiceCatalogProductSpec (parameters)
-        end
-    end
-    
-    CompStep->>CompStep: Topological sort (graphlib)
-    CompStep->>WCtx: Store ComponentSpecification
-
-    Note over Orch, ValStep: ArtifactRefinementLoop (LoopAgent, max 3)
-    
-    loop Quality Assurance Loop (exit on validation_passed)
-        Orch->>GenStep: Run ArtifactGenerateStep (in-process)
-        GenStep->>GCS: fetch_golden_samples(types)
-        GCS-->>GenStep: approved_templates
-        GenStep->>WCtx: Store ArtifactBundle
-        
-        Orch->>ValStep: Run ArtifactValidateStep (in-process)
-        ValStep->>WCtx: Read ArtifactBundle
-        ValStep->>ValStep: 6-point rubric validation
-        ValStep->>WCtx: Store ValidationResult + set validation_passed (or critique)
-    end
-
-    Note over Orch, Async: Phase 5: Artifact Approval & Async Code Publishing
-
-    Orch-->>Client: Return artifact bundle
-    Client->>Orch: POST /invoke {task: "approve_code", workflow_id}
-
-    par Fire & Forget
-        Orch->>Async: publish_code(AID-2)
-        Async->>DB: UPDATE status='IN_PROGRESS'
-        Note right of Async: Pushes to GitHub (REST API)...
-        Async->>DB: UPDATE status='COMPLETED' url='...'
-    and Return Immediate Result
-        Orch-->>Client: {status: "processing", p_id: "PID-1", a_id: "AID-2"}
-    end
-
-    Note over Client, DB: Phase 6: Client-Side Polling
-    
-    loop Poll until both COMPLETED
-        Client->>Orch: POST /invoke {task: "get_publish_status", workflow_id}
-        Orch->>DB: SELECT status, url FROM reviews
-        DB-->>Orch: {doc_status, code_status}
-        Orch-->>Client: Status update
-    end
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/07-phase2-sequence.mmd -o docs/images/07-phase2-sequence.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![Phase 2 Artifact Synthesis Sequence Diagram](docs/images/07-phase2-sequence.png)
 
 **Step-by-Step Explanation:**
 
@@ -877,148 +488,17 @@ This workflow generates the High Availability / Disaster Recovery (HA/DR) sectio
 
 #### 4.9.2 Component Diagram
 
-```mermaid
-graph TD
-    subgraph "Phase 1 SequentialAgent (in-process)"
-        subgraph "LoopAgent (max 3 iterations)"
-            Draft[PatternGenerateStep<br/>PatternGenerator]
-            HADR_Step[HADRSectionsStep<br/>- Extract service names<br/>- Retrieve + Generate text]
-            Review[FullDocReviewStep<br/>PatternReviewer]
-        end
-        DiagStep[HADRDiagramStep<br/>- Programmatic SVG + draw.io<br/>from STATE_MATRIX]
-    end
-
-    subgraph "Core Logic (shared via WorkflowContext)"
-        Retriever[ServiceHADRRetriever]
-        Generator[HADRDocumentationGenerator]
-        DiagGen[HADRDiagramGenerator<br/>- STATE_MATRIX<br/>- _build_programmatic_svg<br/>- _build_programmatic_drawio<br/>- DRAWIO_SERVICE_ICONS]
-        DiagStore[HADRDiagramStorage]
-        PNGConv[SVG→PNG<br/>svglib + reportlab]
-    end
-
-    subgraph "External Services"
-        HADRDS[(Vertex AI Search<br/>service-hadr-datastore)]
-        GeminiText[Gemini 1.5 Pro<br/>Text Generation]
-        DiagGCS[(GCS Bucket<br/>hadr-diagrams)]
-    end
-
-    subgraph "Donor Context"
-        DonorHTML[Donor Pattern HTML]
-    end
-
-    %% Text Generation Flow (in-process)
-    Draft -->|doc_text| HADR_Step
-    HADR_Step -->|in-process| Retriever
-    Retriever -->|metadata filter + vector| HADRDS
-    HADRDS -->|service→strategy→chunks| Retriever
-
-    DonorHTML -->|in-process| Generator
-    Generator -->|donor_hadr_sections| HADR_Step
-
-    HADR_Step -->|in-process| Generator
-    Generator -->|prompt per strategy| GeminiText
-    GeminiText -->|markdown section| Generator
-
-    HADR_Step -->|merged doc| Review
-    Review -->|critique/approve| Draft
-
-    %% Diagram Generation Flow (in-process, programmatic by default)
-    DiagStep -->|in-process| DiagGen
-    DiagGen -->|programmatic SVG + draw.io| DiagGen
-    DiagGen -->|SVG bytes| PNGConv
-    PNGConv -->|PNG bytes| DiagGen
-    DiagStep -->|in-process| DiagStore
-    DiagStore -->|upload SVG+XML+PNG| DiagGCS
-    DiagGCS -->|public URLs| DiagStore
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/08-hadr-component.mmd -o docs/images/08-hadr-component.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![HA/DR Generation Component Diagram](docs/images/08-hadr-component.png)
 
 #### 4.9.3 Sequence Diagram
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Orch as OrchestratorAgent
-    participant WCtx as WorkflowContext
-    participant Ret as ServiceHADRRetriever<br/>(core logic, in-process)
-    participant HADRDS as Vertex AI Search<br/>(HA/DR Data Store)
-    participant Gen as HADRDocumentationGenerator<br/>(core logic, in-process)
-    participant Gemini as Gemini 1.5 Pro
-    participant DiagGen as HADRDiagramGenerator<br/>(core logic, in-process)
-    participant DiagStore as HADRDiagramStorage<br/>(core logic, in-process)
-    participant GCS as GCS (Diagram Bucket)
-
-    Note over Orch,GCS: Inside LoopAgent — HADRSectionsStep (in-process)
-    
-    Orch->>WCtx: Check cached service_names
-    alt First iteration (not cached)
-        Orch->>Orch: _extract_service_names_from_doc(doc_text)
-        Orch->>WCtx: Cache service_names
-    end
-    WCtx-->>Orch: service_names[] (e.g. ["Amazon RDS", "AWS Lambda"])
-
-    par Parallel: Retrieval + Donor Extraction (asyncio.gather)
-        Orch->>Ret: aretrieve_all_services_hadr(service_names)
-        par Async Parallel (N×4 queries via asyncio.gather)
-            Ret->>HADRDS: SearchRequest(filter=svc1+strategy1, query=semantic)
-            Ret->>HADRDS: SearchRequest(filter=svc1+strategy2, query=semantic)
-            Note right of Ret: ...all N×4 queries dispatched in parallel
-            HADRDS-->>Ret: SearchResponse (extractive answers + metadata)
-        end
-        Ret-->>Orch: service_hadr_docs {svc→strategy→[chunks]}
-    and
-        Orch->>Gen: extract_donor_hadr_sections(donor_html)
-        Gen-->>Orch: donor_hadr_sections {strategy→text}
-    end
-
-    Orch->>Orch: Build pattern_context (title, solution, services)
-
-    par Async Parallel (4 strategies via asyncio.gather, 120s timeout each)
-        Orch->>Gen: agenerate_hadr_sections(strategy1)
-        Gen->>Gemini: generate_content(prompt, temp=0.3)
-        Gemini-->>Gen: markdown section with summary tables
-    and
-        Orch->>Gen: agenerate_hadr_sections(strategy2)
-    and
-        Orch->>Gen: agenerate_hadr_sections(strategy3)
-    and
-        Orch->>Gen: agenerate_hadr_sections(strategy4)
-    end
-    Gen-->>Orch: hadr_sections{strategy→markdown}
-    Orch->>Orch: _format_hadr_sections() → merge into generated_sections["HA/DR"]
-
-    Note over Orch,GCS: After LoopAgent — HADRDiagramStep (in-process, programmatic by default)
-
-    Orch->>DiagGen: generate_all_diagrams(services, hadr_sections)
-    
-    alt Programmatic Mode (default: use_ai_diagrams=False)
-        loop 12 diagrams (4 strategies × 3 phases)
-            DiagGen->>DiagGen: STATE_MATRIX[(strategy, phase)] → RegionStates
-            DiagGen->>DiagGen: _is_data_service(svc) → classify core vs non-core
-            DiagGen->>DiagGen: _build_programmatic_svg(services, states)
-            DiagGen->>DiagGen: _build_programmatic_drawio(services, states, DRAWIO_SERVICE_ICONS)
-            DiagGen->>DiagGen: SVG→PNG via svglib+reportlab
-        end
-        Note right of DiagGen: Zero Gemini calls, < 1s total
-    else AI Mode (opt-in: use_ai_diagrams=True)
-        par Async Parallel (12 diagrams, Semaphore(6))
-            DiagGen->>Gemini: generate SVG (gemini-2.0-flash, max_tokens=4096)
-            DiagGen->>DiagGen: _build_programmatic_drawio (always programmatic)
-            DiagGen->>DiagGen: SVG→PNG via svglib+reportlab
-        end
-    end
-    DiagGen-->>Orch: PatternDiagramBundle (12 × {SVG, draw.io XML, PNG})
-
-    Orch->>DiagStore: aupload_diagram_bundle(bundles)
-    par Async Parallel (12 uploads via asyncio.gather, 60s timeout each)
-        DiagStore->>GCS: upload SVG + draw.io + PNG
-        GCS-->>DiagStore: public URLs
-    end
-    DiagStore-->>Orch: url_map {(strategy, phase) → {svg_url, drawio_url, png_url}}
-
-    Orch->>Orch: Embed diagram URLs in HA/DR sections
-    
-    Note over Orch: Non-blocking: if any step fails,<br/>placeholder inserted and workflow continues
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/09-hadr-sequence.mmd -o docs/images/09-hadr-sequence.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![HA/DR Generation Sequence Diagram](docs/images/09-hadr-sequence.png)
 
 #### 4.9.4 Step-by-Step Explanation
 
@@ -1166,63 +646,10 @@ The application interacts with specific Orchestrator tasks that correspond to th
 
 ### 4.10.3 Integration Diagram
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant SPA as React SPA
-    participant Orch as Orchestrator API (/invoke)
-    participant DB as AlloyDB
-    participant WFS as AlloyDB (workflow_state)
-
-    Note over SPA,WFS: Phase 0: Resume Check (on page load)
-    SPA->>SPA: Read localStorage("engen_workflow_id")
-    alt Saved workflow_id exists
-        SPA->>Orch: POST /invoke {task: "resume_workflow", workflow_id}
-        Orch->>WFS: Load workflow snapshot
-        WFS-->>Orch: {phase, doc_data, code_data}
-        Orch-->>SPA: {found: true, step, doc_data, code_data}
-        SPA-->>User: Restore wizard at saved step
-    else No saved workflow_id
-        SPA-->>User: Show INPUT step
-    end
-
-    User->>SPA: 1. Upload Diagram + Enter Title
-    SPA->>Orch: POST /invoke {task: "phase1_generate_docs", user_id}
-    Orch->>WFS: Create workflow_state row
-    WFS-->>Orch: workflow_id
-    Orch-->>SPA: Return Sections + Markdown + workflow_id
-    SPA->>SPA: Store workflow_id in localStorage
-    SPA-->>User: Display Docs for Review
-
-    User->>SPA: 2. Approve Docs
-    SPA->>Orch: POST /invoke {task: "approve_docs", workflow_id}
-    Orch->>DB: Create DOC_TASK (In Progress)
-    Orch->>WFS: Save state (phase=CODE_GEN)
-    Orch-->>SPA: Return doc_review_id
-    
-    SPA->>Orch: 3. POST /invoke {task: "phase2_generate_code", workflow_id}
-    Orch->>WFS: Save state (phase=CODE_REVIEW, code_data)
-    Orch-->>SPA: Return Artifact Bundle
-    SPA-->>User: Display Code Structure for Review
-
-    User->>SPA: 4. Approve Code
-    SPA->>Orch: POST /invoke {task: "approve_code", workflow_id}
-    Orch->>DB: Create CODE_TASK (In Progress)
-    Orch->>WFS: Save state (phase=PUBLISH)
-    Orch-->>SPA: Return code_review_id
-
-    loop Every 3 Seconds
-        SPA->>Orch: POST /invoke {task: "get_publish_status", workflow_id}
-        Orch->>DB: Check Task Status
-        DB-->>Orch: {doc: COMPLETED, code: IN_PROGRESS}
-        Orch-->>SPA: Status Update
-        SPA-->>User: Update Progress Display
-    end
-    
-    Note over SPA,WFS: On both COMPLETED:
-    Orch->>WFS: Save state (COMPLETED) + deactivate
-    SPA->>SPA: Clear localStorage("engen_workflow_id")
-```
+<!-- Rendered from Mermaid source — edit the .mmd file in docs/images/ and re-render with:
+     mmdc -i docs/images/10-spa-integration.mmd -o docs/images/10-spa-integration.png -c docs/mermaid-config.json -b "#1a202c" --scale 2
+-->
+![SPA Integration Sequence Diagram](docs/images/10-spa-integration.png)
 
 ### 4.10.4 Project Structure
 

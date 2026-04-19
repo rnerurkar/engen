@@ -1,0 +1,39 @@
+sequenceDiagram
+    participant Pipeline as Vertex Search Pipeline
+    participant SP as SharePoint Client
+    participant Gemini as Gemini 1.5 Flash
+    participant GCS as Cloud Storage
+    participant ES as Vertex Search (Discovery Engine)
+
+    Pipeline->>SP: fetch_pattern_list()
+    SP-->>Pipeline: patterns[] (Metadata)
+
+    loop For each pattern
+        Pipeline->>SP: fetch_page_html(url)
+        SP-->>Pipeline: raw_html
+        
+        Note over Pipeline,GCS: Image Processing Phase
+        Pipeline->>Pipeline: Extract <img> tags limit=2
+        
+        loop For each image
+            Pipeline->>SP: download_image(src)
+            SP-->>Pipeline: image_bytes
+            
+            par Parallel Analysis & Upload
+                Pipeline->>Gemini: generate_content(image + prompt)
+                Gemini-->>Pipeline: text_description
+            and
+                Pipeline->>GCS: upload_blob(image)
+                GCS-->>Pipeline: public_url
+            end
+            
+            Pipeline->>Pipeline: Update HTML <img> src & alt
+        end
+        
+        Note over Pipeline,ES: Enrichment & Indexing
+        Pipeline->>Pipeline: _enrich_html_content(html + descriptions)
+        Pipeline->>Pipeline: Map metadata to struct_data
+        
+        Pipeline->>ES: write_document(id, content=html, struct_data)
+        ES-->>Pipeline: 200 OK
+    end

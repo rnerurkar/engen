@@ -1,0 +1,55 @@
+sequenceDiagram
+    participant User
+    participant SPA as React SPA
+    participant Orch as Orchestrator API (/invoke)
+    participant DB as AlloyDB
+    participant WFS as AlloyDB (workflow_state)
+
+    Note over SPA,WFS: Phase 0: Resume Check (on page load)
+    SPA->>SPA: Read localStorage("engen_workflow_id")
+    alt Saved workflow_id exists
+        SPA->>Orch: POST /invoke {task: "resume_workflow", workflow_id}
+        Orch->>WFS: Load workflow snapshot
+        WFS-->>Orch: {phase, doc_data, code_data}
+        Orch-->>SPA: {found: true, step, doc_data, code_data}
+        SPA-->>User: Restore wizard at saved step
+    else No saved workflow_id
+        SPA-->>User: Show INPUT step
+    end
+
+    User->>SPA: 1. Upload Diagram + Enter Title
+    SPA->>Orch: POST /invoke {task: "phase1_generate_docs", user_id}
+    Orch->>WFS: Create workflow_state row
+    WFS-->>Orch: workflow_id
+    Orch-->>SPA: Return Sections + Markdown + workflow_id
+    SPA->>SPA: Store workflow_id in localStorage
+    SPA-->>User: Display Docs for Review
+
+    User->>SPA: 2. Approve Docs
+    SPA->>Orch: POST /invoke {task: "approve_docs", workflow_id}
+    Orch->>DB: Create DOC_TASK (In Progress)
+    Orch->>WFS: Save state (phase=CODE_GEN)
+    Orch-->>SPA: Return doc_review_id
+    
+    SPA->>Orch: 3. POST /invoke {task: "phase2_generate_code", workflow_id}
+    Orch->>WFS: Save state (phase=CODE_REVIEW, code_data)
+    Orch-->>SPA: Return Artifact Bundle
+    SPA-->>User: Display Code Structure for Review
+
+    User->>SPA: 4. Approve Code
+    SPA->>Orch: POST /invoke {task: "approve_code", workflow_id}
+    Orch->>DB: Create CODE_TASK (In Progress)
+    Orch->>WFS: Save state (phase=PUBLISH)
+    Orch-->>SPA: Return code_review_id
+
+    loop Every 3 Seconds
+        SPA->>Orch: POST /invoke {task: "get_publish_status", workflow_id}
+        Orch->>DB: Check Task Status
+        DB-->>Orch: {doc: COMPLETED, code: IN_PROGRESS}
+        Orch-->>SPA: Status Update
+        SPA-->>User: Update Progress Display
+    end
+    
+    Note over SPA,WFS: On both COMPLETED:
+    Orch->>WFS: Save state (COMPLETED) + deactivate
+    SPA->>SPA: Clear localStorage("engen_workflow_id")

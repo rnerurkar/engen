@@ -1,0 +1,83 @@
+sequenceDiagram
+    autonumber
+    participant Orch as OrchestratorAgent
+    participant WCtx as WorkflowContext
+    participant Ret as ServiceHADRRetriever<br/>(core logic, in-process)
+    participant HADRDS as Vertex AI Search<br/>(HA/DR Data Store)
+    participant Gen as HADRDocumentationGenerator<br/>(core logic, in-process)
+    participant Gemini as Gemini 1.5 Pro
+    participant DiagGen as HADRDiagramGenerator<br/>(core logic, in-process)
+    participant DiagStore as HADRDiagramStorage<br/>(core logic, in-process)
+    participant GCS as GCS (Diagram Bucket)
+
+    Note over Orch,GCS: Inside LoopAgent — HADRSectionsStep (in-process)
+    
+    Orch->>WCtx: Check cached service_names
+    alt First iteration (not cached)
+        Orch->>Orch: _extract_service_names_from_doc(doc_text)
+        Orch->>WCtx: Cache service_names
+    end
+    WCtx-->>Orch: service_names[] (e.g. ["Amazon RDS", "AWS Lambda"])
+
+    par Parallel: Retrieval + Donor Extraction (asyncio.gather)
+        Orch->>Ret: aretrieve_all_services_hadr(service_names)
+        par Async Parallel (N×4 queries via asyncio.gather)
+            Ret->>HADRDS: SearchRequest(filter=svc1+strategy1, query=semantic)
+            Ret->>HADRDS: SearchRequest(filter=svc1+strategy2, query=semantic)
+            Note right of Ret: ...all N×4 queries dispatched in parallel
+            HADRDS-->>Ret: SearchResponse (extractive answers + metadata)
+        end
+        Ret-->>Orch: service_hadr_docs {svc→strategy→[chunks]}
+    and
+        Orch->>Gen: extract_donor_hadr_sections(donor_html)
+        Gen-->>Orch: donor_hadr_sections {strategy→text}
+    end
+
+    Orch->>Orch: Build pattern_context (title, solution, services)
+
+    par Async Parallel (4 strategies via asyncio.gather, 120s timeout each)
+        Orch->>Gen: agenerate_hadr_sections(strategy1)
+        Gen->>Gemini: generate_content(prompt, temp=0.3)
+        Gemini-->>Gen: markdown section with summary tables
+    and
+        Orch->>Gen: agenerate_hadr_sections(strategy2)
+    and
+        Orch->>Gen: agenerate_hadr_sections(strategy3)
+    and
+        Orch->>Gen: agenerate_hadr_sections(strategy4)
+    end
+    Gen-->>Orch: hadr_sections{strategy→markdown}
+    Orch->>Orch: _format_hadr_sections() → merge into generated_sections["HA/DR"]
+
+    Note over Orch,GCS: After LoopAgent — HADRDiagramStep (in-process, programmatic by default)
+
+    Orch->>DiagGen: generate_all_diagrams(services, hadr_sections)
+    
+    alt Programmatic Mode (default: use_ai_diagrams=False)
+        loop 12 diagrams (4 strategies × 3 phases)
+            DiagGen->>DiagGen: STATE_MATRIX[(strategy, phase)] → RegionStates
+            DiagGen->>DiagGen: _is_data_service(svc) → classify core vs non-core
+            DiagGen->>DiagGen: _build_programmatic_svg(services, states)
+            DiagGen->>DiagGen: _build_programmatic_drawio(services, states, DRAWIO_SERVICE_ICONS)
+            DiagGen->>DiagGen: SVG→PNG via svglib+reportlab
+        end
+        Note right of DiagGen: Zero Gemini calls, < 1s total
+    else AI Mode (opt-in: use_ai_diagrams=True)
+        par Async Parallel (12 diagrams, Semaphore(6))
+            DiagGen->>Gemini: generate SVG (gemini-2.0-flash, max_tokens=4096)
+            DiagGen->>DiagGen: _build_programmatic_drawio (always programmatic)
+            DiagGen->>DiagGen: SVG→PNG via svglib+reportlab
+        end
+    end
+    DiagGen-->>Orch: PatternDiagramBundle (12 × {SVG, draw.io XML, PNG})
+
+    Orch->>DiagStore: aupload_diagram_bundle(bundles)
+    par Async Parallel (12 uploads via asyncio.gather, 60s timeout each)
+        DiagStore->>GCS: upload SVG + draw.io + PNG
+        GCS-->>DiagStore: public URLs
+    end
+    DiagStore-->>Orch: url_map {(strategy, phase) → {svg_url, drawio_url, png_url}}
+
+    Orch->>Orch: Embed diagram URLs in HA/DR sections
+    
+    Note over Orch: Non-blocking: if any step fails,<br/>placeholder inserted and workflow continues
