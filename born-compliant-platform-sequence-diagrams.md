@@ -93,16 +93,115 @@ sequenceDiagram
 - The `session_id` is the auditable thread; it carries the developer identity and the JIRA/change-request linkage all the way to runtime.
 - Model Armor runs the *user-prompt screen* here (cheap, fast). The full DLP/output screen happens at runtime in Layer 5 inside Agent Runtime.
 - DPoP-bound certs make the session credential non-replayable: a leaked token cannot be reused from a different host.
-- For end-user (production) traffic, the same chain runs but originates at the Gemini Enterprise App instead of Angular Dev Chat. The downstream layers do not distinguish.
+- **This sequence is the build-time flow** — a developer using this platform to *create a new agent*. There is a separate run-time flow (an end user *consuming an agent the platform previously built*) that originates at the Gemini Enterprise App; that flow is covered in the Layer 5 request path. The two flows are not variants of each other — they have different originators, different targets, and different downstream layers:
+  - **Build-time:** Angular Dev Chat → Design Agent (this platform's planner) → Layers 2 → 3 → 4 → produces a new published agent.
+  - **Run-time:** Gemini Enterprise App → the published agent that was built earlier → Layer 5 only.
+  - They share **Agent Gateway, Agent Identity, and Model Armor** as inbound infrastructure (which is why those primitives appear in both Layer 1 and Layer 5 of the stack diagram), but everything downstream of those primitives is different.
 
 ---
 
 ## Layer 2 — INTAKE & DESIGN
 
-**Outcome:** A signed Design Contract — a typed JSON document specifying the agent class, Garden template ID, tools/MCP servers, sub-agent topology, region, identity scope, eval set ID, model selection, Model Armor template, and residency tag.
+**Outcome:** A signed Design Contract — a typed JSON document specifying the **ADK pattern composition** (which patterns, how they compose), agent class, Garden template ID, tools/MCP servers, sub-agent topology, region, identity scope, eval set ID, model selection, Model Armor template, and residency tag.
 
 **Enters from Layer 1:** `session_id` + prompt + developer identity.
 **Exits to Layer 3:** `contract_uri` (in Cloud Storage) + cosign signature + Jenkins webhook trigger.
+
+### ADK Pattern Catalog (what the Design Agent searches)
+
+Google's Cloud Architecture Center and ADK documentation define a two-tier pattern taxonomy that the Design Agent must understand and compose:
+
+**Tier 1 — Foundational ADK execution patterns** (the building blocks):
+
+| Pattern | ADK class | When to use |
+|---|---|---|
+| Sequential pipeline | `SequentialAgent` | Deterministic multi-step workflows — output of agent A feeds agent B. Linear, auditable, easy to debug. |
+| Parallel fan-out/gather | `ParallelAgent` | Independent sub-tasks that can run simultaneously, then a synthesizer agent aggregates results. |
+| Loop (iterative) | `LoopAgent` | Repeated execution of a sub-agent sequence until a termination condition is met — e.g., refinement cycles. |
+
+**Tier 2 — Compositional design patterns** (built from Tier 1 primitives):
+
+| Pattern | Composed from | Use case signal |
+|---|---|---|
+| Coordinator / Dispatcher | `LlmAgent` routing to specialist `LlmAgent` sub-agents | Open-ended request that requires classification before execution — e.g., customer service routing. |
+| Hierarchical decomposition | Nested `SequentialAgent` + `ParallelAgent` trees | Complex goal that decomposes into independent sub-goals with their own sub-task sequences. |
+| Generator and Critic | `LoopAgent` wrapping generator + critic `LlmAgent` pair | Output quality is critical — generator produces, critic validates, loop refines until threshold. |
+| Iterative Refinement | `LoopAgent` wrapping generator + critique + refiner agents | Multi-pass quality improvement — extends Generator/Critic with a dedicated refiner agent. |
+| Human-in-the-Loop | Any pattern + `LongRunningFunctionTool` or ADK resume capability | High-stakes decisions requiring human judgment — financial transactions, production deploys, compliance approvals. |
+| Custom orchestration | `LlmAgent` with imperative routing logic across sub-agents | Logic-level orchestration that doesn't fit structured patterns — e.g., conditional branching across parallel and sequential sub-flows. |
+
+**Tier 3 — Reference architectures** (full use-case blueprints from the Architecture Center):
+
+| Reference architecture | Underlying patterns | Source |
+|---|---|---|
+| Classify multimodal data | Parallel fan-out/gather | Architecture Center |
+| Orchestrate security operations | Hierarchical decomposition + RAG | Architecture Center |
+| Multimodal GraphRAG resource orchestration | Sequential pipeline + graph-backed RAG | Architecture Center |
+| Administer interactive learning | Single-agent tool use | Architecture Center |
+| Automate data science workflows | Multi-agent sequential + parallel | Architecture Center |
+| Bidirectional multimodal streaming | Real-time single-agent with Live API | Architecture Center |
+| Orchestrate access to disparate systems | Coordinator/Dispatcher + MCP | Architecture Center |
+| Single-agent AI system (ADK + Cloud Run) | Single-agent tool use | Architecture Center |
+
+Patterns are **compositional** — a real use case almost always requires combining multiple patterns. For example, a procurement agent might use a *Coordinator/Dispatcher* at the top level, routing to a *Sequential pipeline* for order processing, a *Parallel fan-out/gather* for multi-vendor price comparison, and a *Human-in-the-Loop* gate before final purchase approval. The Design Agent's job is to identify which patterns compose to solve the developer's use case and to validate that the composition is sound.
+
+### Ingesting the pattern catalog into Vertex AI Search
+
+The patterns, their metadata, and their composition rules must be ingested into a **Vertex AI Search data store** so the Design Agent can perform semantic/hybrid retrieval at intake time. The ingestion design:
+
+**Data store type:** Vertex AI Search **unstructured data store with metadata** — supports both semantic (embedding-based) vector search and keyword-based search in a single hybrid query.
+
+**Document schema per pattern:**
+
+```json
+{
+  "id": "pattern-coordinator-dispatcher",
+  "structData": {
+    "pattern_name": "Coordinator / Dispatcher",
+    "tier": "compositional",
+    "adk_classes": ["LlmAgent"],
+    "foundation_primitives": ["routing", "delegation"],
+    "composable_with": [
+      "pattern-sequential-pipeline",
+      "pattern-parallel-fan-out-gather",
+      "pattern-human-in-the-loop"
+    ],
+    "use_case_signals": [
+      "open-ended request",
+      "classification before execution",
+      "multiple specialist domains",
+      "customer service",
+      "routing"
+    ],
+    "complexity": "medium",
+    "latency_profile": "interactive",
+    "cost_profile": "medium",
+    "human_involvement": "optional",
+    "reference_architectures": [
+      "orchestrate-access-disparate-systems"
+    ],
+    "adk_sample_url": "https://github.com/google/adk-samples/...",
+    "arch_center_url": "https://docs.google.com/architecture/..."
+  },
+  "content": {
+    "mimeType": "text/html",
+    "uri": "gs://pattern-catalog/coordinator-dispatcher.html"
+  }
+}
+```
+
+**Content documents** (stored in Cloud Storage, referenced by URI):
+Each pattern gets a rich-text document containing: the pattern description, when to use / when not to use, ADK pseudocode showing the agent tree, composition rules (which patterns it nests with), anti-patterns and pitfalls, and links to the Architecture Center reference architecture and Agent Garden template (if one exists).
+
+**Chunking strategy:** Each pattern document is chunked at the section level (description, use-case signals, composition rules, ADK code, anti-patterns) so that semantic search can match on specific sections rather than entire documents. Vertex AI Search's **layout-aware chunking** handles this natively for HTML/PDF.
+
+**Metadata filtering:** The `structData` fields enable **hybrid search**: the Design Agent's query combines a natural-language semantic embedding match (against `content`) with metadata filters (against `structData`). For example: *"semantic: 'multi-vendor price comparison with human approval' AND complexity IN (medium, high) AND human_involvement = required"*.
+
+**Ingestion pipeline:** A Cloud Function triggered on Cloud Storage upload parses each pattern document, extracts/validates the `structData` schema, and calls the Vertex AI Search `ImportDocuments` API. The pipeline runs on initial load and on every Architecture Center or ADK docs update (monitored via a Cloud Scheduler job that checks the Architecture Center release notes RSS feed).
+
+**Composition graph:** In addition to the flat document store, a small **composition adjacency list** is maintained in the `composable_with` metadata field. This lets the Design Agent, after retrieving candidate patterns, traverse the composition graph to find valid multi-pattern compositions — e.g., if the top result is *Coordinator/Dispatcher*, the adjacency list tells it that *Sequential Pipeline*, *Parallel Fan-out*, and *Human-in-the-Loop* are valid children.
+
+### Updated sequence diagram
 
 ```mermaid
 sequenceDiagram
@@ -119,6 +218,7 @@ sequenceDiagram
     participant AR as Design Agent<br/>(Agent Runtime)
     participant AS as Agent Sessions
     participant MB as Memory Bank
+    participant VAS as Vertex AI Search<br/>(Pattern Catalog)
     participant REG as Agent Registry
     participant CA as Gemini Cloud Assist + ADC
     participant CS as Cloud Storage
@@ -137,24 +237,36 @@ sequenceDiagram
     AR->>MB: retrieve_similar_designs(prompt)
     MB-->>AR: relevant past designs (RAG)
 
-    AR->>AR: decompose use case<br/>(LlmAgent reasoning)
+    AR->>AR: decompose use case<br/>(LlmAgent reasoning —<br/>extract task characteristics:<br/>complexity, latency, cost,<br/>human-involvement needs)
+
+    Note over AR,VAS: PATTERN SELECTION (semantic/hybrid search)
+
+    AR->>VAS: hybrid search:<br/>semantic query = use-case description<br/>metadata filters = {complexity,<br/>latency_profile, human_involvement}
+    VAS-->>AR: ranked candidate patterns<br/>(top-K with scores + structData)
+
+    AR->>AR: evaluate composition graph:<br/>traverse composable_with adjacency<br/>to find valid multi-pattern combos
+
+    AR->>VAS: follow-up retrieval:<br/>fetch composition children<br/>(e.g., if Coordinator selected,<br/>retrieve Sequential + Parallel + HITL)
+    VAS-->>AR: child pattern details<br/>+ ADK class mappings + anti-patterns
+
+    AR->>AR: select final pattern composition<br/>+ map to ADK agent tree:<br/>root agent type, sub-agent types,<br/>workflow agent wiring
 
     par Federated discovery
-        AR->>REG: query agents/MCP/tools by capability
+        AR->>REG: query agents/MCP/tools by capability<br/>(filtered by selected patterns'<br/>tool requirements)
         REG-->>AR: Google-published candidates
     and
-        AR->>PR: query company-vetted skills
+        AR->>PR: query company-vetted skills<br/>(filtered by pattern-required<br/>tool categories)
         PR-->>AR: company recipe candidates
     end
 
-    AR->>CA: recommend IaC for design
+    AR->>CA: recommend IaC for design<br/>(includes pattern composition +<br/>agent tree topology)
     CA-->>AR: HCL sketch + Garden template ID<br/>+ region + residency tag
 
-    AR->>AR: assemble Design Contract JSON
-    AR-->>ANG: present contract for review
-    ANG-->>Dev: render Design Contract UI
+    AR->>AR: assemble Design Contract JSON<br/>(includes: pattern_composition,<br/>adk_agent_tree, tool_bindings,<br/>eval_set_id, identity_scope)
+    AR-->>ANG: present contract for review<br/>(pattern rationale visible)
+    ANG-->>Dev: render Design Contract UI<br/>(shows pattern selection +<br/>composition diagram +<br/>why these patterns were chosen)
 
-    Note over Dev,ANG: 🟧 DESIGN GATE — human review
+    Note over Dev,ANG: 🟧 DESIGN GATE — human review<br/>(developer validates pattern selection)
 
     Dev->>ANG: APPROVE
     ANG->>DCS: submit signed approval
@@ -167,15 +279,19 @@ sequenceDiagram
     DCS->>CAL: DESIGN_GATE_PASSED event
     DCS->>DCS: trigger Jenkins webhook<br/>with contract_uri + sig
 
-    Note right of DCS: ▶ Handoff to Layer 3:<br/>contract_uri + cosign signature
+    Note right of DCS: ▶ Handoff to Layer 3:<br/>contract_uri + cosign signature<br/>(contract now includes<br/>pattern_composition + adk_agent_tree)
 ```
 
 **Engineering notes:**
 
 - The Design Contract schema is versioned in the Company Private Registry. Treat schema changes like API changes — backwards compatibility matters.
-- Two registry queries run in parallel; results are merged client-side in the Design Agent. The Design Agent never picks a candidate without showing it to the developer.
-- The Design Gate is **not** an LLM judgment — it is a human approval. The agent presents; the human decides.
+- **Vertex AI Search performs hybrid search** — combining a semantic embedding match on the developer's use-case description with structured metadata filters (complexity, latency profile, human involvement). This is not a keyword-only lookup; it uses the embeddings from Vertex AI's foundation models to find patterns that *semantically match* even when the developer's language doesn't use Google's exact pattern names.
+- **Two-pass retrieval:** The first query finds candidate root patterns (e.g., Coordinator/Dispatcher). The second query traverses the `composable_with` adjacency to retrieve the child patterns that compose with the root. This two-pass approach prevents the Design Agent from proposing pattern combinations that are structurally invalid (e.g., nesting a LoopAgent inside a ParallelAgent where ordering matters).
+- **Pattern rationale is shown to the developer** at the Design Gate. The UI renders the selected pattern composition as a visual agent-tree diagram alongside the "why" — which use-case signals triggered each pattern. This lets the developer override if they know something the search doesn't (e.g., a regulatory constraint that forces Human-in-the-Loop at a point the model didn't predict).
+- The Design Gate is **not** an LLM judgment — it is a human approval. The agent presents; the human decides. Pattern selection is an LLM recommendation backed by search evidence; the developer validates it.
+- Two registry queries (Agent Registry + Company Private Registry) run in parallel **after** pattern selection, because the selected patterns determine which tool categories to search for. For example, a Parallel Fan-out pattern for multi-vendor comparison tells the registry query to look for vendor-specific MCP servers.
 - Cosign signs with a Fulcio-issued ephemeral cert; the public log entry in Rekor is the auditable trail. There are no long-lived signing keys to rotate.
+- **The `pattern_composition` and `adk_agent_tree` fields in the Design Contract** are what Layer 3's `agents-cli` consumes to scaffold the correct ADK agent structure from the matching Agent Garden template. This is the link between pattern selection (Layer 2) and deterministic code generation (Layer 3).
 
 ---
 
@@ -547,6 +663,7 @@ For an engineer onboarding to the platform, the diagrams above are the right sta
 | Agent Runtime | GCP | 1, 2, 4, 5 |
 | Agent Sessions | GCP | 1, 2 |
 | Memory Bank | GCP | 2, 5 |
+| Vertex AI Search (Pattern Catalog) | GCP | 2 |
 | Agent Registry | GCP | 2 |
 | Gemini Cloud Assist + ADC | GCP | 2, 3 |
 | Cloud Storage | GCP | 2 |
