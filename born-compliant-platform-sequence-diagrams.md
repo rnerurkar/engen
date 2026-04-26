@@ -70,7 +70,8 @@ The planning layer. A single Design Agent reasons about the use case, discovers 
 | ADK + Gemini 2.x *(GA)* | GCP | The reasoning core. The Design Agent is an `LlmAgent` powered by Gemini 2.x Pro, using ADK's tool-use and sub-agent capabilities. Generates Mermaid component and sequence diagrams as part of its design output. |
 | Vertex AI Search *(GA)* (Pattern Catalog) | GCP | An unstructured data store with structured metadata containing all ADK design patterns, composition rules, and Architecture Center reference architectures. The Design Agent queries it with semantic/hybrid search to select applicable patterns. |
 | Agent Registry *(Public Preview)* | GCP | Google's managed catalog of agents, MCP servers, and tools. The Design Agent queries it to discover reusable components already published in the organization or by Google. |
-| Company Private Registry | Company | The company-internal catalog of vetted skills, connection recipes, A2A peer agents, and signed Agent Cards. Federated with Agent Registry for a single discovery view. |
+| Company Private Registry | Company | The company-internal catalog of vetted skills, connection recipes, A2A peer agents, and signed Agent Cards. Federated with Agent Registry and GitHub MCP Server for a single discovery view. |
+| GitHub MCP Server | Third-party | Connects the Design Agent to the company's GitHub Enterprise repos — primarily the Company Terraform Module Library. Enables the LLM to browse module READMEs, input/output schemas, and version tags during design. *(GA)* |
 | Cloud Assist + ADC *(GA)* | GCP | Gemini Cloud Assist and Application Design Center. Given the selected pattern composition and tools, it recommends a compliant IaC architecture and maps to an Agent Garden template. |
 | Design Contract | Company | The typed JSON output of this layer — specifying the pattern composition, ADK agent tree, Garden template ID, tools/MCP bindings, model selection, identity scope, region, eval set ID, Model Armor template, residency tag, and URIs to the generated component architecture diagram and sequence diagram. Signed by Cosign before handoff to Layer 3. |
 
@@ -82,9 +83,9 @@ The factory floor. Two parallel tracks — infrastructure and code/eval — run 
 
 | Component | Category | Description |
 |---|---|---|
-| Cloud Assist + ADC *(GA)* | GCP | Generates Terraform HCL from the Design Contract, referencing vetted Agent Garden Terraform modules for identity, gateway, runtime, and secrets provisioning. |
+| Cloud Assist + ADC *(GA)* | GCP | Generates Terraform HCL from the Design Contract, constrained to reference only signed company modules from the GitHub repo. Does not use Agent Garden modules directly. |
 | Terraform *(GA)* | Third-party | HashiCorp's IaC engine. Executes `plan` and `apply` against the GCP provider. |
-| Agent Garden Modules *(GA)* | GCP | A curated library of Terraform modules for agent infrastructure — Agent Identity, Agent Gateway routes, Runtime shells, Secret Manager bindings, KMS key creation. |
+| Company TF Module Library | Company | Company-owned, signed, compliance-hardened Terraform modules stored in a GitHub repo. Wrap Google's upstream Agent Garden patterns with company naming conventions, CMEK defaults, VPC-SC membership, billing labels, PAB bindings, region pinning, and Model Armor floor settings. The *only* module source Cloud Assist is allowed to reference. |
 | Jenkins | Company | CI server running company-shared-libraries. Owns the Plan Gate: `terraform plan` → policy evaluation → human approval → `terraform apply`. |
 | OPA + Conftest *(GA)* | Third-party | Open Policy Agent with Conftest for Rego-based policy-as-code evaluation of Terraform plan output. |
 | Org Policy Constraints *(GA)* | GCP | Google Cloud organization-level guardrails — CMEK enforcement, region pinning, allowed-models lists, machine-type restrictions. Evaluated automatically during `terraform plan`. |
@@ -361,6 +362,7 @@ sequenceDiagram
     end
 
     box rgba(167,139,250,0.15) Third-Party / OSS
+    participant GH as GitHub MCP Server
     participant SIG as Cosign / Sigstore
     end
 
@@ -392,6 +394,9 @@ sequenceDiagram
     and
         AR->>PR: query company-vetted skills<br/>(filtered by pattern-required<br/>tool categories)
         PR-->>AR: company recipe candidates
+    and
+        AR->>GH: query company TF module repo<br/>via GitHub MCP Server<br/>(browse READMEs, input schemas,<br/>version tags)
+        GH-->>AR: available company TF modules<br/>matching infra requirements
     end
 
     AR->>CA: recommend IaC for design<br/>(includes pattern composition +<br/>agent tree topology)
@@ -437,8 +442,9 @@ sequenceDiagram
 - **Vertex AI Search performs hybrid search** — combining a semantic embedding match on the developer's use-case description with structured metadata filters (complexity, latency profile, human involvement). This is not a keyword-only lookup; it uses the embeddings from Vertex AI's foundation models to find patterns that *semantically match* even when the developer's language doesn't use Google's exact pattern names.
 - **Two-pass retrieval:** The first query finds candidate root patterns (e.g., Coordinator/Dispatcher). The second query traverses the `composable_with` adjacency to retrieve the child patterns that compose with the root. This two-pass approach prevents the Design Agent from proposing pattern combinations that are structurally invalid (e.g., nesting a LoopAgent inside a ParallelAgent where ordering matters).
 - The Design Gate is **not** an LLM judgment — it is a human approval. The agent presents; the human decides. Pattern selection and diagram generation are LLM outputs backed by search evidence; the developer validates them.
-- Two registry queries (Agent Registry + Company Private Registry) run in parallel **after** pattern selection, because the selected patterns determine which tool categories to search for.
+- Three registry queries (Agent Registry + Company Private Registry + GitHub MCP Server) run in parallel **after** pattern selection, because the selected patterns determine which tool categories and infrastructure modules to search for. The GitHub MCP Server query specifically discovers which company Terraform modules are available for the infrastructure the selected patterns require — browsing module READMEs, input/output schemas, and version tags so the Design Agent can reference exact module paths and versions in the Design Contract.
 - Cosign signs with a Fulcio-issued ephemeral cert; the public log entry in Rekor is the auditable trail. There are no long-lived signing keys to rotate.
+- **Company Terraform modules are the only module source — Agent Garden is upstream reference only.** The company's platform team reviews Google's Agent Garden Terraform patterns when they ship, wraps them with compliance defaults (company naming, CMEK, VPC-SC membership, billing labels, PAB bindings, region pinning, Model Armor floors), tests them against the OPA policy corpus, signs them, and publishes them to the GitHub repo. Cloud Assist in Layer 3 Track A is constrained to reference only these signed company modules. This is compliance-by-construction, not compliance-by-inspection.
 - **The `pattern_composition`, `adk_agent_tree`, `component_diagram_uri`, and `sequence_diagram_uri` fields in the Design Contract** are what Layer 3's `agents-cli` consumes to scaffold the correct ADK agent structure from the matching Agent Garden template. The diagrams also appear in the Compliance Evidence Chain as the "Design Doc" node — the first link in the attestation chain an auditor walks.
 
 ---
@@ -461,7 +467,7 @@ sequenceDiagram
 
     box rgba(66,133,244,0.15) GCP Managed
     participant CA as Gemini Cloud Assist
-    participant AGM as Agent Garden Modules
+    participant CTF as Company TF Modules<br/>(GitHub repo)
     participant ORG as Org Policy
     participant CLI as agents-cli
     participant ADK as ADK Framework
@@ -489,9 +495,9 @@ sequenceDiagram
 
     par TRACK A · INFRASTRUCTURE
         JNK->>CA: generate Terraform from contract
-        CA-->>JNK: HCL referencing Garden modules
-        JNK->>AGM: pull pinned module versions
-        AGM-->>JNK: vetted modules
+        CA-->>JNK: HCL referencing company modules
+        JNK->>CTF: terraform init — pull company<br/>modules from GitHub repo
+        CTF-->>JNK: signed, compliance-hardened modules
         JNK->>TF: terraform plan
         TF-->>JNK: plan output
         JNK->>OPA: evaluate plan (Rego policies)
@@ -815,7 +821,8 @@ For an engineer onboarding to the platform, the diagrams above are the right sta
 | Agent Registry *(Public Preview)* | GCP | 2 |
 | Gemini Cloud Assist + ADC | GCP | 2, 3 |
 | Cloud Storage | GCP | 2 |
-| Agent Garden Modules *(GA)* | GCP | 3 |
+| Company TF Module Library | Company | 3 |
+| GitHub MCP Server *(GA)* | Third-party | 2 |
 | Agent Garden Templates *(GA)* | GCP | 3 |
 | ADK Framework *(GA)* | GCP | 3 |
 | agents-cli *(Public Preview)* | GCP | 3 |
