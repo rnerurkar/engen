@@ -1,0 +1,580 @@
+# Born Compliant Multi-Agent Platform — Sequence Diagrams
+
+**Audience:** Engineering community — platform engineers, agent developers, SREs, security engineers
+
+**Scope:** Five sequence diagrams, one per architectural layer. Each diagram details the runtime interactions between Company-owned, Third-party/OSS, and GCP-managed components needed to deliver that layer's outcome. Diagrams are sequenced for end-to-end navigation: every layer declares **what enters** and **what exits**, so reading them in order traces the full lifecycle of a "born compliant" agent from intake to runtime.
+
+**Color legend** (preserved across all diagrams via Mermaid `box` groupings):
+
+| Group color | Meaning |
+|---|---|
+| 🟦 Blue | GCP managed services |
+| 🟩 Green | Company-owned components |
+| 🟪 Purple | Third-party / open-source tools |
+| 🟨 Yellow | Open protocols / standards |
+
+---
+
+## End-to-end thread (read this first)
+
+The artifact passed between layers is *always* a signed object. Each layer either produces a new attestation, consumes one from upstream, or both.
+
+```mermaid
+flowchart LR
+    L1["LAYER 1<br/>EXPERIENCE<br/><br/>Authenticated session<br/>+ screened intake prompt"]
+    L2["LAYER 2<br/>INTAKE & DESIGN<br/><br/>Cosign-signed<br/>Design Contract"]
+    L3["LAYER 3<br/>GENERATION & ASSURANCE<br/><br/>Signed bundle<br/>+ attestation chain"]
+    L4["LAYER 4<br/>DELIVERY<br/><br/>Live agent in prod<br/>+ canary route"]
+    L5["LAYER 5<br/>RUNTIME & OPERATE<br/><br/>Telemetry + threat signals<br/>+ audit chain"]
+
+    L1 -->|"session_id + prompt"| L2
+    L2 -->|"contract_uri + cosign sig"| L3
+    L3 -->|"bundle_uri + infra_contract<br/>+ Design/Plan/Eval/Final attestations"| L4
+    L4 -->|"runtime_ref + SPIFFE ID<br/>+ gateway routing"| L5
+    L5 -.->|"drift signal → regenerate"| L2
+    L5 -.->|"anomaly → rollback"| L4
+
+    classDef layer fill:#162033,stroke:#4285f4,color:#f1f5f9,stroke-width:2px;
+    class L1,L2,L3,L4,L5 layer;
+```
+
+---
+
+## Layer 1 — EXPERIENCE
+
+**Outcome:** A developer's natural-language use-case description is authenticated, screened by Model Armor for prompt-injection, and lands on the Design Agent inside Agent Runtime as a fresh session.
+
+**Enters:** Developer's intent (chat message).
+**Exits to Layer 2:** `session_id` (bound to developer identity + JIRA/change-request ID) + the original prompt.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as 👤 Developer
+
+    box rgba(34,197,94,0.15) Company-Owned
+    participant ANG as Angular Dev Chat
+    participant SSO as Company SSO/IdP (Okta)
+    end
+
+    box rgba(66,133,244,0.15) GCP Managed
+    participant AGW as Agent Gateway
+    participant AID as Agent Identity
+    participant MA as Model Armor
+    participant AR as Agent Runtime<br/>(Design Agent)
+    participant AS as Agent Sessions
+    participant CAL as Cloud Audit Logs
+    end
+
+    Dev->>ANG: describe use case in chat
+    ANG->>SSO: validate session
+    SSO-->>ANG: OIDC token
+    ANG->>AGW: POST /design-agent/sessions<br/>{prompt, OIDC token, jira_id}
+
+    AGW->>AID: validate OIDC, mint DPoP-bound cert
+    AID-->>AGW: SPIFFE-bound short-lived cert<br/>(24h rotation)
+
+    AGW->>MA: screen incoming prompt<br/>(prompt-injection, jailbreak)
+    MA-->>AGW: clean
+
+    AGW->>AR: forward request with DPoP credentials
+    AR->>AS: create_session(developer_id, jira_id)
+    AS-->>AR: session_id
+    AR-->>AGW: session_id (streaming start)
+    AGW->>CAL: USER_INTAKE event<br/>(developer, session_id, jira_id)
+    AGW-->>ANG: session_id + initial ack
+    ANG-->>Dev: chat opens with Design Agent
+
+    Note right of CAL: ▶ Handoff to Layer 2:<br/>session_id + prompt arrive at Design Agent
+```
+
+**Engineering notes:**
+
+- The `session_id` is the auditable thread; it carries the developer identity and the JIRA/change-request linkage all the way to runtime.
+- Model Armor runs the *user-prompt screen* here (cheap, fast). The full DLP/output screen happens at runtime in Layer 5 inside Agent Runtime.
+- DPoP-bound certs make the session credential non-replayable: a leaked token cannot be reused from a different host.
+- For end-user (production) traffic, the same chain runs but originates at the Gemini Enterprise App instead of Angular Dev Chat. The downstream layers do not distinguish.
+
+---
+
+## Layer 2 — INTAKE & DESIGN
+
+**Outcome:** A signed Design Contract — a typed JSON document specifying the agent class, Garden template ID, tools/MCP servers, sub-agent topology, region, identity scope, eval set ID, model selection, Model Armor template, and residency tag.
+
+**Enters from Layer 1:** `session_id` + prompt + developer identity.
+**Exits to Layer 3:** `contract_uri` (in Cloud Storage) + cosign signature + Jenkins webhook trigger.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as 👤 Developer
+
+    box rgba(34,197,94,0.15) Company-Owned
+    participant ANG as Angular Dev Chat
+    participant PR as Company Private Registry
+    participant DCS as Design Contract Service
+    end
+
+    box rgba(66,133,244,0.15) GCP Managed
+    participant AR as Design Agent<br/>(Agent Runtime)
+    participant AS as Agent Sessions
+    participant MB as Memory Bank
+    participant REG as Agent Registry
+    participant CA as Gemini Cloud Assist + ADC
+    participant CS as Cloud Storage
+    participant CAL as Cloud Audit Logs
+    end
+
+    box rgba(167,139,250,0.15) Third-Party / OSS
+    participant SIG as Cosign / Sigstore
+    end
+
+    Note over AR,AS: ◀ continued from Layer 1<br/>session_id + prompt in flight
+
+    AR->>AS: load_session(session_id)
+    AS-->>AR: session state
+
+    AR->>MB: retrieve_similar_designs(prompt)
+    MB-->>AR: relevant past designs (RAG)
+
+    AR->>AR: decompose use case<br/>(LlmAgent reasoning)
+
+    par Federated discovery
+        AR->>REG: query agents/MCP/tools by capability
+        REG-->>AR: Google-published candidates
+    and
+        AR->>PR: query company-vetted skills
+        PR-->>AR: company recipe candidates
+    end
+
+    AR->>CA: recommend IaC for design
+    CA-->>AR: HCL sketch + Garden template ID<br/>+ region + residency tag
+
+    AR->>AR: assemble Design Contract JSON
+    AR-->>ANG: present contract for review
+    ANG-->>Dev: render Design Contract UI
+
+    Note over Dev,ANG: 🟧 DESIGN GATE — human review
+
+    Dev->>ANG: APPROVE
+    ANG->>DCS: submit signed approval
+
+    DCS->>SIG: sign Design Contract JSON<br/>(Fulcio ephemeral cert)
+    SIG-->>DCS: cosign signature bundle<br/>(+ Rekor log entry)
+
+    DCS->>CS: store signed contract (versioned)
+    CS-->>DCS: contract_uri
+    DCS->>CAL: DESIGN_GATE_PASSED event
+    DCS->>DCS: trigger Jenkins webhook<br/>with contract_uri + sig
+
+    Note right of DCS: ▶ Handoff to Layer 3:<br/>contract_uri + cosign signature
+```
+
+**Engineering notes:**
+
+- The Design Contract schema is versioned in the Company Private Registry. Treat schema changes like API changes — backwards compatibility matters.
+- Two registry queries run in parallel; results are merged client-side in the Design Agent. The Design Agent never picks a candidate without showing it to the developer.
+- The Design Gate is **not** an LLM judgment — it is a human approval. The agent presents; the human decides.
+- Cosign signs with a Fulcio-issued ephemeral cert; the public log entry in Rekor is the auditable trail. There are no long-lived signing keys to rotate.
+
+---
+
+## Layer 3 — GENERATION & ASSURANCE
+
+This is the longest diagram. Two parallel tracks (A: Infrastructure, B: Code & Eval) run independently and converge at the SIGN step. Each track has its own gate.
+
+**Enters from Layer 2:** `contract_uri` + cosign signature.
+**Exits to Layer 4:** Signed agent bundle in Artifact Registry + `infra_contract` (resource IDs, SPIFFE IDs, secret refs) + attestation chain (Design + Plan + Eval + Final).
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    box rgba(34,197,94,0.15) Company-Owned
+    participant JNK as Jenkins<br/>(shared libraries)
+    participant ESC as Eval Set + Corpus
+    end
+
+    box rgba(66,133,244,0.15) GCP Managed
+    participant CA as Gemini Cloud Assist
+    participant AGM as Agent Garden Modules
+    participant ORG as Org Policy
+    participant CLI as agents-cli + Gemini CLI
+    participant ADK as ADK Framework
+    participant GAR as Agent Garden Templates
+    participant EVAL as Vertex AI Gen AI Eval
+    participant SIM as Agent Simulation
+    participant ARG as Artifact Registry
+    participant BAUTH as Binary Authorization
+    participant CAL as Cloud Audit Logs
+    end
+
+    box rgba(167,139,250,0.15) Third-Party / OSS
+    participant TF as Terraform
+    participant OPA as OPA + Conftest
+    participant WIZ as Wiz IaC + AI-APP
+    participant SNK as Snyk
+    participant TWL as Twistlock
+    participant SIG as Cosign / Sigstore
+    end
+
+    Note over JNK: ◀ from Layer 2: contract_uri arrives via webhook
+
+    JNK->>SIG: verify Design Contract signature<br/>(Rekor lookup)
+    SIG-->>JNK: signature valid
+
+    par TRACK A · INFRASTRUCTURE
+        JNK->>CA: generate Terraform from contract
+        CA-->>JNK: HCL referencing Garden modules
+        JNK->>AGM: pull pinned module versions
+        AGM-->>JNK: vetted modules
+        JNK->>TF: terraform plan
+        TF-->>JNK: plan output
+        JNK->>OPA: evaluate plan (Rego policies)
+        OPA-->>JNK: PASS
+        JNK->>ORG: validate org constraints<br/>(CMEK, region, allowed-models)
+        ORG-->>JNK: PASS
+        JNK->>WIZ: scan IaC for risk
+        WIZ-->>JNK: report — no criticals
+        Note over JNK: 🟧 PLAN GATE — human approval<br/>(cost diff, blast radius)
+        JNK->>TF: terraform apply
+        TF-->>JNK: infra_contract<br/>{SPIFFE IDs, KMS keys,<br/>secret refs, runtime ID}
+        JNK->>SIG: sign Plan Attestation
+        SIG-->>JNK: plan_attestation
+        JNK->>CAL: PLAN_GATE_PASSED
+    and TRACK B · CODE & EVAL
+        JNK->>CLI: scaffold from Garden template<br/>(template_id from contract)
+        CLI->>GAR: fetch template
+        GAR-->>CLI: vetted starter
+        CLI->>ADK: parameterize per Design Contract<br/>(tools, sub-agents, prompt)
+        ADK-->>CLI: built agent package
+        CLI->>EVAL: run eval set (eval_set_id)
+        ESC-->>EVAL: golden + injection corpus
+        EVAL-->>CLI: trajectory metrics + autorater scores
+        CLI->>SIM: synthetic persona test
+        SIM-->>CLI: simulation report
+        Note over CLI: 🟧 EVAL GATE — thresholds checked
+        CLI->>SIG: sign Eval Report
+        SIG-->>CLI: eval_attestation
+        CLI->>CAL: EVAL_GATE_PASSED
+    end
+
+    Note over JNK: CONVERGENCE — both tracks complete
+
+    JNK->>JNK: link agent code to infra_contract<br/>(resolve stub references)
+    JNK->>SNK: dependency scan
+    SNK-->>JNK: PASS
+    JNK->>TWL: container image scan
+    TWL-->>JNK: PASS
+    JNK->>WIZ: AI-APP runtime risk scan
+    WIZ-->>JNK: PASS
+
+    JNK->>SIG: sign final bundle attestation
+    SIG-->>JNK: final_attestation
+
+    JNK->>ARG: push signed bundle
+    ARG-->>JNK: bundle_uri
+    JNK->>BAUTH: register attestation chain<br/>(Design + Plan + Eval + Final)
+    BAUTH-->>JNK: chain locked
+
+    JNK->>CAL: SIGN_PASSED — full chain recorded
+    JNK->>JNK: trigger Harness webhook<br/>{bundle_uri, infra_contract,<br/>attestation_chain_id}
+
+    Note right of JNK: ▶ Handoff to Layer 4:<br/>bundle + infra contract + chain
+```
+
+**Engineering notes:**
+
+- The two tracks share the Design Contract but produce independent artifacts. Convergence requires both to have signed attestations. If one fails, the other is discarded — there is no partial promotion.
+- Track B builds the agent code against **stub references** to the infra contract; at convergence, stubs are replaced with the real IDs Track A emitted. The bundle is *re-signed* after substitution.
+- The "free-form code generation" antipattern is replaced by `agents-cli` parameterizing a Garden template using only values from the signed Design Contract. **There is no LLM in the bundle-build step.** The LLM did its work in Layer 2; from Layer 3 onward, the pipeline is deterministic.
+- Binary Authorization stores the *chain*, not individual attestations. Layer 4 verifies the entire chain in one call.
+- Plan Gate human approval is the *same* gate the existing Jenkins pipeline uses — `terraform plan` review by a platform engineer with access to cost diff and blast radius. We did not invent a new approval flow.
+
+---
+
+## Layer 4 — DELIVERY
+
+**Outcome:** A signed bundle becomes a running agent in production with canary routing, bound to a fresh production SPIFFE identity and CMEK-encrypted secrets.
+
+**Enters from Layer 3:** `bundle_uri` + `infra_contract` + attestation chain.
+**Exits to Layer 5:** Live agent on Agent Runtime (prod) with routing in Agent Gateway, identity issued by Agent Identity, and secrets bound via Secret Manager.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Approver as 👤 Production Approver
+
+    box rgba(34,197,94,0.15) Company-Owned
+    participant HRN as Harness<br/>(shared libraries)
+    participant HFF as Harness Feature Flags
+    participant SNW as ServiceNow CMDB
+    end
+
+    box rgba(66,133,244,0.15) GCP Managed
+    participant ARG as Artifact Registry
+    participant BAUTH as Binary Authorization
+    participant AID as Agent Identity (SPIFFE)
+    participant SM as Secret Manager
+    participant KMS as Cloud KMS (CMEK)
+    participant ARS as Agent Runtime<br/>(staging)
+    participant ARP as Agent Runtime<br/>(prod)
+    participant AGW as Agent Gateway
+    participant CAL as Cloud Audit Logs
+    end
+
+    Note over HRN: ◀ from Layer 3: bundle_uri + infra_contract via webhook
+
+    HRN->>ARG: pull signed bundle
+    ARG-->>HRN: bundle artifact
+
+    HRN->>BAUTH: verify attestation chain<br/>(Design + Plan + Eval + Final)
+    BAUTH-->>HRN: chain valid
+
+    alt chain invalid
+        BAUTH-->>HRN: FAIL — missing or revoked
+        HRN->>CAL: PROMOTION_BLOCKED
+        Note over HRN: ⛔ deploy aborted — no GCP calls made
+    end
+
+    HRN->>SNW: open change record (RFC)
+    SNW-->>HRN: change_id
+
+    Note over HRN,ARS: --- STAGING DEPLOY ---
+
+    HRN->>AID: assign staging SPIFFE ID
+    AID-->>HRN: spiffe://agents/staging/<id>
+    HRN->>SM: bind tool secrets to staging SPIFFE ID
+    HRN->>KMS: bind CMEK key to runtime config
+    HRN->>ARS: deploy bundle with identity + key refs
+    ARS-->>HRN: staging endpoint
+
+    HRN->>AGW: register staging route (100% staging traffic)
+    HRN->>ARS: smoke test suite
+    ARS-->>HRN: smoke PASS
+
+    Note over HRN,Approver: 🟧 PROMOTION GATE<br/>attestation chain visible to approver
+    Approver->>HRN: APPROVE prod
+
+    Note over HRN,ARP: --- PROD DEPLOY (canary) ---
+
+    HRN->>AID: mint fresh prod SPIFFE ID<br/>(NOT a promotion of staging ID)
+    AID-->>HRN: spiffe://agents/prod/<id>
+    HRN->>SM: bind tool secrets to prod SPIFFE ID
+    HRN->>ARP: deploy bundle to prod
+    HRN->>AGW: register prod route at 10% canary
+
+    loop canary watch (15-30 min)
+        HRN->>ARP: monitor SLOs<br/>(latency, error rate, eval score)
+    end
+
+    alt canary healthy
+        HRN->>AGW: shift to 100% prod
+        HRN->>HFF: enable production feature flags
+        HRN->>SNW: close change record
+        HRN->>CAL: PROMOTION_GATE_PASSED — agent live
+    else canary unhealthy
+        HRN->>AGW: shift back to previous version
+        HRN->>SNW: change record FAILED
+        HRN->>CAL: PROMOTION_ROLLBACK
+    end
+
+    Note right of HRN: ▶ Handoff to Layer 5:<br/>runtime_ref + prod SPIFFE ID<br/>+ gateway routing config
+```
+
+**Engineering notes:**
+
+- Harness *consumes* the attestation chain via Binary Auth before any GCP API is called. If any link is missing or revoked, the deploy aborts at step 5; nothing is provisioned, nothing is logged as a deploy attempt at Agent Runtime.
+- Staging and prod use **separate** SPIFFE IDs. There is no "promote the same identity" — Harness mints a fresh prod identity at promotion time. This is a deliberate isolation property.
+- Canary routing is via **Agent Gateway weighted routes**, not a load balancer. Agent Gateway is the only place where A2A-aware and DPoP-aware canary routing exists in the stack.
+- Rollback is "shift Agent Gateway weight back to previous version" — not a redeploy. The previous version stays in Artifact Registry until explicitly retired.
+- ServiceNow integration is for change-management audit trail — the change record links the JIRA ID (from Layer 1) to the deploy event.
+
+---
+
+## Layer 5 — RUNTIME & OPERATE
+
+**Outcome:** Live request/response handling with inline guardrails, plus four continuous loops (telemetry, quality, security, cost) feeding the company's SIEM (Splunk) and APM (Dynatrace) via the Open Telemetry Collector.
+
+**Enters from Layer 4:** Live agent + identity + routing.
+**Exits:** Continuous evidence stream. Drift signals trigger a **regenerate** path (back to Layer 2). Anomaly signals trigger a **rollback** path (back to Layer 4).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 👤 End User
+    actor SRE as 👤 SRE / On-call
+
+    box rgba(34,197,94,0.15) Company-Owned
+    participant HRN as Harness
+    end
+
+    box rgba(66,133,244,0.15) GCP Managed
+    participant GEA as Gemini Enterprise App
+    participant AGW as Agent Gateway
+    participant AID as Agent Identity
+    participant MA as Model Armor
+    participant ARP as Agent Runtime
+    participant MB as Memory Bank
+    participant APG as Apigee Tool Gateway
+    participant CT as Cloud Trace
+    participant CL as Cloud Logging
+    participant CM as Cloud Monitoring
+    participant VOE as Vertex AI Online Eval
+    participant SCC as SCC Agent Threat Detection
+    participant FIN as Cloud Assist FinOps
+    end
+
+    box rgba(167,139,250,0.15) Third-Party / OSS
+    participant OTEL as Open Telemetry Collector
+    participant SPL as Splunk (SIEM)
+    participant DYN as Dynatrace (APM)
+    end
+
+    Note over GEA: ◀ from Layer 4: agent live, routing 100% prod
+
+    Note over User,GEA: --- REQUEST PATH ---
+
+    User->>GEA: query the agent
+    GEA->>AGW: forward request
+
+    AGW->>AID: get DPoP-bound short-lived cert
+    AID-->>AGW: cert (24h X.509 rotation)
+
+    AGW->>MA: screen incoming prompt<br/>(prompt-injection, jailbreak, DLP)
+    MA-->>AGW: clean (or block + reason)
+
+    AGW->>ARP: forward with DPoP credentials
+
+    ARP->>MB: retrieve user context
+    MB-->>ARP: context
+
+    ARP->>ARP: agent reasoning<br/>(LlmAgent / SequentialAgent)
+
+    ARP->>APG: outbound tool call<br/>(BigQuery, MCP server, etc.)
+    APG-->>ARP: tool result
+
+    ARP->>MA: screen output (DLP, hallucination,<br/>tool-poisoning detection)
+    MA-->>ARP: clean
+
+    ARP-->>AGW: response
+    AGW-->>GEA: response
+    GEA-->>User: rendered answer
+
+    Note over CT,DYN: --- CONTINUOUS LOOPS (run independently) ---
+
+    par Telemetry pipeline
+        ARP->>CT: emit Open Telemetry traces
+        ARP->>CL: emit structured logs
+        CT->>OTEL: traces stream
+        CL->>OTEL: logs stream
+        OTEL->>SPL: forward to SIEM<br/>(security + audit)
+        OTEL->>DYN: forward to APM<br/>(performance + RCA)
+    and Quality monitoring
+        ARP->>VOE: sample live traffic (1-5%)
+        VOE->>VOE: drift / hallucination scoring<br/>via Online Evaluation autorater
+        VOE->>CM: emit quality metrics
+    and Threat detection
+        CL->>SCC: ingest audit logs
+        CT->>SCC: ingest traces
+        SCC->>SCC: anomaly detection<br/>(excessive permissions,<br/>A2A/MCP anomalies)
+        SCC->>SPL: forward findings
+    and Cost monitoring
+        ARP->>FIN: token usage labels<br/>(per agent, per request)
+        FIN->>CM: cost anomaly metrics
+    end
+
+    Note over SPL,SRE: --- INVESTIGATION & FEEDBACK ---
+
+    SPL->>SRE: alert (anomaly or SLO breach)
+    SRE->>DYN: investigate distributed trace
+    DYN-->>SRE: root cause
+
+    alt rollback path (operational issue)
+        SRE->>HRN: trigger rollback
+        Note over HRN: ▶ back to Layer 4<br/>shift Agent Gateway weight
+    else regenerate path (drift / quality)
+        SRE->>GEA: file regenerate request<br/>with drift evidence
+        Note over GEA: ▶ back to Layer 2<br/>with original session_id + delta
+    else accept (false positive)
+        SRE->>SPL: annotate alert + tune threshold
+    end
+```
+
+**Engineering notes:**
+
+- The Open Telemetry Collector is the **single egress point** for all agent telemetry. Splunk (SIEM) and Dynatrace (APM) both consume from it. Adding another tool means adding another Open Telemetry exporter — agent code is untouched. This is why we standardized on Open Telemetry rather than vendor SDKs.
+- SCC Agent Threat Detection ingests *audit logs and traces*, not direct agent telemetry. Because Splunk and Dynatrace consume the same Open Telemetry stream, investigations across the SCC, SIEM, and APM views line up on the same trace IDs.
+- Vertex AI Online Eval samples a configurable percentage of live traffic — typically 1-5% for cost reasons. The sampling rate is declared in the Design Contract per agent class and honored automatically by the runtime.
+- The "regenerate" path is the most distinctive runtime feedback loop: a drift signal triggers a re-entry to Layer 2 with the original `session_id`, the drift evidence, and a delta prompt. The result is a *new* Design Contract that, on the next pass through Layers 3 and 4, replaces the running agent. This is how the platform stays current without engineers manually rebuilding agents.
+- Apigee Tool Gateway is the *outbound* firewall — separate from Agent Gateway (inbound). Together with Model Armor, this implements Google's published "three-gateways" pattern: Agent Gateway → Model Gateway → Tool Gateway.
+
+---
+
+## Reading the diagrams as one story
+
+If you read the five diagrams in order, the artifact passed between them is always a *signed object*:
+
+1. **Layer 1** produces a `session_id` — an authentication artifact bound to the developer and a JIRA ticket.
+2. **Layer 2** produces a **cosign-signed Design Contract** — what to build, declared as typed JSON.
+3. **Layer 3** produces a **signed bundle plus an attestation chain** — the build evidence, registered in Binary Authorization.
+4. **Layer 4** produces a **runtime reference plus a fresh prod SPIFFE identity** — the deploy evidence, recorded in ServiceNow and Cloud Audit Logs.
+5. **Layer 5** produces a **continuous evidence stream** — telemetry, eval, threat, and cost — that feeds back into Layer 2 (regenerate) or Layer 4 (rollback).
+
+This is the literal definition of "born compliant": every interaction in every layer either consumes an attestation, produces an attestation, or appends to the audit chain. **There is no path through the system that escapes signing.**
+
+For an engineer onboarding to the platform, the diagrams above are the right starting point — pick the layer your service lives in, follow the message flow, and the integration contract will be evident.
+
+---
+
+## Appendix: Where each component lives
+
+| Component | Category | Layer(s) it appears in |
+|---|---|---|
+| Angular Dev Chat | Company | 1 |
+| Company SSO/IdP | Company | 1 |
+| Company Private Registry | Company | 2 |
+| Design Contract Service | Company | 2 |
+| Eval Set + Corpus | Company | 3 |
+| Jenkins | Company | 3 |
+| Harness | Company | 4 |
+| Harness Feature Flags | Company | 4 |
+| ServiceNow CMDB | Company | 4 |
+| Gemini Enterprise App | GCP | 1, 5 |
+| Agent Gateway | GCP | 1, 4, 5 |
+| Agent Identity | GCP | 1, 4, 5 |
+| Model Armor | GCP | 1, 5 |
+| Agent Runtime | GCP | 1, 2, 4, 5 |
+| Agent Sessions | GCP | 1, 2 |
+| Memory Bank | GCP | 2, 5 |
+| Agent Registry | GCP | 2 |
+| Gemini Cloud Assist + ADC | GCP | 2, 3 |
+| Cloud Storage | GCP | 2 |
+| Agent Garden Modules | GCP | 3 |
+| Agent Garden Templates | GCP | 3 |
+| ADK Framework | GCP | 3 |
+| agents-cli + Gemini CLI | GCP | 3 |
+| Vertex AI Gen AI Eval | GCP | 3 |
+| Agent Simulation | GCP | 3 |
+| Org Policy | GCP | 3 |
+| Artifact Registry | GCP | 3, 4 |
+| Binary Authorization | GCP | 3, 4 |
+| Secret Manager | GCP | 4, 5 |
+| Cloud KMS | GCP | 4 |
+| Apigee Tool Gateway | GCP | 5 |
+| Cloud Trace | GCP | 5 |
+| Cloud Logging | GCP | 5 |
+| Cloud Monitoring | GCP | 5 |
+| Vertex AI Online Eval | GCP | 5 |
+| SCC Agent Threat Detection | GCP | 5 |
+| Cloud Assist FinOps | GCP | 5 |
+| Cloud Audit Logs | GCP | all |
+| Terraform | Third-party | 3 |
+| OPA + Conftest | Third-party | 3 |
+| Wiz IaC + AI-APP | Third-party | 3 |
+| Snyk | Third-party | 3 |
+| Twistlock | Third-party | 3 |
+| Cosign / Sigstore | Third-party | 2, 3 |
+| Open Telemetry Collector | Third-party | 5 |
+| Splunk | Third-party | 5 |
+| Dynatrace | Third-party | 5 |
