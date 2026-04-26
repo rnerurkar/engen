@@ -52,11 +52,11 @@ The user-facing entry points for both developers (build-time) and end users (run
 
 | Component | Category | Description |
 |---|---|---|
-| Angular Developer Chat | Company | The product's conversational UI where developers describe use cases in natural language to start the build-time workflow. |
-| Gemini Enterprise App | GCP | Google's published agent surface (formerly Agentspace). End users consume agents here via Agent Inbox, Agent Gallery, and A2UI rendering. |
-| Agent Inbox | GCP | Surfaces results from long-running agent tasks — the asynchronous counterpart to real-time chat. |
-| Agent Gallery | GCP | A marketplace of all published agents in the organization — every agent built by this platform appears here automatically after Layer 4 promotion. |
-| A2UI Rendering | Protocol | The generative UI protocol that lets agents render structured, interactive responses rather than plain text. |
+| Angular Developer Chat | Company | The product's conversational UI where developers describe use cases in natural language to start the build-time workflow. Renders Mermaid diagrams inline via mermaid.js at the Design Gate for architecture review. |
+| Gemini Enterprise App *(GA)* | GCP | Google's published agent surface (formerly Agentspace). End users consume agents here via Agent Inbox, Agent Gallery, and A2UI rendering. |
+| Agent Inbox *(GA)* | GCP | Surfaces results from long-running agent tasks — the asynchronous counterpart to real-time chat. |
+| Agent Gallery *(GA)* | GCP | A marketplace of all published agents in the organization — every agent built by this platform appears here automatically after Layer 4 promotion. |
+| A2UI Rendering *(GA)* | Protocol | The generative UI protocol that lets agents render structured, interactive responses rather than plain text. |
 | Company SSO / IdP | Company | Okta, Ping, or equivalent OIDC provider. Authenticates the developer; the resulting token is exchanged for a DPoP-bound cert at Agent Identity in the next layer. |
 
 ### Layer 2 — INTAKE & DESIGN
@@ -65,14 +65,14 @@ The planning layer. A single Design Agent reasons about the use case, discovers 
 
 | Component | Category | Description |
 |---|---|---|
-| Agent Runtime | GCP | Hosts the Design Agent as an ADK `LlmAgent`. Provides managed compute, auto-scaling, and the session/memory infrastructure. |
-| Agent Sessions | GCP | Persists conversational state across the Design Gate — the developer can leave, come back, and resume without losing context. |
-| ADK + Gemini 2.x | GCP | The reasoning core. The Design Agent is an `LlmAgent` powered by Gemini 2.x Pro, using ADK's tool-use and sub-agent capabilities. |
-| Vertex AI Search (Pattern Catalog) | GCP | An unstructured data store with structured metadata containing all ADK design patterns, composition rules, and Architecture Center reference architectures. The Design Agent queries it with semantic/hybrid search to select applicable patterns. |
-| Agent Registry | GCP | Google's managed catalog of agents, MCP servers, and tools. The Design Agent queries it to discover reusable components already published in the organization or by Google. |
+| Agent Runtime *(GA)* | GCP | Hosts the Design Agent as an ADK `LlmAgent`. Provides managed compute, auto-scaling, and the session/memory infrastructure. |
+| Agent Sessions *(GA)* | GCP | Persists conversational state across the Design Gate — the developer can leave, come back, and resume without losing context. |
+| ADK + Gemini 2.x *(GA)* | GCP | The reasoning core. The Design Agent is an `LlmAgent` powered by Gemini 2.x Pro, using ADK's tool-use and sub-agent capabilities. Generates Mermaid component and sequence diagrams as part of its design output. |
+| Vertex AI Search *(GA)* (Pattern Catalog) | GCP | An unstructured data store with structured metadata containing all ADK design patterns, composition rules, and Architecture Center reference architectures. The Design Agent queries it with semantic/hybrid search to select applicable patterns. |
+| Agent Registry *(Public Preview)* | GCP | Google's managed catalog of agents, MCP servers, and tools. The Design Agent queries it to discover reusable components already published in the organization or by Google. |
 | Company Private Registry | Company | The company-internal catalog of vetted skills, connection recipes, A2A peer agents, and signed Agent Cards. Federated with Agent Registry for a single discovery view. |
-| Cloud Assist + ADC | GCP | Gemini Cloud Assist and Application Design Center. Given the selected pattern composition and tools, it recommends a compliant IaC architecture and maps to an Agent Garden template. |
-| Design Contract | Company | The typed JSON output of this layer — specifying the pattern composition, ADK agent tree, Garden template ID, tools/MCP bindings, model selection, identity scope, region, eval set ID, Model Armor template, and residency tag. Signed by Cosign before handoff to Layer 3. |
+| Cloud Assist + ADC *(GA)* | GCP | Gemini Cloud Assist and Application Design Center. Given the selected pattern composition and tools, it recommends a compliant IaC architecture and maps to an Agent Garden template. |
+| Design Contract | Company | The typed JSON output of this layer — specifying the pattern composition, ADK agent tree, Garden template ID, tools/MCP bindings, model selection, identity scope, region, eval set ID, Model Armor template, residency tag, and URIs to the generated component architecture diagram and sequence diagram. Signed by Cosign before handoff to Layer 3. |
 
 ### Layer 3 — GENERATION & ASSURANCE
 
@@ -82,36 +82,35 @@ The factory floor. Two parallel tracks — infrastructure and code/eval — run 
 
 | Component | Category | Description |
 |---|---|---|
-| Cloud Assist + ADC | GCP | Generates Terraform HCL from the Design Contract, referencing vetted Agent Garden Terraform modules for identity, gateway, runtime, and secrets provisioning. |
-| Terraform | Third-party | HashiCorp's IaC engine. Executes `plan` and `apply` against the GCP provider. |
-| Agent Garden Modules | GCP | A curated library of Terraform modules for agent infrastructure — Agent Identity, Agent Gateway routes, Runtime shells, Secret Manager bindings, KMS key creation. |
+| Cloud Assist + ADC *(GA)* | GCP | Generates Terraform HCL from the Design Contract, referencing vetted Agent Garden Terraform modules for identity, gateway, runtime, and secrets provisioning. |
+| Terraform *(GA)* | Third-party | HashiCorp's IaC engine. Executes `plan` and `apply` against the GCP provider. |
+| Agent Garden Modules *(GA)* | GCP | A curated library of Terraform modules for agent infrastructure — Agent Identity, Agent Gateway routes, Runtime shells, Secret Manager bindings, KMS key creation. |
 | Jenkins | Company | CI server running company-shared-libraries. Owns the Plan Gate: `terraform plan` → policy evaluation → human approval → `terraform apply`. |
-| OPA + Conftest | Third-party | Open Policy Agent with Conftest for Rego-based policy-as-code evaluation of Terraform plan output. |
-| Org Policy Constraints | GCP | Google Cloud organization-level guardrails — CMEK enforcement, region pinning, allowed-models lists, machine-type restrictions. Evaluated automatically during `terraform plan`. |
-| Wiz IaC Scanner | Third-party | Pre-apply infrastructure risk scan. Checks for misconfigurations, overly permissive IAM, and compliance violations before any resource is created. |
+| OPA + Conftest *(GA)* | Third-party | Open Policy Agent with Conftest for Rego-based policy-as-code evaluation of Terraform plan output. |
+| Org Policy Constraints *(GA)* | GCP | Google Cloud organization-level guardrails — CMEK enforcement, region pinning, allowed-models lists, machine-type restrictions. Evaluated automatically during `terraform plan`. |
+| Wiz IaC Scanner *(GA)* | Third-party | Pre-apply infrastructure risk scan. Checks for misconfigurations, overly permissive IAM, and compliance violations before any resource is created. |
 
 **Track B — Code & Eval:**
 
 | Component | Category | Description |
 |---|---|---|
-| Agent Garden Templates | GCP | Vetted agent starter templates — the parameterized starting point that replaces free-form code generation. Selected by the Design Contract's `garden_template_id`. |
-| agents-cli | GCP | Google's agent lifecycle CLI (Public Preview, launched at Next '26). Scaffolds from a Garden template, runs evals, deploys to Agent Runtime, and publishes to Gemini Enterprise. |
-| Gemini CLI | GCP | The developer interface that invokes agents-cli. Can also be invoked by Claude Code, Cursor, or Antigravity. |
-| ADK Framework | GCP | The Agent Development Kit — Python 1.31.x stable, 2.0 Beta (graph workflows), TypeScript 1.0 GA, Java and Go 1.0. The framework the generated agent code runs on. |
-| Vertex AI Gen AI Eval | GCP | Evaluation service providing trajectory metrics (`trajectory_in_order_match`, `trajectory_precision`, `trajectory_recall`), multi-turn autorater scoring, and structured output validation. |
-| Agent Simulation | GCP | Synthetic persona testing — generates realistic user interactions to validate agent behavior before real users are exposed. |
+| Agent Garden Templates *(GA)* | GCP | Vetted agent starter templates — the parameterized starting point that replaces free-form code generation. Selected by the Design Contract's `garden_template_id`. |
+| agents-cli *(Public Preview)* | GCP | Google's agent lifecycle CLI (Public Preview, launched at Next '26). Scaffolds from a Garden template, runs evals, deploys to Agent Runtime, and publishes to Gemini Enterprise. Invoked directly by Jenkins — not via Gemini CLI — because Layer 3 is deterministic. |
+| ADK Framework *(GA)* | GCP | The Agent Development Kit — Python 1.31.x stable, 2.0 Beta (graph workflows), TypeScript 1.0 GA, Java and Go 1.0. The framework the generated agent code runs on. |
+| Vertex AI Gen AI Eval *(GA)* | GCP | Evaluation service providing trajectory metrics (`trajectory_in_order_match`, `trajectory_precision`, `trajectory_recall`), multi-turn autorater scoring, and structured output validation. |
+| Agent Simulation *(Preview)* | GCP | Synthetic persona testing — generates realistic user interactions to validate agent behavior before real users are exposed. |
 | Eval Set + Corpus | Company | Company-authored golden datasets, prompt-injection test corpora, and domain-specific eval assertions. Stored alongside agent code in the versioned repository. |
 
 **Convergence — Sign & Attest:**
 
 | Component | Category | Description |
 |---|---|---|
-| Artifact Registry | GCP | Stores the signed agent bundle (container image + config). The bundle_uri from here is what Layer 4 pulls. |
-| Binary Authorization | GCP | Registers the attestation chain (Design + Plan + Eval + Final). Layer 4 verifies this chain before any deploy is attempted. |
-| cosign / Sigstore | Third-party | Open-source artifact signing using Fulcio ephemeral certificates and Rekor transparency log. No long-lived signing keys. |
-| Snyk + Twistlock | Third-party | Dependency vulnerability scan (Snyk) and container image scan (Twistlock). Both must pass before the bundle is signed. |
-| Wiz AI-APP | Third-party | AI-application-specific runtime risk scan — checks for prompt injection surfaces, data leakage paths, and model access control gaps. |
-| Cloud Source / GitHub | GCP/Company | Versioned source control for agent code, Terraform modules, eval sets, and pipeline definitions. |
+| Artifact Registry *(GA)* | GCP | Stores the signed agent bundle (container image + config). The bundle_uri from here is what Layer 4 pulls. |
+| Binary Authorization *(GA)* | GCP | Registers the attestation chain (Design + Plan + Eval + Final). Layer 4 verifies this chain before any deploy is attempted. |
+| cosign / Sigstore *(GA)* | Third-party | Open-source artifact signing using Fulcio ephemeral certificates and Rekor transparency log. No long-lived signing keys. |
+| Snyk + Twistlock *(GA)* | Third-party | Dependency vulnerability scan (Snyk) and container image scan (Twistlock). Both must pass before the bundle is signed. |
+| Wiz AI-APP *(GA)* | Third-party | AI-application-specific runtime risk scan — checks for prompt injection surfaces, data leakage paths, and model access control gaps. |
+| Cloud Source / GitHub *(GA)* | GCP/Company | Versioned source control for agent code, Terraform modules, eval sets, and pipeline definitions. |
 | Compliance Attestation | Protocol | The JWS/cosign attestation bundle that travels with the artifact. Contains the Design doc hash, Plan attestation, Eval report, and final scan results. |
 
 ### Layer 4 — DELIVERY
@@ -122,10 +121,10 @@ Harness owns environment promotion. Nothing reaches production unless the full a
 |---|---|---|
 | Harness | Company | Continuous delivery platform using company-shared-libraries. Owns the Promotion Gate: staging deploy → smoke test → human approval → canary → full prod. |
 | Harness Feature Flags | Company | Toggle prompt packs, tool allowlists, and Model Armor templates in production without redeploying the agent. |
-| Agent Gateway | GCP | Google-managed ingress gateway (Private Preview). Terminates mTLS, enforces DPoP re-authentication, applies inline Model Armor, and supports A2A/MCP-aware routing with weighted canary splits. |
-| Agent Identity (SPIFFE) | GCP | Issues SPIFFE-based X.509 certificates with 24-hour rotation and DPoP-bound tokens. Each environment (staging, prod) gets a separate identity — no identity promotion. |
-| Secret Manager | GCP | Native ADK integration for tool credentials. Secrets are bound to the agent's SPIFFE identity — no long-lived service account keys anywhere. |
-| Cloud KMS · CMEK | GCP | Customer-managed encryption keys for Sessions, Memory Bank, and any Discovery Engine data stores. Provisioned by Terraform in Layer 3 Track A. |
+| Agent Gateway *(Private Preview)* | GCP | Google-managed ingress gateway (Private Preview). Terminates mTLS, enforces DPoP re-authentication, applies inline Model Armor, and supports A2A/MCP-aware routing with weighted canary splits. |
+| Agent Identity (SPIFFE) *(GA)* | GCP | Issues SPIFFE-based X.509 certificates with 24-hour rotation and DPoP-bound tokens. Each environment (staging, prod) gets a separate identity — no identity promotion. |
+| Secret Manager *(GA)* | GCP | Native ADK integration for tool credentials. Secrets are bound to the agent's SPIFFE identity — no long-lived service account keys anywhere. |
+| Cloud KMS · CMEK *(GA)* | GCP | Customer-managed encryption keys for Sessions, Memory Bank, and any Discovery Engine data stores. Provisioned by Terraform in Layer 3 Track A. |
 | ServiceNow CMDB | Company | Change record management. Every promotion creates an RFC linked to the original JIRA ticket from Layer 1, closed on successful canary or marked FAILED on rollback. |
 
 ### Layer 5 — RUNTIME & OPERATE
@@ -136,37 +135,37 @@ The agent runs inside a VPC-SC perimeter with continuous evaluation, threat dete
 
 | Component | Category | Description |
 |---|---|---|
-| Agent Runtime | GCP | Production hosting for the deployed agent. Provides managed Sessions (conversational state), Memory Bank (long-term personalization), auto-scaling, and multi-region support. |
-| Memory Bank | GCP | Persistent agent memory for user context and personalization. Not Terraform-managed as of April 2026 — schema migrations are imperative scripts. |
-| Model Armor | GCP | Inline AI firewall. Screens every inbound prompt and outbound response for prompt injection, jailbreak attempts, DLP-sensitive content, malicious URLs, and tool poisoning. 2M-token free tier. |
-| Apigee Tool Gateway | GCP | Outbound tool-call firewall. The "Tool Gateway" in Google's three-gateways pattern (Agent Gateway → Model Gateway → Tool Gateway). Controls which external APIs and MCP servers the agent can reach. |
-| PSC-I + VPC-SC | GCP | Private Service Connect Interface for private ingress from the company VPC. VPC Service Controls perimeter wraps Agent Runtime, BigQuery, Cloud Storage, Secret Manager, Discovery Engine, and KMS. |
-| Cloud DLP | GCP | Data classification and de-identification. Integrated with Model Armor for content-level inspection beyond prompt screening. |
-| Vertex AI Online Eval | GCP | Samples 1–5% of live traffic and runs autorater scoring for drift, hallucination, and quality regression. Sampling rate is declared in the Design Contract per agent class. |
+| Agent Runtime *(GA)* | GCP | Production hosting for the deployed agent. Provides managed Sessions (conversational state), Memory Bank (long-term personalization), auto-scaling, and multi-region support. |
+| Memory Bank *(GA)* | GCP | Persistent agent memory for user context and personalization. Not Terraform-managed as of April 2026 — schema migrations are imperative scripts. |
+| Model Armor *(GA)* | GCP | Inline AI firewall. Screens every inbound prompt and outbound response for prompt injection, jailbreak attempts, DLP-sensitive content, malicious URLs, and tool poisoning. 2M-token free tier. |
+| Apigee Tool Gateway *(GA)* | GCP | Outbound tool-call firewall. The "Tool Gateway" in Google's three-gateways pattern (Agent Gateway → Model Gateway → Tool Gateway). Controls which external APIs and MCP servers the agent can reach. |
+| PSC-I + VPC-SC *(GA)* | GCP | Private Service Connect Interface for private ingress from the company VPC. VPC Service Controls perimeter wraps Agent Runtime, BigQuery, Cloud Storage, Secret Manager, Discovery Engine, and KMS. |
+| Cloud DLP *(GA)* | GCP | Data classification and de-identification. Integrated with Model Armor for content-level inspection beyond prompt screening. |
+| Vertex AI Online Eval *(Preview)* | GCP | Samples 1–5% of live traffic and runs autorater scoring for drift, hallucination, and quality regression. Sampling rate is declared in the Design Contract per agent class. |
 
 **Observability & Threat Detection:**
 
 | Component | Category | Description |
 |---|---|---|
-| Cloud Trace + Monitoring | GCP | Open Telemetry-native distributed tracing and metrics. Enabled automatically via `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true` at the Terraform layer. |
-| Cloud Logging | GCP | Structured and audit log collection. Feeds both SCC Agent Threat Detection and the Open Telemetry Collector for SIEM export. |
-| SCC Agent Threat Detection | GCP | Security Command Center feature that ingests audit logs and traces to detect excessive-permission patterns, A2A/MCP anomalies, and suspicious tool-call sequences. Integrates with Wiz AI-APP findings. |
-| Open Telemetry Collector | Third-party | The single egress point for all agent telemetry. Fans out to Splunk (SIEM) and Dynatrace (APM). Adding another destination means adding an OTel exporter — agent code is untouched. |
-| Splunk | Third-party | Company SIEM. Receives traces, logs, and SCC findings via the Open Telemetry Collector. Security and audit teams use this as their primary investigation surface. |
-| Dynatrace | Third-party | APM platform. Receives distributed traces for performance monitoring, root-cause analysis, and SLO tracking. SREs pivot here from Splunk alerts. |
-| Cloud Assist FinOps | GCP | Gemini Cloud Assist's cost anomaly agent. Tracks per-agent token usage via billing labels and flags unexpected spend spikes. |
+| Cloud Trace + Monitoring *(GA)* | GCP | Open Telemetry-native distributed tracing and metrics. Enabled automatically via `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true` at the Terraform layer. |
+| Cloud Logging *(GA)* | GCP | Structured and audit log collection. Feeds both SCC Agent Threat Detection and the Open Telemetry Collector for SIEM export. |
+| SCC Agent Threat Detection *(Preview)* | GCP | Security Command Center feature that ingests audit logs and traces to detect excessive-permission patterns, A2A/MCP anomalies, and suspicious tool-call sequences. Integrates with Wiz AI-APP findings. |
+| Open Telemetry Collector *(GA)* | Third-party | The single egress point for all agent telemetry. Fans out to Splunk (SIEM) and Dynatrace (APM). Adding another destination means adding an OTel exporter — agent code is untouched. |
+| Splunk *(GA)* | Third-party | Company SIEM. Receives traces, logs, and SCC findings via the Open Telemetry Collector. Security and audit teams use this as their primary investigation surface. |
+| Dynatrace *(GA)* | Third-party | APM platform. Receives distributed traces for performance monitoring, root-cause analysis, and SLO tracking. SREs pivot here from Splunk alerts. |
+| Cloud Assist FinOps *(GA)* | GCP | Gemini Cloud Assist's cost anomaly agent. Tracks per-agent token usage via billing labels and flags unexpected spend spikes. |
 
 ### Cross-cutting — applies to all layers
 
 | Component | Category | Description |
 |---|---|---|
-| Cloud IAM | GCP | Identity and Access Management. Principals, roles, and policy bindings for every GCP resource across all layers. |
-| Org Policy | GCP | Organization-wide guardrails enforced at the resource-manager level — CMEK requirements, region restrictions, allowed-models lists, service-account key creation blocks. |
-| Access Context Manager | GCP | Context-aware access policies. Defines the VPC-SC perimeter rules and the conditions under which agents can access sensitive resources. |
-| Cloud Audit Logs | GCP | Admin activity, data access, and system event logs. The only component that appears in every layer — it is the audit backbone. |
-| Cloud Billing + Labels | GCP | Per-agent cost attribution via billing labels. Each agent deployed by the platform inherits labels from its Design Contract (agent class, team, cost center). |
+| Cloud IAM *(GA)* | GCP | Identity and Access Management. Principals, roles, and policy bindings for every GCP resource across all layers. |
+| Org Policy *(GA)* | GCP | Organization-wide guardrails enforced at the resource-manager level — CMEK requirements, region restrictions, allowed-models lists, service-account key creation blocks. |
+| Access Context Manager *(GA)* | GCP | Context-aware access policies. Defines the VPC-SC perimeter rules and the conditions under which agents can access sensitive resources. |
+| Cloud Audit Logs *(GA)* | GCP | Admin activity, data access, and system event logs. The only component that appears in every layer — it is the audit backbone. |
+| Cloud Billing + Labels *(GA)* | GCP | Per-agent cost attribution via billing labels. Each agent deployed by the platform inherits labels from its Design Contract (agent class, team, cost center). |
 | Compliance Evidence | Company | The signed attestation chain — Design Doc → Plan Attestation → Eval Report → Promotion Attestation → Signed Agent Card → Live SLO + Audit Log. This chain is what "born compliant" means to an auditor. |
-| SPIFFE / SPIRE | Protocol | The workload identity standard underpinning Agent Identity. SPIFFE IDs are the only principal type for agent IAM grants — no service account keys. |
+| SPIFFE / SPIRE *(GA)* | Protocol | The workload identity standard underpinning Agent Identity. SPIFFE IDs are the only principal type for agent IAM grants — no service account keys. |
 
 ---
 
@@ -238,10 +237,10 @@ sequenceDiagram
 
 ## Layer 2 — INTAKE & DESIGN
 
-**Outcome:** A signed Design Contract — a typed JSON document specifying the **ADK pattern composition** (which patterns, how they compose), agent class, Garden template ID, tools/MCP servers, sub-agent topology, region, identity scope, eval set ID, model selection, Model Armor template, and residency tag.
+**Outcome:** A signed Design Contract — a typed JSON document specifying the **ADK pattern composition** (which patterns, how they compose), agent class, Garden template ID, tools/MCP servers, sub-agent topology, region, identity scope, eval set ID, model selection, Model Armor template, and residency tag — accompanied by a **generated component architecture diagram** and **sequence diagram** that visualize the designed workflow for developer review.
 
 **Enters from Layer 1:** `session_id` + prompt + developer identity.
-**Exits to Layer 3:** `contract_uri` (in Cloud Storage) + cosign signature + Jenkins webhook trigger.
+**Exits to Layer 3:** `contract_uri` (in Cloud Storage) + cosign signature + `component_diagram_uri` + `sequence_diagram_uri` + Jenkins webhook trigger.
 
 ### ADK Pattern Catalog (what the Design Agent searches)
 
@@ -399,15 +398,25 @@ sequenceDiagram
     CA-->>AR: HCL sketch + Garden template ID<br/>+ region + residency tag
 
     AR->>AR: assemble Design Contract JSON<br/>(includes: pattern_composition,<br/>adk_agent_tree, tool_bindings,<br/>eval_set_id, identity_scope)
-    AR-->>ANG: present contract for review<br/>(pattern rationale visible)
-    ANG-->>Dev: render Design Contract UI<br/>(shows pattern selection +<br/>composition diagram +<br/>why these patterns were chosen)
 
-    Note over Dev,ANG: 🟧 DESIGN GATE — human review<br/>(developer validates pattern selection)
+    Note over AR,CS: DIAGRAM GENERATION
+
+    AR->>AR: generate component architecture<br/>diagram (Mermaid) from pattern<br/>composition + agent tree +<br/>tool/MCP bindings
+    AR->>AR: generate sequence diagram<br/>(Mermaid) showing runtime<br/>interaction flow between agents,<br/>tools, and external systems
+    AR->>CS: store diagram sources +<br/>rendered PNGs (versioned)
+    CS-->>AR: component_diagram_uri<br/>sequence_diagram_uri
+
+    AR->>AR: attach diagram URIs to<br/>Design Contract JSON
+
+    AR-->>ANG: present Design Contract +<br/>diagram links for review
+    ANG-->>Dev: render Design Contract UI<br/>with embedded diagrams:<br/>· component architecture (mermaid.js)<br/>· sequence diagram (mermaid.js)<br/>· pattern rationale + "why"
+
+    Note over Dev,ANG: 🟧 DESIGN GATE — human review<br/>(developer validates architecture<br/>via diagrams + pattern rationale)
 
     Dev->>ANG: APPROVE
     ANG->>DCS: submit signed approval
 
-    DCS->>SIG: sign Design Contract JSON<br/>(Fulcio ephemeral cert)
+    DCS->>SIG: sign Design Contract JSON<br/>(includes diagram URIs)<br/>(Fulcio ephemeral cert)
     SIG-->>DCS: cosign signature bundle<br/>(+ Rekor log entry)
 
     DCS->>CS: store signed contract (versioned)
@@ -415,19 +424,22 @@ sequenceDiagram
     DCS->>CAL: DESIGN_GATE_PASSED event
     DCS->>DCS: trigger Jenkins webhook<br/>with contract_uri + sig
 
-    Note right of DCS: ▶ Handoff to Layer 3:<br/>contract_uri + cosign signature<br/>(contract now includes<br/>pattern_composition + adk_agent_tree)
+    Note right of DCS: ▶ Handoff to Layer 3:<br/>contract_uri + cosign signature<br/>(contract includes pattern_composition,<br/>adk_agent_tree, component_diagram_uri,<br/>sequence_diagram_uri)
 ```
 
 **Engineering notes:**
 
 - The Design Contract schema is versioned in the Company Private Registry. Treat schema changes like API changes — backwards compatibility matters.
+- **Diagram generation is an LLM capability, not a separate service.** The Design Agent's Gemini 2.x model produces Mermaid source code for both diagrams as part of its reasoning chain. The component diagram is derived from the `pattern_composition` and `adk_agent_tree` fields — agent nodes, sub-agent relationships, tool bindings, and MCP wiring. The sequence diagram is derived from the runtime interaction flow implied by the selected patterns — e.g., a Coordinator/Dispatcher pattern produces a sequence showing the root agent routing to specialists, while a Parallel Fan-out produces a `par` block with a gather step.
+- **Diagram rendering is client-side.** The Angular Dev Chat embeds `mermaid.js` to render the Mermaid source stored in Cloud Storage. The developer sees fully rendered, interactive diagrams — not raw code. Rendered PNGs are also stored alongside the source for use in Confluence, JIRA tickets, and the Compliance Evidence Chain.
+- **Diagrams are part of the signed Design Contract.** The `component_diagram_uri` and `sequence_diagram_uri` are fields in the Design Contract JSON. When the contract is cosign-signed, the diagram URIs are included in the signed payload — meaning any post-approval tampering with the diagrams would invalidate the signature. The diagrams travel with the bundle through Layers 3 and 4 as design evidence.
+- **At the Design Gate, the developer reviews architecture — not JSON.** The Angular UI presents three views: (1) the component architecture diagram showing the agent topology and tool bindings, (2) the sequence diagram showing the runtime interaction flow, and (3) the pattern rationale showing which use-case signals triggered each pattern selection. This lets the developer validate that the *designed workflow* matches their intent, not just that the *parameters* are correct.
 - **Vertex AI Search performs hybrid search** — combining a semantic embedding match on the developer's use-case description with structured metadata filters (complexity, latency profile, human involvement). This is not a keyword-only lookup; it uses the embeddings from Vertex AI's foundation models to find patterns that *semantically match* even when the developer's language doesn't use Google's exact pattern names.
 - **Two-pass retrieval:** The first query finds candidate root patterns (e.g., Coordinator/Dispatcher). The second query traverses the `composable_with` adjacency to retrieve the child patterns that compose with the root. This two-pass approach prevents the Design Agent from proposing pattern combinations that are structurally invalid (e.g., nesting a LoopAgent inside a ParallelAgent where ordering matters).
-- **Pattern rationale is shown to the developer** at the Design Gate. The UI renders the selected pattern composition as a visual agent-tree diagram alongside the "why" — which use-case signals triggered each pattern. This lets the developer override if they know something the search doesn't (e.g., a regulatory constraint that forces Human-in-the-Loop at a point the model didn't predict).
-- The Design Gate is **not** an LLM judgment — it is a human approval. The agent presents; the human decides. Pattern selection is an LLM recommendation backed by search evidence; the developer validates it.
-- Two registry queries (Agent Registry + Company Private Registry) run in parallel **after** pattern selection, because the selected patterns determine which tool categories to search for. For example, a Parallel Fan-out pattern for multi-vendor comparison tells the registry query to look for vendor-specific MCP servers.
+- The Design Gate is **not** an LLM judgment — it is a human approval. The agent presents; the human decides. Pattern selection and diagram generation are LLM outputs backed by search evidence; the developer validates them.
+- Two registry queries (Agent Registry + Company Private Registry) run in parallel **after** pattern selection, because the selected patterns determine which tool categories to search for.
 - Cosign signs with a Fulcio-issued ephemeral cert; the public log entry in Rekor is the auditable trail. There are no long-lived signing keys to rotate.
-- **The `pattern_composition` and `adk_agent_tree` fields in the Design Contract** are what Layer 3's `agents-cli` consumes to scaffold the correct ADK agent structure from the matching Agent Garden template. This is the link between pattern selection (Layer 2) and deterministic code generation (Layer 3).
+- **The `pattern_composition`, `adk_agent_tree`, `component_diagram_uri`, and `sequence_diagram_uri` fields in the Design Contract** are what Layer 3's `agents-cli` consumes to scaffold the correct ADK agent structure from the matching Agent Garden template. The diagrams also appear in the Compliance Evidence Chain as the "Design Doc" node — the first link in the attestation chain an auditor walks.
 
 ---
 
@@ -451,7 +463,7 @@ sequenceDiagram
     participant CA as Gemini Cloud Assist
     participant AGM as Agent Garden Modules
     participant ORG as Org Policy
-    participant CLI as agents-cli + Gemini CLI
+    participant CLI as agents-cli
     participant ADK as ADK Framework
     participant GAR as Agent Garden Templates
     participant EVAL as Vertex AI Gen AI Eval
@@ -768,7 +780,7 @@ sequenceDiagram
 If you read the five diagrams in order, the artifact passed between them is always a *signed object*:
 
 1. **Layer 1** produces a `session_id` — an authentication artifact bound to the developer and a JIRA ticket.
-2. **Layer 2** produces a **cosign-signed Design Contract** — what to build, declared as typed JSON.
+2. **Layer 2** produces a **cosign-signed Design Contract** — what to build, declared as typed JSON — accompanied by a generated component architecture diagram and sequence diagram that the developer approves at the Design Gate.
 3. **Layer 3** produces a **signed bundle plus an attestation chain** — the build evidence, registered in Binary Authorization.
 4. **Layer 4** produces a **runtime reference plus a fresh prod SPIFFE identity** — the deploy evidence, recorded in ServiceNow and Cloud Audit Logs.
 5. **Layer 5** produces a **continuous evidence stream** — telemetry, eval, threat, and cost — that feeds back into Layer 2 (regenerate) or Layer 4 (rollback).
@@ -792,42 +804,42 @@ For an engineer onboarding to the platform, the diagrams above are the right sta
 | Harness | Company | 4 |
 | Harness Feature Flags | Company | 4 |
 | ServiceNow CMDB | Company | 4 |
-| Gemini Enterprise App | GCP | 1, 5 |
-| Agent Gateway | GCP | 1, 4, 5 |
+| Gemini Enterprise App *(GA)* | GCP | 1, 5 |
+| Agent Gateway *(Private Preview)* | GCP | 1, 4, 5 |
 | Agent Identity | GCP | 1, 4, 5 |
-| Model Armor | GCP | 1, 5 |
-| Agent Runtime | GCP | 1, 2, 4, 5 |
-| Agent Sessions | GCP | 1, 2 |
-| Memory Bank | GCP | 2, 5 |
-| Vertex AI Search (Pattern Catalog) | GCP | 2 |
-| Agent Registry | GCP | 2 |
+| Model Armor *(GA)* | GCP | 1, 5 |
+| Agent Runtime *(GA)* | GCP | 1, 2, 4, 5 |
+| Agent Sessions *(GA)* | GCP | 1, 2 |
+| Memory Bank *(GA)* | GCP | 2, 5 |
+| Vertex AI Search *(GA)* (Pattern Catalog) | GCP | 2 |
+| Agent Registry *(Public Preview)* | GCP | 2 |
 | Gemini Cloud Assist + ADC | GCP | 2, 3 |
 | Cloud Storage | GCP | 2 |
-| Agent Garden Modules | GCP | 3 |
-| Agent Garden Templates | GCP | 3 |
-| ADK Framework | GCP | 3 |
-| agents-cli + Gemini CLI | GCP | 3 |
-| Vertex AI Gen AI Eval | GCP | 3 |
-| Agent Simulation | GCP | 3 |
-| Org Policy | GCP | 3 |
-| Artifact Registry | GCP | 3, 4 |
-| Binary Authorization | GCP | 3, 4 |
-| Secret Manager | GCP | 4, 5 |
+| Agent Garden Modules *(GA)* | GCP | 3 |
+| Agent Garden Templates *(GA)* | GCP | 3 |
+| ADK Framework *(GA)* | GCP | 3 |
+| agents-cli *(Public Preview)* | GCP | 3 |
+| Vertex AI Gen AI Eval *(GA)* | GCP | 3 |
+| Agent Simulation *(Preview)* | GCP | 3 |
+| Org Policy *(GA)* | GCP | 3 |
+| Artifact Registry *(GA)* | GCP | 3, 4 |
+| Binary Authorization *(GA)* | GCP | 3, 4 |
+| Secret Manager *(GA)* | GCP | 4, 5 |
 | Cloud KMS | GCP | 4 |
-| Apigee Tool Gateway | GCP | 5 |
+| Apigee Tool Gateway *(GA)* | GCP | 5 |
 | Cloud Trace | GCP | 5 |
-| Cloud Logging | GCP | 5 |
+| Cloud Logging *(GA)* | GCP | 5 |
 | Cloud Monitoring | GCP | 5 |
-| Vertex AI Online Eval | GCP | 5 |
-| SCC Agent Threat Detection | GCP | 5 |
-| Cloud Assist FinOps | GCP | 5 |
-| Cloud Audit Logs | GCP | all |
-| Terraform | Third-party | 3 |
-| OPA + Conftest | Third-party | 3 |
+| Vertex AI Online Eval *(Preview)* | GCP | 5 |
+| SCC Agent Threat Detection *(Preview)* | GCP | 5 |
+| Cloud Assist FinOps *(GA)* | GCP | 5 |
+| Cloud Audit Logs *(GA)* | GCP | all |
+| Terraform *(GA)* | Third-party | 3 |
+| OPA + Conftest *(GA)* | Third-party | 3 |
 | Wiz IaC + AI-APP | Third-party | 3 |
 | Snyk | Third-party | 3 |
 | Twistlock | Third-party | 3 |
 | Cosign / Sigstore | Third-party | 2, 3 |
-| Open Telemetry Collector | Third-party | 5 |
-| Splunk | Third-party | 5 |
-| Dynatrace | Third-party | 5 |
+| Open Telemetry Collector *(GA)* | Third-party | 5 |
+| Splunk *(GA)* | Third-party | 5 |
+| Dynatrace *(GA)* | Third-party | 5 |
