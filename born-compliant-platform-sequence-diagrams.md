@@ -12,30 +12,29 @@ Every team in the enterprise that wants to build an AI agent today faces the sam
 
 ### The solution: AgentForge
 
-AgentForge is a **paved-road platform** that turns agent development from a bespoke construction project into a governed, repeatable, design-to-deploy workflow. A developer describes a use case in plain English through a chat interface. The platform's Design Agent selects the right ADK patterns, discovers reusable tools and MCP servers, generates the architecture diagrams, and presents a Design Contract for human approval. On approval, a deterministic pipeline scaffolds the agent code from a vetted template, provisions compliant infrastructure from signed Terraform modules, runs eval and security scans, and promotes the agent through four governance gates to production — where it runs with managed identity, inline Model Armor, continuous evaluation, and threat detection from day one.
+AgentForge is a **paved-road platform** that turns agent development from a bespoke construction project into a governed, repeatable, design-to-deploy workflow. A developer describes a use case in plain English through a chat interface. The platform's Design Agent selects the right ADK patterns, discovers reusable tools and MCP servers, generates the architecture diagrams, and presents a Design Contract for human approval. On approval, a deterministic pipeline scaffolds the agent code from a vetted template, provisions compliant infrastructure from signed Terraform modules, runs eval and security scans, and promotes the agent through two governance gates to production — where it runs with managed identity, inline Model Armor, continuous evaluation, and threat detection from day one.
 
 **The developer writes business logic. AgentForge writes everything else.**
 
-### The four governance gates — what makes "born compliant" real
+### The two governance gates — what makes "born compliant" real
 
-The phrase "born compliant" is a claim. The four-gate attestation chain is the **proof.** Every agent built through AgentForge passes through four mandatory governance checkpoints. Each gate produces a cryptographically signed attestation — a tamper-proof evidence artifact that proves the check occurred and what the result was. The attestations are chained: each one references the hash of the previous, so removing or altering any link in the chain is detectable and blocks the pipeline. This is the same principle as a certificate chain in TLS or a notarized chain of custody in legal proceedings — but applied to the agent lifecycle.
+The phrase "born compliant" is a claim. The two-gate attestation chain is the **proof.** Every agent built through AgentForge passes through two mandatory governance checkpoints. Each gate produces a cryptographically signed attestation — a tamper-proof evidence artifact that proves the check occurred and what the result was. The attestations are chained: each one references the hash of the previous, so removing or altering any link in the chain is detectable and blocks the pipeline. This is the same principle as a certificate chain in TLS or a notarized chain of custody in legal proceedings — but applied to the agent lifecycle.
 
 ```mermaid
 flowchart LR
     G1["🟧 DESIGN GATE<br/><br/>Human approves the<br/>architecture + patterns<br/>before any code is written"]
     G2["🟧 PLAN GATE<br/><br/>Policy-as-code validates<br/>infrastructure plan before<br/>any resource is provisioned"]
-    G3["🟧 EVAL GATE<br/><br/>Automated quality + safety<br/>thresholds are met before<br/>the agent is packaged"]
-    G4["🟧 PROMOTION GATE<br/><br/>Full attestation chain is<br/>verified before the agent<br/>reaches production"]
 
     G1 -->|"Design Attestation<br/>(signed contract)"| G2
-    G2 -->|"Plan Attestation<br/>(signed policy pass)"| G3
-    G3 -->|"Eval Attestation<br/>(signed quality report)"| G4
-    G4 -->|"Promotion Attestation<br/>(signed deploy auth)"| PROD["✅ PRODUCTION<br/><br/>Agent is live with<br/>continuous monitoring"]
+    G2 -->|"Plan Attestation<br/>(signed policy pass)"| SCAFFOLD["📦 SCAFFOLD + COMMIT<br/><br/>Code scaffolded from<br/>Design Contract, committed<br/>to company GitHub repo"]
+    SCAFFOLD -->|"Company CI/CD<br/>takes over"| CICD["🔄 COMPANY CI/CD<br/><br/>Non-Prod → Pre-Prod → Prod<br/>via existing Jenkins/Harness<br/>pipelines with company gates"]
 
     classDef gate fill:#78350f,stroke:#fbbf24,color:#fbbf24,stroke-width:2px;
-    classDef prod fill:#14532d,stroke:#22c55e,color:#22c55e,stroke-width:2px;
-    class G1,G2,G3,G4 gate;
-    class PROD prod;
+    classDef scaffold fill:#14532d,stroke:#22c55e,color:#22c55e,stroke-width:2px;
+    classDef cicd fill:#1e3a5f,stroke:#60a5fa,color:#60a5fa,stroke-width:2px;
+    class G1,G2 gate;
+    class SCAFFOLD scaffold;
+    class CICD cicd;
 ```
 
 **What each gate does and why it exists:**
@@ -44,17 +43,21 @@ flowchart LR
 |---|---|---|---|---|---|
 | **Design Gate** | After the Design Agent produces the architecture, before any code or infrastructure is generated | Is the pattern selection sound? Are the right tools and MCP servers selected? Does the architecture match the use case? Is the threat model addressed? | Developer (human) | Signed Design Contract + component diagram + sequence diagram | Teams ship agents with untested architectures; wrong pattern selection discovered in production |
 | **Plan Gate** | After Terraform generates the infrastructure plan, before any cloud resources are provisioned | Does the plan comply with OPA policies? Are CMEK, VPC-SC, region pinning enforced? Is the cost diff acceptable? Is the blast radius bounded? | Platform engineer (human) | Signed Plan Attestation referencing the Design Attestation hash | Non-compliant infrastructure reaches production; CMEK missing, VPC-SC perimeter open, cost overruns |
-| **Eval Gate** | After the agent code is scaffolded and tests are run, before the agent is packaged | Do quality metrics (trajectory accuracy, autorater scores) meet thresholds? Does the prompt-injection corpus pass? Do synthetic personas produce safe responses? | Automated (threshold-based) | Signed Eval Attestation referencing the Plan Attestation hash | Agents with hallucination problems, prompt-injection vulnerabilities, or quality regressions reach production |
-| **Promotion Gate** | After staging deploy and smoke tests pass, before production traffic is routed | Is the complete attestation chain (Design → Plan → Eval) intact and verified? Did staging smoke tests pass? Has the change record been opened? | Production approver (human) | Signed Promotion Attestation completing the chain | Agents without design review, untested infrastructure, or failing evals reach production because someone manually pushed a deploy |
 
-**Why the chain matters — not just the individual gates:**
+**What happens after the Plan Gate:**
 
-Individual gates are not new — every CI/CD pipeline has approval steps. What's new is the **chain.** Each attestation includes the cryptographic hash of the previous attestation, creating a tamper-proof sequence. If an attacker or a well-meaning engineer bypasses the Eval Gate and tries to promote directly, the Promotion Gate will detect that the Eval Attestation is missing from the chain and **block the deploy automatically.** No human has to catch the skip — the math catches it.
+After the Plan Gate passes, AgentForge provisions the infrastructure and scaffolds the agent code from the signed Design Contract. The scaffolded code — including the agent class hierarchy, MCP connections, A2A clients, skill directories, FunctionTool stubs, and callback placeholders — is committed to the **company's GitHub repository** via the GitHub MCP Server, organized per company best practices.
+
+**From this point, AgentForge's job is done.** The company's existing CI/CD pipelines — which already have their own quality gates, environment promotion (Non-Prod → Pre-Prod → Prod), eval frameworks, and approval workflows — take over. AgentForge does not impose its own eval or promotion gates because the company already has them.
+
+**Why the chain still matters — even with only two gates:**
+
+The two-gate chain is where the novel compliance value lives. The Design Attestation proves that a human reviewed the architecture before any code was generated. The Plan Attestation proves that the infrastructure was policy-checked before any resources were provisioned. Together, they guarantee that every scaffolded agent was *designed with evidence* and *provisioned with compliance* — before a single line of business logic is written. The company's CI/CD adds the remaining quality assurance (testing, eval, staging, canary, production promotion) using their established process.
 
 This means:
-- **For the CISO:** Every agent in production can be traced back to a signed design review, a signed infrastructure policy pass, a signed quality evaluation, and a signed production authorization. The audit trail is not a spreadsheet someone filled in — it's a cryptographic chain that cannot be forged.
-- **For the CAO/CIO:** The compliance posture of the 50th agent deployed through AgentForge is identical to the 1st — because the chain is enforced by the platform, not by human discipline. You don't need to worry about standards decaying as the team scales.
-- **For the auditor:** The chain answers the question *"prove this agent was reviewed, tested, and authorized"* with a single API call to Binary Authorization, not a week of evidence gathering across Confluence, JIRA, and email threads.
+- **For the CISO:** Every agent codebase in the company's GitHub repos can be traced back to a signed design review and a signed infrastructure policy pass. The compliance trail starts before code exists.
+- **For the CAO/CIO:** AgentForge handles the part that's hardest to standardize (architecture + infrastructure). The company's CI/CD handles the part they've already standardized (build + test + deploy).
+- **For the auditor:** The attestation chain answers *"prove this agent was designed and provisioned correctly"* — the company's CI/CD pipeline answers *"prove it was tested and deployed correctly."* Two complementary evidence chains.
 
 ### The ROI
 
@@ -69,7 +72,7 @@ This means:
 | **Observability setup** | Custom per agent | Auto-wired — Open Telemetry, Cloud Trace, Splunk, Dynatrace | Zero instrumentation code per agent |
 | **Rollback** | Redeploy previous version | Agent Gateway weight shift (seconds) | Sub-minute rollback |
 | **Platform team size** | N/A (each team self-serves poorly) | ~5 engineers maintain the platform for the entire enterprise | Centralized investment, distributed benefit |
-| **Cost of compliance failure** | Unbounded (each agent is its own risk) | Bounded — no agent escapes the four governance gates | Portfolio-level compliance, not agent-level |
+| **Cost of compliance failure** | Unbounded (each agent is its own risk) | Bounded — no agent escapes the two governance gates | Portfolio-level compliance, not agent-level |
 
 **The one-line pitch for the board:** AgentForge lets the enterprise ship 10x more agents in half the time with a compliance posture that improves with every deployment, because compliance is structural — not a checkbox.
 
@@ -94,7 +97,7 @@ Here is the gap:
 | Architecture diagrams for human review | ❌ Not provided | ✅ Generated from the pattern composition, signed as evidence |
 | Compliance-hardened infrastructure | ❌ Templates use Google's default Terraform | ✅ Company TF modules with CMEK, VPC-SC, billing labels, region pinning baked in |
 | CI/CD pipelines aligned to company standards | ❌ Cloud Build configs (Google's standard) | ✅ Pre-staged Jenkins + Harness templates discovered via MCP |
-| Four-gate attestation chain | ❌ Not provided | ✅ Design → Plan → Eval → Promotion, cryptographically chained |
+| Four-gate attestation chain | ❌ Not provided | ✅ Design → Plan, cryptographically chained |
 | Skill discovery by developer intent | ❌ Developer manually selects skills | ✅ Semantic search matches use-case intent to skills, assigns them to agent nodes |
 | Provenance verification at build time | ❌ Not provided | ✅ Every skill, module, and template verified against signed Design Contract |
 
@@ -234,7 +237,7 @@ Harness owns environment promotion. Nothing reaches production unless the full a
 
 | Component | Category | Description |
 |---|---|---|
-| Harness *(via MCP Server)* | Company | Continuous delivery platform running a **pre-staged company pipeline template** (`agent-deploy-canary-v4`). The template contains the Promotion Gate logic, canary watch, rollback triggers, and environment progression. The Design Agent discovers the template and configures it with parameters from the Design Contract via the Harness MCP Server. No Harness YAML is generated. |
+| Harness *(via MCP Server)* | Company | Continuous delivery platform. In AgentForge, the Harness MCP Server is used at **design time** (Layer 2) to discover pipeline templates and read their parameter schemas. The actual deployment pipeline execution (eval, staging, canary, production promotion) happens **outside AgentForge scope** via the company's existing Harness pipelines in Layer 4. |
 | Harness Feature Flags | Company | Toggle prompt packs, tool allowlists, and Model Armor templates in production without redeploying the agent. |
 | Agent Gateway *(Private Preview)* | GCP | Google-managed gateway operating in two modes. **Ingress (Client-to-Agent):** controls which clients can access agents. **Egress (Agent-to-Anywhere):** secures and governs ALL outbound agent traffic — to tools/MCP servers, to models (Gemini, Model Garden, third-party), to other agents (A2A), and to external APIs. Enforces IAM policies, Model Armor, and identity-aware routing at the egress point. **Note:** SCC Agent Engine Threat Detection is not available when Agent Gateway is enabled — they are mutually exclusive in the current preview. |
 | Agent Identity (SPIFFE) *(GA)* | GCP | Issues SPIFFE-based X.509 certificates with 24-hour rotation and DPoP-bound tokens. Each environment (staging, prod) gets a separate identity — no identity promotion. |
@@ -280,7 +283,7 @@ The agent runs inside a VPC-SC perimeter with continuous evaluation, threat dete
 | Access Context Manager *(GA)* | GCP | Context-aware access policies. Defines the VPC-SC perimeter rules and the conditions under which agents can access sensitive resources. |
 | Cloud Audit Logs *(GA)* | GCP | Admin activity, data access, and system event logs. The only component that appears in every layer — it is the audit backbone. |
 | Cloud Billing + Labels *(GA)* | GCP | Per-agent cost attribution via billing labels. Each agent deployed by the platform inherits labels from its Design Contract (agent class, team, cost center). |
-| Compliance Evidence | Company | The signed attestation chain — Design Doc → Plan Attestation → Eval Report → Promotion Attestation → Signed Agent Card → Live SLO + Audit Log. This chain is what "born compliant" means to an auditor. |
+| Compliance Evidence | Company | The signed attestation chain — Design Doc → Plan Attestation → GitHub Commit → Company CI/CD → Live SLO + Audit Log. AgentForge produces the first three links; the company's CI/CD produces the rest. This chain is what "born compliant" means to an auditor. |
 | SPIFFE / SPIRE *(GA)* | Protocol | The workload identity standard underpinning Agent Identity. SPIFFE IDs are the only principal type for agent IAM grants — no service account keys. |
 
 ---
@@ -690,7 +693,7 @@ sequenceDiagram
 | **LLM involved?** | Yes — reasoning, pattern selection, tool discovery, diagram generation | No — deterministic parameterization from signed contract |
 | **Inputs** | Developer's use-case prompt + pattern catalog + registries + GitHub MCP | Signed Design Contract JSON (all choices already made) |
 | **Outputs** | Signed Design Contract + component diagram + sequence diagram | Scaffolded ADK agent package + eval results |
-| **Who approves the output?** | Developer at Design Gate (reviews architecture via diagrams) | Automated eval thresholds at Eval Gate (no human reviews code) |
+| **Who approves the output?** | Developer at Design Gate (reviews architecture via diagrams) | No approval needed — scaffold is committed to GitHub; company CI/CD handles quality gates |
 | **Why this boundary exists** | If Design Agent invoked agents-cli directly, the human approval gate would come *after* code generation — forcing the developer to review generated code instead of reviewing a design. That's a worse developer experience and a weaker compliance posture. |
 
 **Design Contract JSON example** (the artifact handed from Layer 2 to Layer 3):
@@ -917,7 +920,6 @@ sequenceDiagram
 
     box rgba(34,197,94,0.15) Company-Owned
     participant JNK as Jenkins<br/>(pre-staged template)
-    participant ESC as Eval Set + Corpus
     end
 
     box rgba(66,133,244,0.15) GCP Managed
@@ -927,9 +929,6 @@ sequenceDiagram
     participant CLI as agents-cli
     participant ADK as ADK Framework
     participant GAR as Agent Garden Templates
-    participant EVAL as Vertex AI Gen AI Eval
-    participant SIM as Agent Simulation
-    participant ARG as Artifact Registry
     participant BAUTH as Binary Authorization
     participant CAL as Cloud Audit Logs
     end
@@ -943,6 +942,7 @@ sequenceDiagram
     participant SIG as Cosign / Sigstore
     participant GSR as Google Skills Repo<br/>(github.com/google/skills)
     participant CSR as Company Skills Repo<br/>(github.com/company/skills)
+    participant GH as GitHub MCP Server<br/>(company repo)
     end
 
     Note over JNK: ◀ from Layer 2: contract_uri arrives via webhook
@@ -993,15 +993,11 @@ sequenceDiagram
         CLI->>CLI: wire ADK SkillToolset with<br/>load_skill_resource tool for each<br/>bundled skill (enables L3 on-demand<br/>loading at runtime)
         CLI->>ADK: build agent package<br/>(all params from signed contract —<br/>zero LLM choices)
         ADK-->>CLI: built agent package
-        CLI->>EVAL: agents-cli eval run<br/>--eval-set {eval_set_id}<br/>--corpus {injection_corpus_id}
-        ESC-->>EVAL: golden + injection corpus
-        EVAL-->>CLI: trajectory metrics + autorater scores
-        CLI->>SIM: synthetic persona test
-        SIM-->>CLI: simulation report
-        Note over CLI: 🟧 EVAL GATE — thresholds checked
-        CLI->>SIG: sign Eval Report
-        SIG-->>CLI: eval_attestation
-        CLI->>CAL: EVAL_GATE_PASSED
+
+        Note over CLI,GH: COMMIT TO COMPANY GITHUB REPO
+
+        CLI->>GH: commit scaffolded code to<br/>company GitHub repo via<br/>GitHub MCP Server<br/>(organized per company standards:<br/>repo structure, branch naming,<br/>PR with Design Contract link)
+        GH-->>CLI: commit SHA + PR URL
     end
 
     Note over JNK: CONVERGENCE — both tracks complete
@@ -1017,24 +1013,22 @@ sequenceDiagram
     JNK->>SIG: sign final bundle attestation
     SIG-->>JNK: final_attestation
 
-    JNK->>ARG: push signed bundle
-    ARG-->>JNK: bundle_uri
-    JNK->>BAUTH: register attestation chain<br/>(Design + Plan + Eval + Final)
+    JNK->>BAUTH: register attestation chain<br/>(Design + Plan)
     BAUTH-->>JNK: chain locked
 
-    JNK->>CAL: SIGN_PASSED — full chain recorded
-    JNK->>JNK: trigger Harness webhook<br/>{bundle_uri, infra_contract,<br/>attestation_chain_id}
+    JNK->>CAL: SCAFFOLD_COMPLETE —<br/>code committed to GitHub,<br/>infra provisioned,<br/>attestation chain recorded
 
-    Note right of JNK: ▶ Handoff to Layer 4:<br/>bundle + infra contract + chain
+    Note right of JNK: ▶ Handoff to Company CI/CD:<br/>scaffolded code in GitHub repo<br/>+ provisioned infra + attestation chain<br/><br/>Company's existing Jenkins/Harness<br/>pipelines handle eval, staging,<br/>canary, and production promotion<br/>through Non-Prod → Pre-Prod → Prod
 ```
 
 **Engineering notes:**
 
-- The two tracks share the Design Contract but produce independent artifacts. Convergence requires both to have signed attestations. If one fails, the other is discarded — there is no partial promotion.
-- Track B builds the agent code against **stub references** to the infra contract; at convergence, stubs are replaced with the real IDs Track A emitted. The bundle is *re-signed* after substitution.
+- The two tracks share the Design Contract but produce independent artifacts. If one fails, the other is discarded.
+- Track B builds the agent code against **stub references** to the infra contract; at convergence, stubs are replaced with the real IDs Track A emitted.
 - **`agents-cli` is a deterministic consumer of the Design Contract — see the field-by-field consumption table in the Layer 2 engineering notes.** It reads `garden_template_id` to fetch the scaffold, `adk_agent_tree` to generate the class hierarchy, `tool_bindings[]` to wire MCP servers and function tools per agent node, `mcp_server_configs[]` to generate connection setup, `skill_references[]` to pin versions with signature hashes, and `infra_modules[]` to generate the Terraform references Track A consumes. If any field is missing or malformed, agents-cli fails with a schema validation error — it never guesses.
-- **There is no LLM in Track B.** The LLM did its work in Layer 2. From Layer 3 onward, the pipeline is deterministic. This is the fundamental architectural boundary: design is LLM-assisted (Layer 2), generation is LLM-free (Layer 3).
-- Binary Authorization stores the *chain*, not individual attestations. Layer 4 verifies the entire chain in one call.
+- **There is no LLM in Track B.** The LLM did its work in Layer 2. From Layer 3 onward, the pipeline is deterministic.
+- **After convergence, the scaffolded code is committed to the company's GitHub repo via the GitHub MCP Server.** The commit includes the agent package, skill directories, Terraform references, callback stubs, and a reference to the signed Design Contract. The company's existing CI/CD pipelines — which already have their own eval frameworks, quality gates, staging environments, canary deployment, and production promotion workflows — take over from this point. AgentForge does not impose eval or promotion gates because the company already has them.
+- Binary Authorization stores the attestation chain (Design + Plan) for audit purposes. The company's CI/CD can verify this chain as a prerequisite before promoting the agent code.
 - Plan Gate human approval is the *same* gate the existing Jenkins pipeline uses — `terraform plan` review by a platform engineer with access to cost diff and blast radius. We did not invent a new approval flow.
 
 ### What the platform scaffolds vs what engineers must implement
@@ -1083,105 +1077,28 @@ The scaffold gives you a *runnable but incomplete* agent. You can deploy it to s
 
 ---
 
-## Layer 4 — DELIVERY
+## Layer 4 — COMPANY CI/CD (outside AgentForge scope)
 
-**Outcome:** A signed bundle becomes a running agent in production with canary routing, bound to a fresh production SPIFFE identity and CMEK-encrypted secrets.
+**AgentForge's scope ends at Layer 3.** After the scaffolded code is committed to the company's GitHub repo and the infrastructure is provisioned, the company's existing CI/CD pipelines take over for eval, staging, canary deployment, and production promotion.
 
-**Enters from Layer 3:** `bundle_uri` + `infra_contract` + attestation chain.
-**Exits to Layer 5:** Live agent on Agent Runtime (prod) with routing in Agent Gateway, identity issued by Agent Identity, and secrets bound via Secret Manager.
+**What AgentForge hands off:**
+- Scaffolded agent code in the company's GitHub repo (committed via GitHub MCP Server)
+- Provisioned infrastructure (Agent Runtime, Agent Identity, Agent Gateway route, PSC-I, KMS, Model Armor)
+- Signed attestation chain (Design Attestation → Plan Attestation) in Binary Authorization
+- Design Contract JSON (for reference and audit trail)
+- Component + sequence diagrams (for documentation)
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Approver as 👤 Production Approver
+**What the company's CI/CD handles (using their existing gates):**
+- Code review and merge (company PR workflow)
+- Build and package the agent (using the scaffolded code as the starting point)
+- Run eval sets and prompt-injection corpus tests
+- Deploy to Non-Prod → Pre-Prod → Prod (company's existing environment promotion)
+- Canary routing and rollback (via Agent Gateway or Apigee traffic-split)
+- Agent registration in Agent Registry with skill metadata (post-deploy hook)
+- Production monitoring and SLO enforcement
 
-    box rgba(34,197,94,0.15) Company-Owned
-    participant HRN as Harness<br/>(pre-staged template)
-    participant HFF as Harness Feature Flags
-    participant SNW as ServiceNow CMDB
-    end
-
-    box rgba(66,133,244,0.15) GCP Managed
-    participant ARG as Artifact Registry
-    participant BAUTH as Binary Authorization
-    participant AID as Agent Identity (SPIFFE)
-    participant SM as Secret Manager
-    participant KMS as Cloud KMS (CMEK)
-    participant ARS as Agent Runtime<br/>(staging)
-    participant ARP as Agent Runtime<br/>(prod)
-    participant AGW as Agent Gateway
-    participant REG as Agent Registry
-    participant CAL as Cloud Audit Logs
-    end
-
-    Note over HRN: ◀ from Layer 3: bundle_uri + infra_contract via webhook
-
-    HRN->>ARG: pull signed bundle
-    ARG-->>HRN: bundle artifact
-
-    HRN->>BAUTH: verify attestation chain<br/>(Design + Plan + Eval + Final)
-    BAUTH-->>HRN: chain valid
-
-    alt chain invalid
-        BAUTH-->>HRN: FAIL — missing or revoked
-        HRN->>CAL: PROMOTION_BLOCKED
-        Note over HRN: ⛔ deploy aborted — no GCP calls made
-    end
-
-    HRN->>SNW: open change record (RFC)
-    SNW-->>HRN: change_id
-
-    Note over HRN,ARS: --- STAGING DEPLOY ---
-
-    HRN->>AID: assign staging SPIFFE ID
-    AID-->>HRN: spiffe://agents/staging/<id>
-    HRN->>SM: bind tool secrets to staging SPIFFE ID
-    HRN->>KMS: bind CMEK key to runtime config
-    HRN->>ARS: deploy bundle with identity + key refs
-    ARS-->>HRN: staging endpoint
-
-    HRN->>AGW: register staging route (100% staging traffic)
-    HRN->>ARS: smoke test suite
-    ARS-->>HRN: smoke PASS
-
-    Note over HRN,Approver: 🟧 PROMOTION GATE<br/>attestation chain visible to approver
-    Approver->>HRN: APPROVE prod
-
-    Note over HRN,ARP: --- PROD DEPLOY (canary) ---
-
-    HRN->>AID: mint fresh prod SPIFFE ID<br/>(NOT a promotion of staging ID)
-    AID-->>HRN: spiffe://agents/prod/<id>
-    HRN->>SM: bind tool secrets to prod SPIFFE ID
-    HRN->>ARP: deploy bundle to prod
-    HRN->>AGW: register prod route at 10% canary
-
-    loop canary watch (15-30 min)
-        HRN->>ARP: monitor SLOs<br/>(latency, error rate, eval score)
-    end
-
-    alt canary healthy
-        HRN->>AGW: shift to 100% prod
-        HRN->>REG: register agent in Agent Registry<br/>with skill metadata from L1 frontmatter<br/>(so other agents can discover this<br/>agent by its capabilities)
-        HRN->>HFF: enable production feature flags
-        HRN->>SNW: close change record
-        HRN->>CAL: PROMOTION_GATE_PASSED — agent live
-    else canary unhealthy
-        HRN->>AGW: shift back to previous version
-        HRN->>SNW: change record FAILED
-        HRN->>CAL: PROMOTION_ROLLBACK
-    end
-
-    Note right of HRN: ▶ Handoff to Layer 5:<br/>runtime_ref + prod SPIFFE ID<br/>+ gateway routing config
-```
-
-**Engineering notes:**
-
-- Harness *consumes* the attestation chain via Binary Auth before any GCP API is called. If any link is missing or revoked, the deploy aborts at step 5; nothing is provisioned, nothing is logged as a deploy attempt at Agent Runtime.
-- Staging and prod use **separate** SPIFFE IDs. There is no "promote the same identity" — Harness mints a fresh prod identity at promotion time. This is a deliberate isolation property.
-- Canary routing is via **Agent Gateway weighted routes**, not a load balancer. Agent Gateway is the only place where A2A-aware and DPoP-aware canary routing exists in the stack.
-- Rollback is "shift Agent Gateway weight back to previous version" — not a redeploy. The previous version stays in Artifact Registry until explicitly retired.
-- ServiceNow integration is for change-management audit trail — the change record links the JIRA ID (from Layer 1) to the deploy event.
-- **Agent + skill registration in Agent Registry happens after successful canary, not at deploy time.** The agent is registered with its skill metadata (extracted from L1 YAML frontmatter of each bundled skill) only when it reaches 100% production traffic. This means other agents cannot discover this agent until it's proven healthy in production. The skill metadata enables capability-based discovery — other agents querying Agent Registry for "fraud detection" or "BigQuery analytics" will find this agent by its skills, not just by name. On rollback, the previous agent version's registry entry is restored.
+**Why AgentForge doesn't own this layer:**
+The company already has Jenkins/Harness pipelines with approval gates, environment promotion, canary analysis, and rollback workflows that are audited and SOC 2-compliant. Duplicating these gates inside AgentForge would create two competing governance systems — one for agents and one for everything else. Instead, AgentForge provides the *design and scaffold* that the company's CI/CD consumes, just like any other codebase.
 
 ---
 
@@ -1341,8 +1258,8 @@ If you read the five diagrams in order, the artifact passed between them is alwa
 
 1. **Layer 1** produces a `session_id` — an authentication artifact bound to the developer and a JIRA ticket.
 2. **Layer 2** produces a **cosign-signed Design Contract** — what to build, declared as typed JSON — accompanied by a generated component architecture diagram and sequence diagram that the developer approves at the Design Gate.
-3. **Layer 3** produces a **signed bundle plus an attestation chain** — the build evidence, registered in Binary Authorization.
-4. **Layer 4** produces a **runtime reference plus a fresh prod SPIFFE identity** — the deploy evidence, recorded in ServiceNow and Cloud Audit Logs.
+3. **Layer 3** provisions infrastructure (Track A, Plan Gate) and scaffolds agent code (Track B). The scaffolded code is **committed to the company's GitHub repo** via the GitHub MCP Server. The attestation chain (Design + Plan) is registered in Binary Authorization.
+4. **Layer 4** is handled by the **company's existing CI/CD** — eval, staging, canary, and production promotion through Non-Prod → Pre-Prod → Prod. AgentForge's scope ends at Layer 3.
 5. **Layer 5** produces a **continuous evidence stream** — telemetry, eval, threat, and cost — that feeds back into Layer 2 (regenerate) or Layer 4 (rollback).
 
 This is the literal definition of "born compliant": every interaction in every layer either consumes an attestation, produces an attestation, or appends to the audit chain. **There is no path through the system that escapes signing.**
@@ -1633,13 +1550,11 @@ This table traces the complete build from developer prompt to production deploym
 | 12 | L3-B | agents-cli | Generates FunctionTool stubs (severity_classifier, coverage_calculator, notification_sender) — **signatures generated, bodies empty** | `tool_bindings[]` (type=function_tool) | `app/tools/*.py` (3 files, bodies = `raise NotImplementedError`) |
 | 13 | L3-B | agents-cli → `gh skill install` | Installs 4 skills at pinned versions from GitHub, verifies provenance SHA against Design Contract — **build fails on mismatch** | `skill_references[]` | `skills/bigquery/`, `skills/fraud-detection/`, etc. (4 directories with SKILL.md + references/) |
 | 14 | L3-B | agents-cli | Wires ADK `SkillToolset` with `load_skill_resource` for progressive L1/L2/L3 loading | Bundled skill directories | `SkillToolset` in root agent's tools list |
-| 15 | L3-B | agents-cli | Builds agent package (code + skills + tool declarations + callbacks) | All generated files | `dist/fnol-agent-1.0.0.tar.gz` |
-| 16 | L3-B | agents-cli → Vertex AI Gen AI Eval | Runs eval set + prompt-injection corpus, checks thresholds | `eval_set_id` + `injection_corpus_id` | Eval metrics + **Eval Attestation** |
-| 17 | L3-B | Agent Simulation | Generates synthetic FNOL personas, runs multi-turn conversations against agent | Agent package | Simulation report (persona diversity) |
-| 18 | L3 | Convergence | Infra IDs from Track A injected into Track B config; bundle re-signed; both attestations registered in Binary Authorization | Plan Attestation + Eval Attestation | Signed bundle in Artifact Registry |
-| 19 | L4 | Harness (pre-staged template) | Pull bundle → verify attestation chain → deploy staging → smoke test → **PROMOTION GATE** → canary (10% × 30min) → 100% prod | `pipeline_configs.harness` + attestation chain | Production agent + **Promotion Attestation** |
-| 20 | L4 | Agent Runtime | Auto-registers agent in Agent Registry with skill metadata from L1 frontmatter | L1 frontmatter from bundled skills | Agent discoverable by other agents via skills |
-| 21 | L5 | Agent Runtime | Agent receives policyholder request → activates skills (L2) → reasons → loads L3 references on-demand → calls tools via Agent Gateway egress | Live request | Claim filed, enriched, summarized, services booked |
+| 15 | L3-B | agents-cli → ADK SDK | Builds agent package (code + skills + tool declarations + callbacks) | All generated files | `dist/fnol-agent-1.0.0.tar.gz` |
+| 16 | L3-B | agents-cli → GitHub MCP Server | Commits scaffolded code to company GitHub repo — organized per company standards (repo structure, branch naming, PR with Design Contract link) | Built agent package | Commit SHA + PR URL |
+| 17 | L3 | Convergence | Infra IDs from Track A linked to Track B code; attestation chain (Design + Plan) registered in Binary Authorization | Plan Attestation + scaffold commit | Signed attestation chain in Binary Auth |
+| 18 | L4+ | Company CI/CD | **AgentForge's job is done.** Company's existing Jenkins/Harness pipelines take over: eval, staging, canary, production promotion through Non-Prod → Pre-Prod → Prod | Scaffolded code in GitHub + provisioned infra + attestation chain | Production agent |
+| 19 | L5 | Agent Runtime | Agent receives policyholder request → activates skills (L2) → reasons → loads L3 references on-demand → calls tools via Agent Gateway egress | Live request | Claim filed, enriched, summarized, services booked |
 
 **What the engineer writes after receiving this scaffold:** system prompts (5 agents), FunctionTool bodies (3 tools), `before_tool_callback` validation, eval golden dataset (200+ conversations), domain injection corpus, Memory Bank schema, human escalation thresholds, state regulation guardrails, A2A Agent Card content.
 
@@ -1653,7 +1568,7 @@ For this use case, here is the concrete split:
 - A2A client connections to Body Shop Network, Rental Car, and Police Report agents — with signed Agent Card verification
 - Skill bindings for Policy Verification, Fraud Detection, and SLA Tracker — pinned versions with signature hashes
 - Agent Identity (SPIFFE), Agent Gateway route, Model Armor template binding, CMEK, VPC-SC membership, Secret Manager entries
-- Jenkinsfile (Plan Gate) + Harness YAML (Promotion Gate) from company shared-library templates
+- Jenkinsfile (Plan Gate) from company shared-library template + Harness pipeline config parameters for company CI/CD to consume
 - Open Telemetry instrumentation, Cloud Trace spans, structured logging
 - Eval harness pointing to the FNOL eval set and injection corpus
 - Component diagram and sequence diagram (the ones above)
@@ -1792,7 +1707,7 @@ AgentForge comprises **71 distinct capabilities** across GCP managed services, c
 | **Capabilities unchanged (already GA/company/OSS)** | **61** (86% of total) |
 | **Total engineering effort for GA-only** | **14–20 weeks** of platform team work |
 | **Largest single effort** | Agent Gateway → Apigee (3–4 weeks + 1 week CAA) |
-| **Attestation chain impact** | **Zero** — all four gates fire at the same points |
+| **Attestation chain impact** | **Zero** — all two gates fire at the same points |
 | **Design Contract schema impact** | **Zero** — same fields, same JSON structure |
 | **Scaffold vs engineer split impact** | **Zero** — same ~70/30 split |
 | **Skill lifecycle impact** | **Zero** — same semantic discovery, same `gh skill install`, same progressive loading |
@@ -1860,13 +1775,13 @@ These are known techniques applied to a new domain and would be rejected as obvi
 |---|---|---|---|
 | High | Medium-high | Low (search algorithm) | **Strong** |
 
-### Claim 3 — Multi-Gate Attestation Chain for Agent Lifecycle Compliance
+### Claim 3 — Two-Gate Attestation Chain for Agent Design and Infrastructure Compliance
 
-**Problem solved:** Existing CI/CD approval gates produce pass/fail flags, not durable cryptographically verifiable evidence. An auditor cannot prove, from the deployed artifact alone, that all reviews occurred and were not tampered with.
+**Problem solved:** Existing CI/CD approval gates produce pass/fail flags, not durable cryptographically verifiable evidence. An auditor cannot prove, from the codebase alone, that design review and infrastructure policy evaluation occurred and were not tampered with.
 
-**Novel method:** A four-gate attestation chain where each gate produces a cryptographically signed attestation referencing the hash of the previous attestation, creating a tamper-proof sequence registered in a binary authorization system. Deployment is conditional on verification of the complete chain.
+**Novel method:** A two-gate attestation chain where the Design Gate produces a signed design attestation (proving the architecture was human-reviewed before code was generated) and the Plan Gate produces a signed plan attestation (proving the infrastructure was policy-checked before resources were provisioned). The plan attestation references the hash of the design attestation, creating a tamper-proof sequence. The scaffolded code is committed to the company's GitHub repo only after both attestations are valid. The company's existing CI/CD consumes this chain as a prerequisite before promoting the agent code through environments.
 
-**Draft claim:** A system for compliance-verified deployment of an AI agent, comprising: (a) a design gate generating a signed design attestation; (b) a plan gate generating a signed plan attestation referencing the design attestation hash; (c) an evaluation gate generating a signed evaluation attestation referencing the plan attestation hash; (d) a promotion gate verifying the complete chain before deployment; and (e) a deployment module that deploys only if the chain is valid.
+**Draft claim:** A system for compliance-verified scaffolding of an AI agent, comprising: (a) a design gate generating a signed design attestation; (b) a plan gate generating a signed plan attestation referencing the design attestation hash; (c) a code scaffolding step that commits generated code to a repository only if both attestations are valid; and (d) registration of the attestation chain in a binary authorization system for downstream CI/CD verification.
 
 | Novelty | Non-obviousness | Alice risk | **Strength** |
 |---|---|---|---|
