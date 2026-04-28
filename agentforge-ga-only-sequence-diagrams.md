@@ -1,6 +1,8 @@
-# AgentForge — Born Compliant. Built to Scale.
+# AgentForge GA — Born Compliant. Built to Scale.
 
-*An enterprise agent development platform built on Google's Gemini Enterprise Agent Platform*
+*GA-Only Variant — All services SLA-backed, zero preview dependencies*
+
+*Built on Google's Gemini Enterprise Agent Platform*
 
 ---
 
@@ -67,7 +69,7 @@ This means:
 | **Compliance audit prep** | Weeks of evidence gathering | Automatic — signed attestation chain from intake to runtime | Hours, not weeks |
 | **Security review** | Per-agent review by security team | Structural — every agent inherits identity, gateway, Model Armor, VPC-SC, CMEK | Review the platform once, trust every agent |
 | **Observability setup** | Custom per agent | Auto-wired — Open Telemetry, Cloud Trace, Splunk, Dynatrace | Zero instrumentation code per agent |
-| **Rollback** | Redeploy previous version | Agent Gateway weight shift (seconds) | Sub-minute rollback |
+| **Rollback** | Redeploy previous version | Apigee traffic-split weight shift (seconds) | Sub-minute rollback |
 | **Platform team size** | N/A (each team self-serves poorly) | ~5 engineers maintain the platform for the entire enterprise | Centralized investment, distributed benefit |
 | **Cost of compliance failure** | Unbounded (each agent is its own risk) | Bounded — no agent escapes the four governance gates | Portfolio-level compliance, not agent-level |
 
@@ -75,7 +77,7 @@ This means:
 
 ### Why not just use Google's tools directly?
 
-Google ships three Agent Garden templates through agents-cli — the starting points every developer uses to create an agent project:
+Google ships three Agent Garden templates — the starting points every developer uses to create an agent project. In the GA-only variant, AgentForge's **company scaffold script** (built on the ADK Python SDK, both GA) consumes these templates instead of agents-cli (which is Public Preview):
 
 | Template | What Google gives you | What it creates |
 |---|---|---|
@@ -98,13 +100,13 @@ Here is the gap:
 | Skill discovery by developer intent | ❌ Developer manually selects skills | ✅ Semantic search matches use-case intent to skills, assigns them to agent nodes |
 | Provenance verification at build time | ❌ Not provided | ✅ Every skill, module, and template verified against signed Design Contract |
 
-**Google's templates are the foundation AgentForge builds on — not a competitor.** agents-cli creates the project shell; AgentForge's Design Contract fills it with a complete, governed, multi-pattern agent. The template provides the skeleton; the Design Contract provides the organs.
+**Google's templates are the foundation AgentForge builds on — not a competitor.** The company scaffold script clones the template and parameterizes it from the Design Contract; AgentForge's Design Contract fills it with a complete, governed, multi-pattern agent. The template provides the skeleton; the Design Contract provides the organs.
 
 A developer using Google's templates alone spends **4–6 weeks** on architecture, tool discovery, infrastructure, and CI/CD before writing any business logic. A developer using AgentForge spends **2–3 days** — because the Design Agent, the Design Contract, and the deterministic pipeline handle everything except the business logic and domain guardrails that only the developer can write.
 
 ### Why now
 
-Google Cloud Next '26 (April 22, 2026) shipped the managed primitives this platform depends on: Agent Runtime *(GA)*, Agent Identity *(GA)*, Agent Gateway *(Private Preview)*, Agent Registry *(Public Preview)*, Model Armor *(GA)*, agents-cli *(Public Preview)*, and Agent Simulation *(Preview)*. Before Next '26, building a compliant agent platform required hand-rolling identity, gateway, and threat detection. After Next '26, those are managed services. AgentForge is the opinionated layer on top that makes them work together as a paved road.
+Google Cloud Next '26 (April 22, 2026) shipped the managed primitives this platform depends on: Agent Runtime *(GA)*, Agent Identity *(GA)*, Agent Gateway *(Private Preview, replaced by Apigee in GA-only)*, Agent Registry *(Public Preview)*, Model Armor *(GA)*, agents-cli *(Public Preview, replaced by scaffold script in GA-only)*, and Agent Simulation *(Preview)*. Before Next '26, building a compliant agent platform required hand-rolling identity, gateway, and threat detection. After Next '26, those are managed services. AgentForge is the opinionated layer on top that makes them work together as a paved road.
 
 ---
 
@@ -156,7 +158,7 @@ flowchart LR
 
 The diagram below shows every platform and product component required to enable the five layers. Icon shapes distinguish component ownership at a glance: **■ rounded square = GCP managed**, **⬡ hexagon = Company-owned**, **⯃ octagon = Third-party/OSS**, **● circle = Open protocol**.
 
-![AgentForge — Technology Stack](./born-compliant-platform-tech-stack.png)
+![AgentForge GA — Technology Stack](./agentforge-ga-only-tech-stack.png)
 
 ### Layer 1 — EXPERIENCE
 
@@ -181,11 +183,11 @@ The planning layer. A single Design Agent reasons about the use case, discovers 
 | Agent Sessions *(GA)* | GCP | Persists conversational state across the Design Gate — the developer can leave, come back, and resume without losing context. |
 | ADK + Gemini 2.x *(GA)* | GCP | The reasoning core. The Design Agent is an `LlmAgent` powered by Gemini 2.x Pro, using ADK's tool-use and sub-agent capabilities. Generates Mermaid component and sequence diagrams as part of its design output. |
 | Vertex AI Search *(GA)* (Pattern Catalog) | GCP | An unstructured data store with structured metadata containing all ADK design patterns, composition rules, and Architecture Center reference architectures. The Design Agent queries it with semantic/hybrid search to select applicable patterns. |
-| Agent Registry *(Public Preview)* | GCP | Google's managed catalog of agents, MCP servers, and tools. The Design Agent queries it to discover reusable components already published in the organization or by Google. |
-| Company Private Registry | Company | The company-internal catalog of vetted skills, connection recipes, A2A peer agents, and signed Agent Cards. Federated with Agent Registry, GitHub MCP Server, Jenkins MCP Server, and Harness MCP Server for a unified discovery view. |
+| Apigee API Hub *(GA)* | GCP | MCP server registry with MCP as a first-class API style. All MCP servers — Google-managed, company-built, and third-party — are registered here. Whitelist enforcement via API Products. Semantic search for tool discovery. Replaces Agent Registry (Public Preview) in the GA-only variant. |
+| Company Private Registry | Company | The company-internal catalog of vetted skills, connection recipes, A2A peer agents, and signed Agent Cards. Merged into Apigee API Hub as a category. Federated with GitHub MCP Server, Jenkins MCP Server, and Harness MCP Server for a unified discovery view. |
 | GitHub MCP Server | Third-party | Connects the Design Agent to the company's GitHub Enterprise repos — primarily the Company Terraform Module Library. Enables the LLM to browse module READMEs, input/output schemas, and version tags during design. *(GA)* |
-| Jenkins MCP Server | Company | Registered in Agent Registry. Enables the Design Agent to discover and configure pre-staged Jenkins pipeline templates — reading template parameter schemas and supplying values from the Design Contract. No Jenkinsfile is generated. |
-| Harness MCP Server | Company | Registered in Agent Registry. Enables the Design Agent to discover and configure pre-staged Harness deployment pipeline templates — reading template input schemas and supplying values from the Design Contract. No Harness YAML is generated. |
+| Jenkins MCP Server | Company | Registered in Apigee API Hub. Enables the Design Agent to discover and configure pre-staged Jenkins pipeline templates — reading template parameter schemas and supplying values from the Design Contract. No Jenkinsfile is generated. |
+| Harness MCP Server | Company | Registered in Apigee API Hub. Enables the Design Agent to discover and configure pre-staged Harness deployment pipeline templates — reading template input schemas and supplying values from the Design Contract. No Harness YAML is generated. |
 | Cloud Assist + ADC *(GA)* | GCP | Gemini Cloud Assist and Application Design Center. Given the selected pattern composition and tools, it recommends a compliant IaC architecture and maps to an Agent Garden template. |
 | Design Contract | Company | The typed JSON output of this layer — specifying the pattern composition, ADK agent tree, Garden template ID, tools/MCP bindings, model selection, identity scope, region, eval set ID, Model Armor template, residency tag, and URIs to the generated component architecture diagram and sequence diagram. Signed by Cosign before handoff to Layer 3. |
 
@@ -210,10 +212,10 @@ The factory floor. Two parallel tracks — infrastructure and code/eval — run 
 | Component | Category | Description |
 |---|---|---|
 | Agent Garden Templates *(GA)* | GCP | Vetted agent starter templates — the parameterized starting point that replaces free-form code generation. Selected by the Design Contract's `garden_template_id`. |
-| agents-cli *(Public Preview)* | GCP | Google's agent lifecycle CLI (Public Preview, launched at Next '26). Scaffolds from a Garden template, runs evals, deploys to Agent Runtime, and publishes to Gemini Enterprise. Invoked directly by Jenkins — not via Gemini CLI — because Layer 3 is deterministic. |
+| Company Scaffold Script *(GA stack)* | Company | A company-built Python script (~500–800 lines) using the **ADK Python SDK (GA)**. Reads the Design Contract, clones the Garden template from GitHub, parameterizes using ADK library APIs, installs skills via `gh skill install` (GitHub CLI, GA), verifies provenance, bundles skills into the agent package, and wires the ADK `SkillToolset`. Eval via **Vertex AI Gen AI Eval SDK (GA)**. Deploy via **Agent Runtime REST API (GA)**. Replaces agents-cli (Public Preview). |
 | ADK Framework *(GA)* | GCP | The Agent Development Kit — Python 1.31.x stable, 2.0 Beta (graph workflows), TypeScript 1.0 GA, Java and Go 1.0. The framework the generated agent code runs on. |
 | Vertex AI Gen AI Eval *(GA)* | GCP | Evaluation service providing trajectory metrics (`trajectory_in_order_match`, `trajectory_precision`, `trajectory_recall`), multi-turn autorater scoring, and structured output validation. |
-| Agent Simulation *(Preview)* | GCP | Synthetic persona testing — generates realistic user interactions to validate agent behavior before real users are exposed. |
+| Custom Test Harness *(GA stack)* | Company | Company-authored structured test scenarios (persona + intent + expected trajectory) run through the **Vertex AI Gen AI Eval (GA)** multi-turn autorater. Deterministic — same scenarios every run. Replaces Agent Simulation (Preview). |
 | Eval Set + Corpus | Company | Company-authored golden datasets, prompt-injection test corpora, and domain-specific eval assertions. Stored alongside agent code in the versioned repository. |
 
 **Convergence — Sign & Attest:**
@@ -236,7 +238,7 @@ Harness owns environment promotion. Nothing reaches production unless the full a
 |---|---|---|
 | Harness *(via MCP Server)* | Company | Continuous delivery platform running a **pre-staged company pipeline template** (`agent-deploy-canary-v4`). The template contains the Promotion Gate logic, canary watch, rollback triggers, and environment progression. The Design Agent discovers the template and configures it with parameters from the Design Contract via the Harness MCP Server. No Harness YAML is generated. |
 | Harness Feature Flags | Company | Toggle prompt packs, tool allowlists, and Model Armor templates in production without redeploying the agent. |
-| Agent Gateway *(Private Preview)* | GCP | Google-managed gateway operating in two modes. **Ingress (Client-to-Agent):** controls which clients can access agents. **Egress (Agent-to-Anywhere):** secures and governs ALL outbound agent traffic — to tools/MCP servers, to models (Gemini, Model Garden, third-party), to other agents (A2A), and to external APIs. Enforces IAM policies, Model Armor, and identity-aware routing at the egress point. **Note:** SCC Agent Engine Threat Detection is not available when Agent Gateway is enabled — they are mutually exclusive in the current preview. |
+| Apigee Runtime Gateway *(GA)* | GCP | Apigee serving as the unified gateway for all agent traffic. **Ingress:** OAuth 2.1/OIDC, mTLS, Model Armor integration. **Egress:** routes all outbound agent traffic (tools, models, A2A) through Apigee proxies with API Products for whitelist enforcement. Custom DPoP policies via Apigee policy engine replicate Agent Gateway's DPoP re-authentication. Custom A2A routing policies replicate Agent Gateway's protocol awareness. **No SCC mutual exclusivity constraint** — Splunk threat rules work alongside Apigee without limitation. |
 | Agent Identity (SPIFFE) *(GA)* | GCP | Issues SPIFFE-based X.509 certificates with 24-hour rotation and DPoP-bound tokens. Each environment (staging, prod) gets a separate identity — no identity promotion. |
 | Secret Manager *(GA)* | GCP | Native ADK integration for tool credentials. Secrets are bound to the agent's SPIFFE identity — no long-lived service account keys anywhere. |
 | Cloud KMS · CMEK *(GA)* | GCP | Customer-managed encryption keys for Sessions, Memory Bank, and any Discovery Engine data stores. Provisioned by Terraform in Layer 3 Track A. |
@@ -253,19 +255,19 @@ The agent runs inside a VPC-SC perimeter with continuous evaluation, threat dete
 | Agent Runtime *(GA)* | GCP | Production hosting for the deployed agent. Provides managed Sessions (conversational state), Memory Bank (long-term personalization), auto-scaling, and multi-region support. |
 | Memory Bank *(GA)* | GCP | Persistent agent memory for user context and personalization. Not Terraform-managed as of April 2026 — schema migrations are imperative scripts. |
 | Model Armor *(GA)* | GCP | Inline AI firewall. Screens every inbound prompt and outbound response for prompt injection, jailbreak attempts, DLP-sensitive content, malicious URLs, and tool poisoning. 2M-token free tier. |
-| Apigee AI Gateway *(GA, optional)* | GCP | **Optional** model management layer sitting **downstream of Agent Gateway egress**, not alongside it. When Agent Gateway routes model traffic outbound, it can optionally pass through Apigee AI Gateway for additional capabilities: semantic caching (~70% cost reduction for repeated patterns), per-agent/per-team token budgets, multi-provider model failover, and the `ApigeeLlm` ADK wrapper. If Agent Gateway is used without Apigee AI Gateway, model routing and Model Armor still work — you lose caching, token budgets, and multi-provider failover. |
-| Apigee Tool Gateway *(GA, optional)* | GCP | **Optional** API management layer for external tool endpoints that sit **downstream of Agent Gateway egress**. Agent Gateway handles the routing and security for all outbound tool calls; Apigee adds API management features (rate limiting, OAuth credential management, API keys, quota enforcement) for specific external APIs that need them. Not required for Google-managed MCP servers. |
+| Apigee AI Gateway *(GA, optional)* | GCP | **Optional** model management layer sitting **downstream of Apigee Runtime Gateway egress**, not alongside it. When Apigee Runtime Gateway routes model traffic outbound, it can optionally pass through Apigee AI Gateway for additional capabilities: semantic caching (~70% cost reduction for repeated patterns), per-agent/per-team token budgets, multi-provider model failover, and the `ApigeeLlm` ADK wrapper. If Apigee Runtime Gateway is used without Apigee AI Gateway, model routing and Model Armor still work — you lose caching, token budgets, and multi-provider failover. |
+| Apigee Tool Gateway *(GA, optional)* | GCP | **Optional** API management layer for external tool endpoints that sit **downstream of Apigee Runtime Gateway egress**. Apigee Runtime Gateway handles the routing and security for all outbound tool calls; Apigee adds API management features (rate limiting, OAuth credential management, API keys, quota enforcement) for specific external APIs that need them. Not required for Google-managed MCP servers. |
 | PSC-I + VPC-SC *(GA)* | GCP | Private Service Connect Interface for private ingress from the company VPC. VPC Service Controls perimeter wraps Agent Runtime, BigQuery, Cloud Storage, Secret Manager, Discovery Engine, and KMS. |
 | Cloud DLP *(GA)* | GCP | Data classification and de-identification. Integrated with Model Armor for content-level inspection beyond prompt screening. |
-| Vertex AI Online Eval *(Preview)* | GCP | Samples 1–5% of live traffic and runs autorater scoring for drift, hallucination, and quality regression. Sampling rate is declared in the Design Contract per agent class. |
+| Batch Eval Pipeline *(GA stack)* | GCP + Company | A **Cloud Function (GA)** that periodically samples logged conversations from **Cloud Logging (GA)**, sends them to the **Vertex AI Gen AI Eval SDK (GA)** for batch scoring, and publishes results as custom metrics in **Cloud Monitoring (GA)**. Batch interval: 5–15 minutes. Replaces Vertex AI Online Eval (Preview). |
 
 **Observability & Threat Detection:**
 
 | Component | Category | Description |
 |---|---|---|
 | Cloud Trace + Monitoring *(GA)* | GCP | Open Telemetry-native distributed tracing and metrics. Enabled automatically via `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true` at the Terraform layer. |
-| Cloud Logging *(GA)* | GCP | Structured and audit log collection. Feeds both SCC Agent Threat Detection and the Open Telemetry Collector for SIEM export. |
-| SCC Agent Threat Detection *(Preview)* | GCP | Security Command Center feature that ingests audit logs and traces to detect excessive-permission patterns, A2A/MCP anomalies, and suspicious tool-call sequences. Integrates with Wiz AI-APP findings. **⚠ Constraint: Mutually exclusive with Agent Gateway in the current preview** — when Agent Gateway is enabled for an agent, SCC Agent Engine Threat Detection is not available. The GA-only variant addresses this by using Splunk correlation rules as the threat detection mechanism. |
+| Cloud Logging *(GA)* | GCP | Structured and audit log collection. Feeds the Open Telemetry Collector for SIEM export and the Batch Eval Pipeline for quality monitoring. |
+| Splunk Threat Rules *(GA)* | Company | Custom **Splunk correlation rules** that ingest **Cloud Audit Logs (GA)** and **Cloud Trace (GA)** data via the **Open Telemetry Collector (GA)**. Pattern-based detection for excessive permissions, anomalous tool patterns, and A2A communication anomalies. **No gateway exclusivity constraint** — works alongside Apigee Runtime Gateway without limitation. When SCC Agent Threat Detection reaches GA and the mutual exclusivity constraint is resolved, it can be added alongside Splunk for defense-in-depth. |
 | Open Telemetry Collector *(GA)* | Third-party | The single egress point for all agent telemetry. Fans out to Splunk (SIEM) and Dynatrace (APM). Adding another destination means adding an OTel exporter — agent code is untouched. |
 | Splunk *(GA)* | Third-party | Company SIEM. Receives traces, logs, and SCC findings via the Open Telemetry Collector. Security and audit teams use this as their primary investigation surface. |
 | Dynatrace *(GA)* | Third-party | APM platform. Receives distributed traces for performance monitoring, root-cause analysis, and SLO tracking. SREs pivot here from Splunk alerts. |
@@ -309,7 +311,7 @@ sequenceDiagram
     end
 
     box rgba(66,133,244,0.15) GCP Managed
-    participant AGW as Agent Gateway
+    participant APG as Apigee Runtime Gateway
     participant AID as Agent Identity
     participant MA as Model Armor
     participant AR as Agent Runtime<br/>(Design Agent)
@@ -320,20 +322,20 @@ sequenceDiagram
     Dev->>ANG: describe use case in chat
     ANG->>SSO: validate session
     SSO-->>ANG: OIDC token
-    ANG->>AGW: POST /design-agent/sessions<br/>{prompt, OIDC token, jira_id}
+    ANG->>APG_L1: POST /design-agent/sessions<br/>{prompt, OIDC token, jira_id}
 
-    AGW->>AID: validate OIDC, mint DPoP-bound cert
-    AID-->>AGW: SPIFFE-bound short-lived cert<br/>(24h rotation)
+    APG_L1->>AID: validate OIDC, mint DPoP-bound cert
+    AID-->>APG_L1: SPIFFE-bound short-lived cert<br/>(24h rotation)
 
-    AGW->>MA: screen incoming prompt<br/>(prompt-injection, jailbreak)
-    MA-->>AGW: clean
+    APG_L1->>MA: screen incoming prompt<br/>(prompt-injection, jailbreak)
+    MA-->>APG_L1: clean
 
-    AGW->>AR: forward request with DPoP credentials
+    APG_L1->>AR: forward request with DPoP credentials
     AR->>AS: create_session(developer_id, jira_id)
     AS-->>AR: session_id
-    AR-->>AGW: session_id (streaming start)
-    AGW->>CAL: USER_INTAKE event<br/>(developer, session_id, jira_id)
-    AGW-->>ANG: session_id + initial ack
+    AR-->>APG_L1: session_id (streaming start)
+    APG_L1->>CAL: USER_INTAKE event<br/>(developer, session_id, jira_id)
+    APG_L1-->>ANG: session_id + initial ack
     ANG-->>Dev: chat opens with Design Agent
 
     Note right of CAL: ▶ Handoff to Layer 2:<br/>session_id + prompt arrive at Design Agent
@@ -347,7 +349,7 @@ sequenceDiagram
 - **This sequence is the build-time flow** — a developer using this platform to *create a new agent*. There is a separate run-time flow (an end user *consuming an agent the platform previously built*) that originates at the Gemini Enterprise App; that flow is covered in the Layer 5 request path. The two flows are not variants of each other — they have different originators, different targets, and different downstream layers:
   - **Build-time:** Angular Dev Chat → Design Agent (this platform's planner) → Layers 2 → 3 → 4 → produces a new published agent.
   - **Run-time:** Gemini Enterprise App → the published agent that was built earlier → Layer 5 only.
-  - They share **Agent Gateway, Agent Identity, and Model Armor** as inbound infrastructure (which is why those primitives appear in both Layer 1 and Layer 5 of the stack diagram), but everything downstream of those primitives is different.
+  - They share **Apigee Runtime Gateway, Agent Identity, and Model Armor** as inbound infrastructure (which is why those primitives appear in both Layer 1 and Layer 5 of the stack diagram), but everything downstream of those primitives is different.
 
 ---
 
@@ -498,10 +500,10 @@ sequenceDiagram
     participant EMB as Vertex AI Embeddings API<br/>(text-embedding-005)
     participant VAS as Vertex AI Search<br/>(Skill Data Store)
     participant DA as Design Agent<br/>(Layer 2)
-    participant CLI as agents-cli / scaffold script<br/>(Layer 3)
+    participant SCRIPT as Company Scaffold Script<br/>(Layer 3)
     participant ART as Artifact Registry<br/>(Layer 3)
     participant ARR as Agent Runtime<br/>(Layer 4/5)
-    participant REG as Agent Registry<br/>(Layer 4)
+    participant AHUB as Apigee API Hub<br/>(Layer 4)
     end
 
     Note over GSR,CSR: PHASE 0 — SKILL INGESTION (one-time + on update)
@@ -523,21 +525,21 @@ sequenceDiagram
 
     Note over CLI,ART: PHASE 2 — INSTALLATION & BUNDLING (Layer 3 - Build Time)
 
-    CLI->>CLI: read skill_references[] from<br/>signed Design Contract
+    SCRIPT->>SCRIPT: read skill_references[] from<br/>signed Design Contract
 
-    CLI->>GSR: gh skill install google/skills<br/>bigquery@v1.2.0
-    GSR-->>CLI: skill directory + provenance<br/>metadata in frontmatter
+    SCRIPT->>GSR: gh skill install google/skills<br/>bigquery@v1.2.0
+    GSR-->>SCRIPT: skill directory + provenance<br/>metadata in frontmatter
 
-    CLI->>CSR: gh skill install company/skills<br/>fraud-detection@v3.1.0
-    CSR-->>CLI: skill directory + provenance SHA
+    SCRIPT->>CSR: gh skill install company/skills<br/>fraud-detection@v3.1.0
+    CSR-->>SCRIPT: skill directory + provenance SHA
 
-    CLI->>CLI: verify provenance SHA matches<br/>Design Contract (tamper check)
+    SCRIPT->>SCRIPT: verify provenance SHA matches<br/>Design Contract (tamper check)
 
-    CLI->>CLI: bundle skills into agent package:<br/>agent-package/skills/bigquery/SKILL.md<br/>agent-package/skills/fraud-detection/SKILL.md<br/>+ all references/ subdirectories
+    SCRIPT->>SCRIPT: bundle skills into agent package:<br/>agent-package/skills/bigquery/SKILL.md<br/>agent-package/skills/fraud-detection/SKILL.md<br/>+ all references/ subdirectories
 
-    CLI->>CLI: wire ADK SkillToolset with<br/>load_skill_resource tool for each<br/>bundled skill
+    SCRIPT->>SCRIPT: wire ADK SkillToolset with<br/>load_skill_resource tool for each<br/>bundled skill
 
-    CLI->>ART: push signed agent package<br/>(code + skills + attestations)
+    SCRIPT->>ART: push signed agent package<br/>(code + skills + attestations)
 
     Note over ARR,REG: PHASE 3 — REGISTRATION (Layer 4 - Deploy Time)
 
@@ -586,7 +588,7 @@ sequenceDiagram
     participant AS as Agent Sessions
     participant MB as Memory Bank
     participant VAS as Vertex AI Search<br/>(Patterns + Skills)
-    participant REG as Agent Registry
+    participant AHUB as Apigee API Hub
     participant CA as Gemini Cloud Assist + ADC
     participant CS as Cloud Storage
     participant CAL as Cloud Audit Logs
@@ -629,8 +631,8 @@ sequenceDiagram
     AR->>AR: map skills to agent nodes:<br/>e.g., order_processor → bigquery skill,<br/>fraud_detector → fraud-detection skill,<br/>approval_gate → regulatory-compliance skill
 
     par Federated discovery — resolve complete wiring spec
-        AR->>REG: query MCP servers + A2A agents<br/>by capabilities required by each<br/>pattern node in agent tree
-        REG-->>AR: resolved MCP endpoints +<br/>tool schemas + auth methods<br/>(e.g., BigQuery MCP server)
+        AR->>AHUB: query MCP servers + A2A agents<br/>by capabilities required by each<br/>pattern node in agent tree
+        AHUB-->>AR: resolved MCP endpoints +<br/>tool schemas + auth methods<br/>(e.g., BigQuery MCP server)
     and
         AR->>PR: query company skills + recipes<br/>that extend or constrain the<br/>discovered MCP servers
         PR-->>AR: skill versions + signatures<br/>(e.g., bq-connector-restricted v2.3.1<br/>with dataset allowlists)
@@ -682,16 +684,16 @@ sequenceDiagram
 
 **Engineering notes:**
 
-**Separation of concerns: Design Agent (Layer 2) vs agents-cli (Layer 3):**
+**Separation of concerns: Design Agent (Layer 2) vs Company Scaffold Script (Layer 3):**
 
-| | Design Agent (Layer 2) | agents-cli (Layer 3) |
+| | Design Agent (Layer 2) | Company Scaffold Script (Layer 3) |
 |---|---|---|
 | **Role** | Designs the agentic solution | Generates code for it |
 | **LLM involved?** | Yes — reasoning, pattern selection, tool discovery, diagram generation | No — deterministic parameterization from signed contract |
 | **Inputs** | Developer's use-case prompt + pattern catalog + registries + GitHub MCP | Signed Design Contract JSON (all choices already made) |
 | **Outputs** | Signed Design Contract + component diagram + sequence diagram | Scaffolded ADK agent package + eval results |
 | **Who approves the output?** | Developer at Design Gate (reviews architecture via diagrams) | Automated eval thresholds at Eval Gate (no human reviews code) |
-| **Why this boundary exists** | If Design Agent invoked agents-cli directly, the human approval gate would come *after* code generation — forcing the developer to review generated code instead of reviewing a design. That's a worse developer experience and a weaker compliance posture. |
+| **Why this boundary exists** | If Design Agent invoked the scaffold script directly, the human approval gate would come *after* code generation — forcing the developer to review generated code instead of reviewing a design. That's a worse developer experience and a weaker compliance posture. |
 
 **Design Contract JSON example** (the artifact handed from Layer 2 to Layer 3):
 
@@ -872,9 +874,9 @@ sequenceDiagram
 }
 ```
 
-**How agents-cli consumes this contract in Layer 3 Track B:**
+**How the company scaffold script consumes this contract in Layer 3 Track B:**
 
-| Design Contract field | What agents-cli does with it |
+| Design Contract field | What the scaffold script does with it |
 |---|---|
 | `garden_template_id` | Fetches the matching Agent Garden template as the scaffold starting point |
 | `adk_agent_tree` | Generates the agent class hierarchy — root LlmAgent with typed sub-agents |
@@ -884,11 +886,11 @@ sequenceDiagram
 | `infra_modules[]` | Generates Terraform module references that Track A consumes (module paths + pinned versions from GitHub repo) |
 | `eval_set_id` + `injection_corpus_id` | Configures the eval run — which golden dataset and which prompt-injection corpus to test against |
 | `model_armor_template` | Configures the Model Armor floor settings for the agent at runtime |
-| `model_routing` *(optional)* | When Apigee AI Gateway is enabled, configures the `ApigeeLlm` wrapper — proxy URL, primary model, fallback chain, failover policy, token budget, and semantic cache flag. When not enabled, Agent Gateway routes model calls directly. |
+| `model_routing` *(optional)* | When Apigee AI Gateway is enabled, configures the `ApigeeLlm` wrapper — proxy URL, primary model, fallback chain, failover policy, token budget, and semantic cache flag. When not enabled, Apigee Runtime Gateway routes model calls directly. |
 | `pipeline_configs.jenkins` | Jenkins MCP Server triggers the pre-staged infra template (`agent-infra-plan-apply-v3`) with the specified parameters — no Jenkinsfile is generated |
 | `pipeline_configs.harness` | Harness MCP Server triggers the pre-staged deploy template (`agent-deploy-canary-v4`) with the specified parameters — no Harness YAML is generated |
 
-Every parameter comes from the signed Design Contract — **agents-cli makes zero choices.** This is why the pipeline is deterministic and auditable. If a field is missing or malformed, agents-cli fails fast with a schema validation error rather than guessing.
+Every parameter comes from the signed Design Contract — **the scaffold script makes zero choices.** This is why the pipeline is deterministic and auditable. If a field is missing or malformed, the script fails fast with a schema validation error rather than guessing.
 
 **Additional notes:**
 
@@ -897,10 +899,10 @@ Every parameter comes from the signed Design Contract — **agents-cli makes zer
 - **Diagrams are part of the signed Design Contract.** The `component_diagram_uri` and `sequence_diagram_uri` are fields in the signed payload — post-approval tampering with the diagrams invalidates the signature. The diagrams travel with the bundle through Layers 3 and 4 as design evidence and appear in the Compliance Evidence Chain as the "Design Doc" node.
 - **At the Design Gate, the developer reviews architecture — not JSON.** The Angular UI presents: (1) the component architecture diagram showing agent topology and tool bindings, (2) the sequence diagram showing runtime interaction flow, and (3) the pattern rationale. The JSON example above is what travels *inside* the signed contract; the developer never reads it directly.
 - **Vertex AI Search performs hybrid search for BOTH patterns AND skills** — combining semantic embedding match with structured metadata filters. For patterns: two-pass retrieval finds candidate root patterns, then traverses the `composable_with` adjacency for valid children. For skills: after patterns are selected, a second hybrid search matches the developer's use-case intent + each pattern node's requirements to ranked skill candidates from both Google-authored skills (`github.com/google/skills`) and company-authored skills (`github.com/company/skills`). Skills are indexed with their L1 YAML frontmatter metadata (name, tags, capabilities, domain) as structured filters and their L2 Markdown body as the semantic embedding surface. The Design Agent maps discovered skills to specific agent nodes in the pattern composition — e.g., the `order_processor` node gets the BigQuery skill, the `fraud_detector` gets the fraud-detection skill — and writes these assignments into `skill_references[]` in the Design Contract.
-- Three registry queries (Agent Registry + Company Private Registry + GitHub MCP Server) run in parallel **after** pattern selection. The GitHub MCP Server query discovers which company Terraform modules are available — browsing module READMEs, input/output schemas, and version tags so the Design Agent can reference exact module paths and versions in the Design Contract.
+- Three registry queries (Apigee API Hub + Company Private Registry + GitHub MCP Server) run in parallel **after** pattern selection. The GitHub MCP Server query discovers which company Terraform modules are available — browsing module READMEs, input/output schemas, and version tags so the Design Agent can reference exact module paths and versions in the Design Contract.
 - Cosign signs with a Fulcio-issued ephemeral cert; the public log entry in Rekor is the auditable trail.
 - **Company Terraform modules are the only module source — Agent Garden is upstream reference only.** Cloud Assist in Layer 3 Track A is constrained to reference only these signed company modules. This is compliance-by-construction, not compliance-by-inspection.
-- **Jenkins and Harness pipelines are parameterized templates, not generated YAML.** The Design Agent discovers pipeline templates via Jenkins MCP Server and Harness MCP Server (both registered in Agent Registry), reads their parameter schemas, and supplies values from the Design Contract. The templates themselves — `agent-infra-plan-apply-v3` for Jenkins and `agent-deploy-canary-v4` for Harness — are pre-staged, company-audited, and version-pinned. All gate logic (OPA checks, human approvals, canary watch, rollback triggers) lives in the template, not in generated code. This is the same "parameterize, don't generate" principle applied to CI/CD that we applied to agent code via agents-cli. The attestation chain is preserved because the gates fire at the same points — only the mechanism that creates the pipeline configuration changes. The chain is actually *stronger* because the auditor now has two levels of assurance: (1) the template was reviewed and signed by the platform team, and (2) the parameters for this specific agent were reviewed and signed at the Design Gate.
+- **Jenkins and Harness pipelines are parameterized templates, not generated YAML.** The Design Agent discovers pipeline templates via Jenkins MCP Server and Harness MCP Server (both registered in Apigee API Hub), reads their parameter schemas, and supplies values from the Design Contract. The templates themselves — `agent-infra-plan-apply-v3` for Jenkins and `agent-deploy-canary-v4` for Harness — are pre-staged, company-audited, and version-pinned. All gate logic (OPA checks, human approvals, canary watch, rollback triggers) lives in the template, not in generated code. This is the same "parameterize, don't generate" principle applied to CI/CD that we applied to agent code via the company scaffold script. The attestation chain is preserved because the gates fire at the same points — only the mechanism that creates the pipeline configuration changes. The chain is actually *stronger* because the auditor now has two levels of assurance: (1) the template was reviewed and signed by the platform team, and (2) the parameters for this specific agent were reviewed and signed at the Design Gate.
 
 ---
 
@@ -924,11 +926,11 @@ sequenceDiagram
     participant CA as Gemini Cloud Assist
     participant CTF as Company TF Modules<br/>(GitHub repo)
     participant ORG as Org Policy
-    participant CLI as agents-cli
+    participant SCRIPT as Company Scaffold Script
     participant ADK as ADK Framework
     participant GAR as Agent Garden Templates
     participant EVAL as Vertex AI Gen AI Eval
-    participant SIM as Agent Simulation
+    participant THR as Custom Test Harness
     participant ARG as Artifact Registry
     participant BAUTH as Binary Authorization
     participant CAL as Cloud Audit Logs
@@ -970,38 +972,39 @@ sequenceDiagram
         SIG-->>JNK: plan_attestation
         JNK->>CAL: PLAN_GATE_PASSED
     and TRACK B · CODE & EVAL
-        JNK->>CLI: agents-cli create<br/>--template {garden_template_id}<br/>--config design-contract.json
-        CLI->>GAR: fetch template
-        GAR-->>CLI: vetted starter scaffold
-        CLI->>CLI: read adk_agent_tree →<br/>generate agent class hierarchy<br/>(root LlmAgent + typed sub-agents)
-        CLI->>CLI: read tool_bindings[] →<br/>generate FunctionTool / MCPToolset<br/>declarations per agent node
-        CLI->>CLI: read mcp_server_configs[] →<br/>generate MCP client connections<br/>(transport, auth, PSC flags)
-        CLI->>CLI: read skill_references[] from<br/>Design Contract
+        JNK->>SCRIPT: scaffold script run<br/>--template {garden_template_id}<br/>--config design-contract.json
+        SCRIPT->>GAR: fetch template
+        GAR-->>SCRIPT: vetted starter scaffold
+        SCRIPT->>SCRIPT: read adk_agent_tree →<br/>generate agent class hierarchy<br/>(root LlmAgent + typed sub-agents)
+        SCRIPT->>SCRIPT: read tool_bindings[] →<br/>generate FunctionTool / MCPToolset<br/>declarations per agent node
+        SCRIPT->>SCRIPT: read mcp_server_configs[] →<br/>generate MCP client connections<br/>(transport, auth, PSC flags)
+        SCRIPT->>SCRIPT: read skill_references[] from<br/>Design Contract
 
-        Note over CLI,CSR: SKILL INSTALLATION & BUNDLING
+        Note over SCRIPT,CSR: SKILL INSTALLATION & BUNDLING
 
-        CLI->>GSR: gh skill install google/skills<br/>bigquery@v1.2.0<br/>(version-pinned from contract)
-        GSR-->>CLI: skill directory + provenance<br/>metadata in SKILL.md frontmatter
+        SCRIPT->>GSR: gh skill install google/skills<br/>bigquery@v1.2.0<br/>(version-pinned from contract)
+        GSR-->>SCRIPT: skill directory + provenance<br/>metadata in SKILL.md frontmatter
 
-        CLI->>CSR: gh skill install company/skills<br/>fraud-detection@v3.1.0
-        CSR-->>CLI: skill directory + provenance SHA
+        SCRIPT->>CSR: gh skill install company/skills<br/>fraud-detection@v3.1.0
+        CSR-->>SCRIPT: skill directory + provenance SHA
 
-        CLI->>CLI: verify provenance SHA for each<br/>skill matches Design Contract<br/>(tamper detection — if SHA mismatch,<br/>build fails immediately)
+        SCRIPT->>SCRIPT: verify provenance SHA for each<br/>skill matches Design Contract<br/>(tamper detection — if SHA mismatch,<br/>build fails immediately)
 
-        CLI->>CLI: bundle skill directories into<br/>agent package:<br/>agent-package/skills/bigquery/SKILL.md<br/>agent-package/skills/bigquery/references/*<br/>agent-package/skills/fraud-detection/SKILL.md<br/>agent-package/skills/fraud-detection/references/*
+        SCRIPT->>SCRIPT: bundle skill directories into<br/>agent package:<br/>agent-package/skills/bigquery/SKILL.md<br/>agent-package/skills/bigquery/references/*<br/>agent-package/skills/fraud-detection/SKILL.md<br/>agent-package/skills/fraud-detection/references/*
 
-        CLI->>CLI: wire ADK SkillToolset with<br/>load_skill_resource tool for each<br/>bundled skill (enables L3 on-demand<br/>loading at runtime)
-        CLI->>ADK: build agent package<br/>(all params from signed contract —<br/>zero LLM choices)
-        ADK-->>CLI: built agent package
-        CLI->>EVAL: agents-cli eval run<br/>--eval-set {eval_set_id}<br/>--corpus {injection_corpus_id}
+        SCRIPT->>SCRIPT: wire ADK SkillToolset with<br/>load_skill_resource tool for each<br/>bundled skill (enables L3 on-demand<br/>loading at runtime)
+        SCRIPT->>ADK: build agent package<br/>(all params from signed contract —<br/>zero LLM choices)
+        ADK-->>SCRIPT: built agent package
+        SCRIPT->>EVAL: eval via Gen AI Eval SDK<br/>--eval-set {eval_set_id}<br/>--corpus {injection_corpus_id}
         ESC-->>EVAL: golden + injection corpus
-        EVAL-->>CLI: trajectory metrics + autorater scores
-        CLI->>SIM: synthetic persona test
-        SIM-->>CLI: simulation report
-        Note over CLI: 🟧 EVAL GATE — thresholds checked
-        CLI->>SIG: sign Eval Report
-        SIG-->>CLI: eval_attestation
-        CLI->>CAL: EVAL_GATE_PASSED
+        EVAL-->>SCRIPT: trajectory metrics + autorater scores
+        SCRIPT->>THR: run company test scenarios
+        THR->>THR: Gen AI Eval multi-turn autorater
+        THR-->>SCRIPT: simulation report
+        Note over SCRIPT: 🟧 EVAL GATE — thresholds checked
+        SCRIPT->>SIG: sign Eval Report
+        SIG-->>SCRIPT: eval_attestation
+        SCRIPT->>CAL: EVAL_GATE_PASSED
     end
 
     Note over JNK: CONVERGENCE — both tracks complete
@@ -1032,7 +1035,7 @@ sequenceDiagram
 
 - The two tracks share the Design Contract but produce independent artifacts. Convergence requires both to have signed attestations. If one fails, the other is discarded — there is no partial promotion.
 - Track B builds the agent code against **stub references** to the infra contract; at convergence, stubs are replaced with the real IDs Track A emitted. The bundle is *re-signed* after substitution.
-- **`agents-cli` is a deterministic consumer of the Design Contract — see the field-by-field consumption table in the Layer 2 engineering notes.** It reads `garden_template_id` to fetch the scaffold, `adk_agent_tree` to generate the class hierarchy, `tool_bindings[]` to wire MCP servers and function tools per agent node, `mcp_server_configs[]` to generate connection setup, `skill_references[]` to pin versions with signature hashes, and `infra_modules[]` to generate the Terraform references Track A consumes. If any field is missing or malformed, agents-cli fails with a schema validation error — it never guesses.
+- **The company scaffold script is a deterministic consumer of the Design Contract — see the field-by-field consumption table in the Layer 2 engineering notes.** It reads `garden_template_id` to fetch the scaffold, `adk_agent_tree` to generate the class hierarchy, `tool_bindings[]` to wire MCP servers and function tools per agent node, `mcp_server_configs[]` to generate connection setup, `skill_references[]` to pin versions with signature hashes, and `infra_modules[]` to generate the Terraform references Track A consumes. If any field is missing or malformed, the scaffold script fails with a schema validation error — it never guesses.
 - **There is no LLM in Track B.** The LLM did its work in Layer 2. From Layer 3 onward, the pipeline is deterministic. This is the fundamental architectural boundary: design is LLM-assisted (Layer 2), generation is LLM-free (Layer 3).
 - Binary Authorization stores the *chain*, not individual attestations. Layer 4 verifies the entire chain in one call.
 - Plan Gate human approval is the *same* gate the existing Jenkins pipeline uses — `terraform plan` review by a platform engineer with access to cost diff and blast radius. We did not invent a new approval flow.
@@ -1043,18 +1046,18 @@ sequenceDiagram
 
 **What the platform provides out-of-the-box (the ~70% scaffold):**
 
-| Scaffolded component | What agents-cli generates | Engineer effort |
+| Scaffolded component | What the scaffold script generates | Engineer effort |
 |---|---|---|
 | ADK agent class hierarchy | Root agent + sub-agents matching `adk_agent_tree` from the Design Contract, with correct `SequentialAgent`/`ParallelAgent`/`LlmAgent` types | None — fully generated |
 | MCP server connections | `MCPToolset` declarations with transport (SSE), auth method (Agent Identity or OAuth2), PSC endpoint flags, per the `mcp_server_configs[]` | None — fully wired |
 | Tool declarations | `FunctionTool` and `MCPToolset` stubs with endpoints, schemas, and descriptions per `tool_bindings[]` | **Function bodies are empty** — see below |
 | Agent Identity integration | SPIFFE-bound auth, DPoP token handling, credential refresh | None — wired via ADK + Agent Identity |
 | Model Armor integration | `before_model_callback` wired to the Model Armor template specified in `model_armor_template` for generic prompt/output screening | None — generic screening is automatic |
-| Apigee AI Gateway integration *(optional)* | When `model_routing` is present in Design Contract, `ApigeeLlm` wrapper configured for primary model, failover chain, token budget, semantic cache. When absent, agents call models directly via Agent Gateway egress. | None — conditionally wired from Design Contract |
+| Apigee AI Gateway integration *(optional)* | When `model_routing` is present in Design Contract, `ApigeeLlm` wrapper configured for primary model, failover chain, token budget, semantic cache. When absent, agents call models directly via Apigee Runtime Gateway egress. | None — conditionally wired from Design Contract |
 | Session management | Agent Sessions create/load/persist boilerplate for conversational state | None — standard lifecycle is generated |
 | Memory Bank integration | Retrieve/store context boilerplate per ADK Memory Bank API | None — standard CRUD is generated |
 | Observability instrumentation | Open Telemetry trace spans, structured logging, `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true` env var | None — auto-wired at Terraform layer |
-| Terraform infrastructure | Agent Runtime, Agent Identity, Agent Gateway route, Secret Manager, KMS, PSC-I — all from signed company modules | None — Track A handles this |
+| Terraform infrastructure | Agent Runtime, Agent Identity, Apigee Runtime Gateway route, Secret Manager, KMS, PSC-I — all from signed company modules | None — Track A handles this |
 | CI/CD pipeline configuration | Pre-staged Jenkins template (`agent-infra-plan-apply-v3`) configured with Design Contract parameters via Jenkins MCP Server; pre-staged Harness template (`agent-deploy-canary-v4`) configured via Harness MCP Server | None — templates are company-audited; only parameters vary per agent |
 | Eval harness configuration | Eval set ID + injection corpus ID + autorater config from Design Contract | None — harness is wired; **eval content is not** |
 | Deployment configuration | Agent Runtime region, scaling, CMEK, billing labels from Design Contract | None — Terraform-managed |
@@ -1088,7 +1091,7 @@ The scaffold gives you a *runnable but incomplete* agent. You can deploy it to s
 **Outcome:** A signed bundle becomes a running agent in production with canary routing, bound to a fresh production SPIFFE identity and CMEK-encrypted secrets.
 
 **Enters from Layer 3:** `bundle_uri` + `infra_contract` + attestation chain.
-**Exits to Layer 5:** Live agent on Agent Runtime (prod) with routing in Agent Gateway, identity issued by Agent Identity, and secrets bound via Secret Manager.
+**Exits to Layer 5:** Live agent on Agent Runtime (prod) with routing in Apigee Runtime Gateway, identity issued by Agent Identity, and secrets bound via Secret Manager.
 
 ```mermaid
 sequenceDiagram
@@ -1109,8 +1112,8 @@ sequenceDiagram
     participant KMS as Cloud KMS (CMEK)
     participant ARS as Agent Runtime<br/>(staging)
     participant ARP as Agent Runtime<br/>(prod)
-    participant AGW as Agent Gateway
-    participant REG as Agent Registry
+    participant APG as Apigee Runtime Gateway
+    participant AHUB as Apigee API Hub
     participant CAL as Cloud Audit Logs
     end
 
@@ -1140,7 +1143,7 @@ sequenceDiagram
     HRN->>ARS: deploy bundle with identity + key refs
     ARS-->>HRN: staging endpoint
 
-    HRN->>AGW: register staging route (100% staging traffic)
+    HRN->>APG: register staging route (100% staging traffic)
     HRN->>ARS: smoke test suite
     ARS-->>HRN: smoke PASS
 
@@ -1153,20 +1156,20 @@ sequenceDiagram
     AID-->>HRN: spiffe://agents/prod/<id>
     HRN->>SM: bind tool secrets to prod SPIFFE ID
     HRN->>ARP: deploy bundle to prod
-    HRN->>AGW: register prod route at 10% canary
+    HRN->>APG: register prod route at 10% canary
 
     loop canary watch (15-30 min)
         HRN->>ARP: monitor SLOs<br/>(latency, error rate, eval score)
     end
 
     alt canary healthy
-        HRN->>AGW: shift to 100% prod
-        HRN->>REG: register agent in Agent Registry<br/>with skill metadata from L1 frontmatter<br/>(so other agents can discover this<br/>agent by its capabilities)
+        HRN->>APG: shift to 100% prod
+        HRN->>AHUB: register agent in Apigee API Hub<br/>with skill metadata from L1 frontmatter<br/>(so other agents can discover this<br/>agent by its capabilities)
         HRN->>HFF: enable production feature flags
         HRN->>SNW: close change record
         HRN->>CAL: PROMOTION_GATE_PASSED — agent live
     else canary unhealthy
-        HRN->>AGW: shift back to previous version
+        HRN->>APG: shift back to previous version
         HRN->>SNW: change record FAILED
         HRN->>CAL: PROMOTION_ROLLBACK
     end
@@ -1178,10 +1181,10 @@ sequenceDiagram
 
 - Harness *consumes* the attestation chain via Binary Auth before any GCP API is called. If any link is missing or revoked, the deploy aborts at step 5; nothing is provisioned, nothing is logged as a deploy attempt at Agent Runtime.
 - Staging and prod use **separate** SPIFFE IDs. There is no "promote the same identity" — Harness mints a fresh prod identity at promotion time. This is a deliberate isolation property.
-- Canary routing is via **Agent Gateway weighted routes**, not a load balancer. Agent Gateway is the only place where A2A-aware and DPoP-aware canary routing exists in the stack.
-- Rollback is "shift Agent Gateway weight back to previous version" — not a redeploy. The previous version stays in Artifact Registry until explicitly retired.
+- Canary routing is via **Apigee traffic-split policies**, not a load balancer. Apigee custom policies replicate the A2A-aware routing that Agent Gateway provides natively in the stack.
+- Rollback is "shift Apigee traffic-split weight back to previous version" — not a redeploy. The previous version stays in Artifact Registry until explicitly retired.
 - ServiceNow integration is for change-management audit trail — the change record links the JIRA ID (from Layer 1) to the deploy event.
-- **Agent + skill registration in Agent Registry happens after successful canary, not at deploy time.** The agent is registered with its skill metadata (extracted from L1 YAML frontmatter of each bundled skill) only when it reaches 100% production traffic. This means other agents cannot discover this agent until it's proven healthy in production. The skill metadata enables capability-based discovery — other agents querying Agent Registry for "fraud detection" or "BigQuery analytics" will find this agent by its skills, not just by name. On rollback, the previous agent version's registry entry is restored.
+- **Agent + skill registration in Apigee API Hub happens after successful canary, not at deploy time.** The agent is registered with its skill metadata (extracted from L1 YAML frontmatter of each bundled skill) only when it reaches 100% production traffic. This means other agents cannot discover this agent until it's proven healthy in production. The skill metadata enables capability-based discovery — other agents querying Apigee API Hub for "fraud detection" or "BigQuery analytics" will find this agent by its skills, not just by name. On rollback, the previous agent version's registry entry is restored.
 
 ---
 
@@ -1204,19 +1207,19 @@ sequenceDiagram
 
     box rgba(66,133,244,0.15) GCP Managed
     participant GEA as Gemini Enterprise App
-    participant AGW as Agent Gateway
+    participant APG as Apigee Runtime Gateway
     participant AID as Agent Identity
     participant MA as Model Armor
     participant ARP as Agent Runtime
-    participant AGWE as Agent Gateway<br/>(egress)
+    participant APGE as Apigee Runtime Gw<br/>(egress)
     participant AIGW as Apigee AI Gateway<br/>(optional)
     participant MB as Memory Bank
     participant APG as Apigee<br/>(optional tool mgmt)
     participant CT as Cloud Trace
     participant CL as Cloud Logging
     participant CM as Cloud Monitoring
-    participant VOE as Vertex AI Online Eval
-    participant SCC as SCC Agent Threat Detection
+    participant BEP as Batch Eval Pipeline<br/>(Cloud Function)
+    participant STR as Splunk Threat Rules
     participant FIN as Cloud Assist FinOps
     end
 
@@ -1233,11 +1236,11 @@ sequenceDiagram
     User->>GEA: query the agent
     GEA->>AGW: forward request
 
-    AGW->>AID: get DPoP-bound short-lived cert
-    AID-->>AGW: cert (24h X.509 rotation)
+    APG_L1->>AID: get DPoP-bound short-lived cert
+    AID-->>APG_L1: cert (24h X.509 rotation)
 
-    AGW->>MA: screen incoming prompt<br/>(prompt-injection, jailbreak, DLP)
-    MA-->>AGW: clean (or block + reason)
+    APG_L1->>MA: screen incoming prompt<br/>(prompt-injection, jailbreak, DLP)
+    MA-->>APG_L1: clean (or block + reason)
 
     AGW->>ARP: forward with DPoP credentials
 
@@ -1252,27 +1255,27 @@ sequenceDiagram
 
     ARP->>ARP: agent needs detailed knowledge →<br/>calls load_skill_resource tool →<br/>loads L3 reference on-demand<br/>(e.g., references/query-patterns.md)<br/>context stays lean: only what's needed
 
-    ARP->>AGWE: model call via Agent Gateway egress<br/>(all outbound traffic exits here)
-    AGWE->>MA: screen prompt (Model Armor)
-    MA-->>AGWE: clean
+    ARP->>APGE: model call via Apigee Runtime Gw egress<br/>(all outbound traffic exits here)
+    APGE->>MA: screen prompt (Model Armor)
+    MA-->>APGE: clean
     opt Apigee AI Gateway enabled
-        AGWE->>AIGW: route through Apigee<br/>(semantic cache check, token budget)
+        APGE->>AIGW: route through Apigee<br/>(semantic cache check, token budget)
         AIGW->>AIGW: route to primary model
         alt primary model unavailable or rate-limited
             AIGW->>AIGW: failover to backup model
         end
-        AIGW-->>AGWE: model response
+        AIGW-->>APGE: model response
     end
     Note over AGWE: if no Apigee AI Gw,<br/>Agent Gw routes directly to model
-    AGWE-->>ARP: model response
+    APGE-->>ARP: model response
 
-    ARP->>AGWE: outbound tool call<br/>(MCP server, external API)
-    AGWE->>MA: screen tool request
-    MA-->>AGWE: clean
+    ARP->>APGE: outbound tool call<br/>(MCP server, external API)
+    APGE->>MA: screen tool request
+    MA-->>APGE: clean
     opt Apigee tool mgmt enabled
-        AGWE->>APG: route through Apigee<br/>(OAuth, rate limit, quota)
+        APGE->>APG: route through Apigee<br/>(OAuth, rate limit, quota)
     end
-    AGWE-->>ARP: tool result
+    APGE-->>ARP: tool result
 
     ARP->>MA: screen output (DLP, hallucination,<br/>tool-poisoning detection)
     MA-->>ARP: clean
@@ -1291,14 +1294,14 @@ sequenceDiagram
         OTEL->>SPL: forward to SIEM<br/>(security + audit)
         OTEL->>DYN: forward to APM<br/>(performance + RCA)
     and Quality monitoring
-        ARP->>VOE: sample live traffic (1-5%)
-        VOE->>VOE: drift / hallucination scoring<br/>via Online Evaluation autorater
-        VOE->>CM: emit quality metrics
+        BEP->>BEP: sample from Cloud Logging (1-5%)
+        BEP->>BEP: batch scoring (5-15 min interval)<br/>via Gen AI Eval SDK autorater
+        BEP->>CM: emit quality metrics
     and Threat detection
-        CL->>SCC: ingest audit logs
-        CT->>SCC: ingest traces
-        SCC->>SCC: anomaly detection<br/>(excessive permissions,<br/>A2A/MCP anomalies)
-        SCC->>SPL: forward findings
+        CL->>STR: ingest audit logs
+        CT->>STR: ingest traces
+        STR->>STR: correlation rules on OTel data<br/>(excessive permissions,<br/>A2A/MCP anomalies)
+        STR->>SPL: forward findings
     and Cost monitoring
         ARP->>FIN: token usage labels<br/>(per agent, per request)
         FIN->>CM: cost anomaly metrics
@@ -1312,7 +1315,7 @@ sequenceDiagram
 
     alt rollback path (operational issue)
         SRE->>HRN: trigger rollback
-        Note over HRN: ▶ back to Layer 4<br/>shift Agent Gateway weight
+        Note over HRN: ▶ back to Layer 4<br/>shift Apigee traffic-split weight
     else regenerate path (drift / quality)
         SRE->>GEA: file regenerate request<br/>with drift evidence
         Note over GEA: ▶ back to Layer 2<br/>with original session_id + delta
@@ -1324,13 +1327,13 @@ sequenceDiagram
 **Engineering notes:**
 
 - The Open Telemetry Collector is the **single egress point** for all agent telemetry. Splunk (SIEM) and Dynatrace (APM) both consume from it. Adding another tool means adding another Open Telemetry exporter — agent code is untouched. This is why we standardized on Open Telemetry rather than vendor SDKs.
-- SCC Agent Threat Detection ingests *audit logs and traces*, not direct agent telemetry. Because Splunk and Dynatrace consume the same Open Telemetry stream, investigations across the SCC, SIEM, and APM views line up on the same trace IDs.
-- Vertex AI Online Eval samples a configurable percentage of live traffic — typically 1-5% for cost reasons. The sampling rate is declared in the Design Contract per agent class and honored automatically by the runtime.
+- Splunk Threat Rules ingest *audit logs and traces* via the Open Telemetry Collector, not direct agent telemetry. Because Splunk and Dynatrace consume the same Open Telemetry stream, investigations across the SIEM and APM views line up on the same trace IDs.
+- The Batch Eval Pipeline (Cloud Function) samples a configurable percentage of logged conversations — typically 1–5% — at a batch interval of 5–15 minutes. The sampling rate is declared in the Design Contract per agent class. Unlike Vertex AI Online Eval (Preview), this is batch rather than real-time, but uses the same Gen AI Eval SDK for scoring consistency between build-time and runtime evaluation.
 - The "regenerate" path is the most distinctive runtime feedback loop: a drift signal triggers a re-entry to Layer 2 with the original `session_id`, the drift evidence, and a delta prompt. The result is a *new* Design Contract that, on the next pass through Layers 3 and 4, replaces the running agent. This is how the platform stays current without engineers manually rebuilding agents.
-- **Agent Gateway is the single control plane for ALL agent traffic.** It operates in two modes: **Ingress (Client-to-Agent)** controls which clients can access agents; **Egress (Agent-to-Anywhere)** secures and governs all outbound traffic from agents — to tools/MCP servers, to models (Gemini, Model Garden, third-party), to other agents (A2A), and to external APIs. Model routing, identity-aware policies, and Model Armor enforcement all happen at the Agent Gateway egress point. This is NOT a "three-gateways" pattern — Agent Gateway is the unified gateway; Apigee components are optional downstream destinations for advanced API management.
-- **Apigee AI Gateway is optional and sits downstream of Agent Gateway egress.** When enabled, Agent Gateway routes model traffic through Apigee AI Gateway for semantic caching, per-agent token budgets, and multi-provider failover. Without it, Agent Gateway still routes model calls and applies Model Armor — you lose caching, token budgets, and cross-provider failover. The `ApigeeLlm` wrapper in ADK is only needed when Apigee AI Gateway is enabled.
-- **Apigee Tool Gateway is also optional and downstream.** For external APIs that need API management (rate limiting, OAuth, quotas), Agent Gateway can route tool calls through Apigee. Google-managed MCP servers (BigQuery, Cloud SQL, etc.) do not need Apigee — Agent Gateway handles them directly.
-- **SCC Agent Engine Threat Detection and Agent Gateway are mutually exclusive in the current preview.** When Agent Gateway is enabled for an agent, SCC Threat Detection is not available. This is a significant constraint: you must choose between gateway-level governance (Agent Gateway) and SCC-level threat detection. The GA-only variant addresses this by using Splunk correlation rules as the threat detection mechanism, which works regardless of gateway configuration.
+- **Apigee Runtime Gateway serves as the unified control plane for all agent traffic in the GA-only variant.** It operates in two modes: **Ingress (Client-to-Agent)** controls which clients can access agents; **Egress (Agent-to-Anywhere)** secures and governs all outbound traffic from agents — to tools/MCP servers, to models (Gemini, Model Garden, third-party), to other agents (A2A), and to external APIs. Model routing, identity-aware policies, and Model Armor enforcement all happen at the Apigee Runtime Gateway egress point. Apigee AI Gateway and Apigee Tool Gateway are optional downstream destinations for advanced model and API management respectively.
+- **Apigee AI Gateway is optional and sits downstream of Apigee Runtime Gateway egress.** When enabled, Apigee Runtime Gateway routes model traffic through Apigee AI Gateway for semantic caching, per-agent token budgets, and multi-provider failover. Without it, Apigee Runtime Gateway still routes model calls and applies Model Armor — you lose caching, token budgets, and cross-provider failover. The `ApigeeLlm` wrapper in ADK is only needed when Apigee AI Gateway is enabled.
+- **Apigee Tool Gateway is also optional and downstream.** For external APIs that need API management (rate limiting, OAuth, quotas), Apigee Runtime Gateway can route tool calls through Apigee AI Gateway. Google-managed MCP servers (BigQuery, Cloud SQL, etc.) do not need Apigee — Apigee Runtime Gateway handles them directly.
+- **In the GA-only variant, Splunk correlation rules replace SCC Agent Threat Detection.** There is no mutual exclusivity constraint between Splunk and Apigee Runtime Gateway — the constraint only existed between SCC Threat Detection and Agent Gateway (both preview). Using Splunk correlation rules on GA services eliminates this limitation entirely.
 - **Skills are loaded progressively at runtime to prevent context bloat.** The agent package contains bundled skill directories (installed at build time in Layer 3). At runtime, the ADK `SkillToolset` manages a three-layer progressive disclosure: **L1 frontmatter** (always visible — ~50 tokens per skill, so the agent knows what skills are available); **L2 instructions** (loaded when a skill is activated for a request — ~500–2000 tokens of step-by-step guidance); **L3 references** (loaded on-demand via the `load_skill_resource` tool only when a specific step requires detailed knowledge). This means an agent with 10 bundled skills doesn't load all 10 into context for every request — it activates only the relevant ones, and within those, loads detailed references only when reasoning requires them. This is a local operation (skill files are in the package, not fetched over the network) and is the mechanism Google designed to solve the context bloat problem that MCP servers create when agents pull too much documentation into the context window.
 
 ---
@@ -1365,14 +1368,14 @@ For an engineer onboarding to the platform, the diagrams above are the right sta
 | Harness Feature Flags | Company | 4 |
 | ServiceNow CMDB | Company | 4 |
 | Gemini Enterprise App *(GA)* | GCP | 1, 5 |
-| Agent Gateway *(Private Preview)* | GCP | 1, 4, 5 |
+| Apigee Runtime Gateway *(GA)* | GCP | 1, 4, 5 |
 | Agent Identity | GCP | 1, 4, 5 |
 | Model Armor *(GA)* | GCP | 1, 5 |
 | Agent Runtime *(GA)* | GCP | 1, 2, 4, 5 |
 | Agent Sessions *(GA)* | GCP | 1, 2 |
 | Memory Bank *(GA)* | GCP | 2, 5 |
 | Vertex AI Search *(GA)* (Pattern Catalog) | GCP | 2 |
-| Agent Registry *(Public Preview)* | GCP | 2 |
+| Apigee API Hub *(GA)* | GCP | 2 |
 | Gemini Cloud Assist + ADC | GCP | 2, 3 |
 | Cloud Storage | GCP | 2 |
 | Company TF Module Library | Company | 3 |
@@ -1381,9 +1384,9 @@ For an engineer onboarding to the platform, the diagrams above are the right sta
 | Harness MCP Server | Company | 2 |
 | Agent Garden Templates *(GA)* | GCP | 3 |
 | ADK Framework *(GA)* | GCP | 3 |
-| agents-cli *(Public Preview)* | GCP | 3 |
+| Company Scaffold Script | Company | 3 |
 | Vertex AI Gen AI Eval *(GA)* | GCP | 3 |
-| Agent Simulation *(Preview)* | GCP | 3 |
+| Custom Test Harness | Company | 3 |
 | Org Policy *(GA)* | GCP | 3 |
 | Artifact Registry *(GA)* | GCP | 3, 4 |
 | Binary Authorization *(GA)* | GCP | 3, 4 |
@@ -1394,8 +1397,8 @@ For an engineer onboarding to the platform, the diagrams above are the right sta
 | Cloud Trace | GCP | 5 |
 | Cloud Logging *(GA)* | GCP | 5 |
 | Cloud Monitoring | GCP | 5 |
-| Vertex AI Online Eval *(Preview)* | GCP | 5 |
-| SCC Agent Threat Detection *(Preview)* | GCP | 5 |
+| Batch Eval Pipeline *(GA)* | GCP + Company | 5 |
+| Splunk Threat Rules | Company | 5 |
 | Cloud Assist FinOps *(GA)* | GCP | 5 |
 | Cloud Audit Logs *(GA)* | GCP | all |
 | Terraform *(GA)* | Third-party | 3 |
@@ -1434,9 +1437,9 @@ Based on the use-case signals (multi-domain routing, parallel enrichment, human-
 
 | Component | Type | Source | Purpose |
 |---|---|---|---|
-| BigQuery MCP Server | MCP Server | Agent Registry (GCP) | Query policy database and historical claims |
-| Cloud SQL MCP Server | MCP Server | Agent Registry (GCP) | Read/write to the claims management system |
-| Vertex AI Search | MCP Server | Agent Registry (GCP) | RAG over policy documents and state regulations |
+| BigQuery MCP Server | MCP Server | Apigee API Hub (GCP) | Query policy database and historical claims |
+| Cloud SQL MCP Server | MCP Server | Apigee API Hub (GCP) | Read/write to the claims management system |
+| Vertex AI Search | MCP Server | Apigee API Hub (GCP) | RAG over policy documents and state regulations |
 | Weather API MCP Server | MCP Server | Company Private Registry | Enrich claim with weather conditions at time/location of incident |
 | Policy Verification Skill | Company Skill | Company Private Registry | Wraps BigQuery MCP with company-specific policy validation rules, coverage limits, and deductible calculations |
 | Fraud Detection Skill | Company Skill | Company Private Registry | Scores the claim against fraud indicators using company's ML model + historical patterns |
@@ -1622,7 +1625,7 @@ For this use case, here is the concrete split:
 - MCP connections to BigQuery, Cloud SQL, Vertex AI Search, and Weather API — transport, auth, and PSC endpoint all wired
 - A2A client connections to Body Shop Network, Rental Car, and Police Report agents — with signed Agent Card verification
 - Skill bindings for Policy Verification, Fraud Detection, and SLA Tracker — pinned versions with signature hashes
-- Agent Identity (SPIFFE), Agent Gateway route, Model Armor template binding, CMEK, VPC-SC membership, Secret Manager entries
+- Agent Identity (SPIFFE), Apigee Runtime Gateway route, Model Armor template binding, CMEK, VPC-SC membership, Secret Manager entries
 - Jenkinsfile (Plan Gate) + Harness YAML (Promotion Gate) from company shared-library templates
 - Open Telemetry instrumentation, Cloud Trace spans, structured logging
 - Eval harness pointing to the FNOL eval set and injection corpus
@@ -1926,4 +1929,4 @@ What Google shipped at Next '26 made this platform possible. Agent Identity, Age
 
 The FNOL example above is one use case. The same platform, the same patterns, the same paved road applies to claims adjudication, underwriting triage, customer onboarding, fraud investigation, regulatory reporting, and every other workflow where an enterprise needs an AI agent that is trustworthy on day one. The patterns are composable. The modules are reusable. The attestation chain is continuous.
 
-**AgentForge. Born Compliant. Built to Scale.**
+**AgentForge GA. Born Compliant. Built to Scale. Zero Preview Dependencies.**
