@@ -1616,6 +1616,36 @@ sequenceDiagram
     FNOL-->>PH: "Your claim #CLM-4521 is filed.<br/>Body shop options: [...]<br/>Rental pickup: tomorrow 9 AM at [...]<br/>Adjuster will contact you within 48h."
 ```
 
+### How the FNOL agent package is built — step by step (GA-only)
+
+This table traces the complete build from developer prompt to production deployment. Each row is one step. The "Consumes" column shows what input drives the step; the "Produces" column shows what output feeds the next step. No LLM is involved after Step 6.
+
+| Step | Layer | Who | What happens | Consumes | Produces |
+|---|---|---|---|---|---|
+| 1 | L1 | Developer | Describes FNOL use case in Angular Dev Chat | Natural language prompt | Session with developer identity |
+| 2 | L2 | Design Agent → Vertex AI Search | Two-pass pattern search: finds Coordinator/Dispatcher root, traverses adjacency for Sequential + Parallel + Loop + HITL children | Use-case embedding + metadata filters | `pattern_composition` + `adk_agent_tree` |
+| 3 | L2 | Design Agent → Vertex AI Search | Semantic skill search per agent node: BigQuery, Cloud SQL, Fraud Detection, State Regulations skills discovered | Pattern node capability requirements | `skill_references[]` with version pins + provenance SHAs |
+| 4 | L2 | Design Agent → API Hub + GitHub/Jenkins/Harness MCP | Five-way parallel discovery: MCP servers, A2A agents, TF modules, Jenkins template, Harness template | Pattern tool requirements | `tool_bindings[]`, `mcp_server_configs[]`, `infra_modules[]`, `pipeline_configs` |
+| 5 | L2 | Design Agent | Generates Mermaid component + sequence diagrams from pattern composition | `adk_agent_tree` + `tool_bindings[]` | `component_diagram_uri` + `sequence_diagram_uri` |
+| 6 | L2 | Developer | Reviews diagrams + rationale in Angular UI → **APPROVES** | Rendered diagrams + pattern rationale | **Design Attestation** (cosign-signed Design Contract) |
+| 7 | L3-A | Jenkins (pre-staged template) | `terraform plan` → OPA/Wiz scan → human approval → `terraform apply` using company TF modules | `infra_modules[]` + `pipeline_configs.jenkins` | Provisioned infra (Agent Runtime, SPIFFE ID, Apigee route, PSC-I, KMS) + **Plan Attestation** |
+| 8 | L3-B | Scaffold script | Clones `adk_a2a` Garden template from company GitHub fork | `garden_template_id` | Bare project structure (one root agent) |
+| 9 | L3-B | Scaffold script | Generates agent class hierarchy: root LlmAgent + SequentialAgent + 2×ParallelAgent + LoopAgent + HITL LlmAgent | `adk_agent_tree` | `app/agent.py` + `app/sub_agents/*.py` (5 files) |
+| 10 | L3-B | Scaffold script | Generates MCP connections (BigQuery, Cloud SQL, Vertex Search, Weather API) with transport, auth, PSC flags | `tool_bindings[]` + `mcp_server_configs[]` | `app/mcp_connections/*.py` (4 files, fully wired) |
+| 11 | L3-B | Scaffold script | Generates A2A client connections (Body Shop, Rental Car, Police Report) | `tool_bindings[]` (type=a2a_agent) | `app/a2a_clients/*.py` (3 files, fully wired) |
+| 12 | L3-B | Scaffold script | Generates FunctionTool stubs (severity_classifier, coverage_calculator, notification_sender) — **signatures generated, bodies empty** | `tool_bindings[]` (type=function_tool) | `app/tools/*.py` (3 files, bodies = `raise NotImplementedError`) |
+| 13 | L3-B | Scaffold script → `gh skill install` | Installs 4 skills at pinned versions from GitHub, verifies provenance SHA against Design Contract — **build fails on mismatch** | `skill_references[]` | `skills/bigquery/`, `skills/fraud-detection/`, etc. (4 directories with SKILL.md + references/) |
+| 14 | L3-B | Scaffold script | Wires ADK `SkillToolset` with `load_skill_resource` for progressive L1/L2/L3 loading | Bundled skill directories | `SkillToolset` in root agent's tools list |
+| 15 | L3-B | Scaffold script → ADK SDK | Builds agent package (code + skills + tool declarations + callbacks) | All generated files | `dist/fnol-agent-1.0.0.tar.gz` |
+| 16 | L3-B | Scaffold script → Gen AI Eval SDK | Runs eval set + prompt-injection corpus, checks thresholds | `eval_set_id` + `injection_corpus_id` | Eval metrics + **Eval Attestation** |
+| 17 | L3-B | Custom Test Harness | Runs company-authored FNOL test scenarios through Gen AI Eval autorater | Test scenario files | Simulation report |
+| 18 | L3 | Convergence | Infra IDs from Track A injected into Track B config; bundle re-signed; both attestations registered in Binary Authorization | Plan Attestation + Eval Attestation | Signed bundle in Artifact Registry |
+| 19 | L4 | Harness (pre-staged template) | Pull bundle → verify attestation chain → deploy staging → smoke test → **PROMOTION GATE** → canary (10% × 30min) → 100% prod | `pipeline_configs.harness` + attestation chain | Production agent + **Promotion Attestation** |
+| 20 | L4 | Harness post-deploy hook | Register agent in Apigee API Hub with skill metadata from L1 frontmatter | L1 frontmatter from bundled skills | Agent discoverable by other agents via skills |
+| 21 | L5 | Agent Runtime | Agent receives policyholder request → activates skills (L2) → reasons → loads L3 references on-demand → calls tools via Apigee Gw egress | Live request | Claim filed, enriched, summarized, services booked |
+
+**What the engineer writes after receiving this scaffold:** system prompts (5 agents), FunctionTool bodies (3 tools), `before_tool_callback` validation, eval golden dataset (200+ conversations), domain injection corpus, Memory Bank schema, human escalation thresholds, state regulation guardrails, A2A Agent Card content.
+
 ### What AgentForge provides vs what the FNOL team implements
 
 For this use case, here is the concrete split:
