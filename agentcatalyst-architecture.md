@@ -97,23 +97,33 @@ This document describes the end-to-end architecture of AgentCatalyst — from st
 
 ## End-to-end thread (read this first)
 
-Before diving into the five layers, here is the complete flow as a narrative:
+Before diving into the five layers, here is the complete flow as a narrative. No jargon, no architecture diagrams — just what happens step by step from the developer's perspective.
 
 A developer is asked to build an AI agent that processes auto insurance claims (FNOL). She opens VSCode with GitHub Copilot and types `/specify`. The AgentCatalyst preset presents a structured template with six sections — Business Problem, Workflow, Data Sources, External Integrations, Internal Capabilities, and Infrastructure Requirements. She fills it in using plain English, describing the step-by-step workflow, the data systems involved, the external partner APIs, and her proprietary models. This takes about 15 minutes. The result is `spec.md` — a structured requirements document saved in her workspace.
 
 She types `/plan` and answers a handful of technical questions — GCP region, LLM model, CI/CD tools, Terraform module source. This takes 5 minutes. The result is `plan.md`.
 
-She types `/catalyst.blueprint`. This custom command packages her `spec.md` and `plan.md` and sends them to the Blueprint Advisor — an LlmAgent running on Agent Runtime. The Blueprint Advisor reads her spec, searches the company's pattern catalog and skill catalog in Vertex AI Search, and recommends an architecture: a Coordinator root agent with four sub-agents (Sequential intake, Parallel enrichment, Loop summary, HITL adjuster review), connected to BigQuery, Cloud SQL, and Vertex AI Search via MCP servers, with three external A2A agents for body shop, rental car, and police report services. It returns `agent-blueprint.yaml` — a deployment specification describing WHAT to build.
+She types `/catalyst.blueprint`. This custom command packages her `spec.md` and `plan.md` and sends them to the Blueprint Advisor — an AI advisor running on GCP that has access to the company's catalog of 11 agent patterns, reusable skills, and approved tools. The Blueprint Advisor reads her spec, searches the catalogs, and recommends an architecture: a Coordinator root agent with four sub-agents (Sequential intake, Parallel enrichment, Loop summary, HITL adjuster review), connected to BigQuery, Cloud SQL, and Vertex AI Search via MCP servers, with three external A2A agents for body shop, rental car, and police report services. It returns `agent-blueprint.yaml` — a YAML file describing WHAT to build. Not code — just a specification.
 
-She reviews the YAML in her editor. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the YAML directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves.
+She reviews the YAML in her editor. It's a readable file — agent names, types, tool endpoints, infrastructure settings. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the YAML directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves.
 
-She types `/catalyst.generate`. The coding agent uses `agents-cli scaffold create` for the project structure, then applies Google's `google-agents-cli-adk-code` skill and company overlay skills to generate the complete project from `agent-blueprint.yaml`: 6 agent class files, 3 MCP connections, 3 A2A clients, 3 FunctionTool stubs (marked "engineer implements"), Model Armor callbacks, complete Terraform, Dynatrace observability config, and Jenkins/Harness pipeline definitions. Every file follows company coding standards because the company overlay skills encode those standards.
+She types `/catalyst.generate`. Now the coding agent (Copilot, in her case) reads the YAML and starts generating the actual code. But it doesn't guess how to write the code — it has **skills** installed that teach it the right way:
 
-She opens `app/tools/severity_classifier.py` and writes the actual classification logic — the 20% that requires domain expertise. The 80% boilerplate was handled by `agents-cli`.
+- **Google's `google-agents-cli-adk-code` skill** teaches it how to write correct ADK Python code — the right import paths, the right class constructors, the right way to wire tools to agents. Think of it as a "how to write ADK code" instruction manual that the coding agent reads before writing anything.
+- **The company's `company-terraform-patterns` skill** teaches it which Terraform modules to use and how to pin versions — so the generated Terraform references `github.com/company/tf-modules//agent-runtime@v3.1.0`, not some generic Terraform.
+- **The company's `company-cicd` skill** teaches it to generate a Jenkinsfile and a Harness pipeline definition — NOT to deploy directly from her laptop. This is important: `agents-cli` has a `deploy` command that pushes code straight to GCP, but the company doesn't allow that. The `company-cicd` skill explicitly tells the coding agent: "Generate pipeline files. Do not deploy directly." The coding agent obeys.
+- **The company's `company-observability` skill** teaches it to generate Dynatrace and Splunk configuration, not just the default Cloud Trace.
+- **The company's `company-security` skill** teaches it to generate Model Armor callbacks, VPC-SC references, and CMEK configuration.
 
-She commits, opens a PR, and the company's standard Jenkins/Harness pipelines take it through Non-Prod → Pre-Prod → Prod.
+The result: a complete project in her workspace — 6 agent class files, 3 MCP connections, 3 A2A clients, 3 FunctionTool stubs (marked "engineer implements"), Model Armor callbacks, complete Terraform, Dynatrace observability config, and Jenkins + Harness pipeline definitions. Every file follows company coding standards because the company skills taught the coding agent those standards.
 
-**Total time from "I need an FNOL agent" to generated code committed to GitHub: under 1 hour.** Without AgentCatalyst, this takes 4–6 weeks.
+She opens `app/tools/severity_classifier.py` and writes the actual classification logic — the 20% that requires her domain expertise. She writes system prompts for each agent — the "personality" and instructions that make each agent behave correctly for insurance claims. The 80% boilerplate was handled by the coding agent guided by skills.
+
+She commits and opens a PR. Her team reviews it — the generated code looks familiar because every AgentCatalyst project follows the same company patterns. After the PR is merged, Jenkins automatically runs Terraform to provision the infrastructure (Agent Runtime, Cloud SQL, Model Armor, VPC-SC). Then Harness automatically deploys the agent through Non-Prod (testing), Pre-Prod (canary at 10% traffic), and Production (progressive rollout). If anything breaks, Harness rolls back automatically.
+
+She never ran `agents-cli deploy`. She never provisioned a GCP resource from her laptop. She never wrote a Dockerfile or a Cloud Build config. All of that was either generated by the coding agent (Terraform, pipeline definitions) or handled by the company's CI/CD after she committed.
+
+**Total time from "I need an FNOL agent" to generated code committed to GitHub: under 1 hour.** The remaining 2–4 hours are spent writing the 20% — system prompts, FunctionTool business logic, and test data. Without AgentCatalyst, this entire process takes 4–6 weeks.
 
 ---
 
