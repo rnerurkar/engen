@@ -214,6 +214,20 @@ Saved as `plan.md`. (~5 min)
 
 Type `/catalyst.blueprint`. Wait ~30 seconds. `app-blueprint.yaml` appears in your workspace.
 
+**What happens behind the scenes in those 30 seconds:**
+
+The coding agent sends your `spec.md` + `plan.md` to the Blueprint Advisor (an AI running on GCP). The Blueprint Advisor reads your spec and does three searches against the company's curated catalogs:
+
+1. **Pattern search** — reads your Workflow section's ordering words ("First," "Simultaneously," "Refine until") and searches the pattern catalog to find the right agent topology. "First... then..." → Sequential. "Simultaneously" → Parallel. "Refine until" → Loop.
+
+2. **Tool search** — reads your Data Sources and External Integrations sections and searches the tool registry for the specific tools your agent needs. The tool registry is chunked at the **individual tool level**, not the server level — so when you write "BigQuery analytical queries," the search matches the specific `execute_query` tool on the BigQuery MCP server, not just "BigQuery" generically. MCP tools and A2A agent tasks are in the same registry, so one search finds both. If you wrote "they operate their own body shop service," the search finds the A2A agent. If the company had built an internal MCP server instead, it would find that.
+
+3. **Skill search** — finds skills that match the tools and capabilities your agent needs. Skills are automatically paired with their corresponding tools — the `bigquery` skill gets assigned to the same agent that uses the BigQuery MCP server.
+
+**How the Blueprint Advisor decides which tool goes to which agent:**
+
+It uses **co-occurrence** — which data source is mentioned in the same sentence as which workflow step. Your spec says: *"First, verify coverage **by querying our BigQuery**."* BigQuery is mentioned in the same sentence as "verify" → BigQuery MCP is assigned to the `verify_policy` agent. This is why the language in your spec matters — clear co-occurrence leads to correct assignments.
+
 The coding agent shows a summary:
 
 ```
@@ -230,14 +244,30 @@ Review the YAML and edit before running /catalyst.generate.
 
 ### 2.6 Review and edit the YAML
 
-Open `app-blueprint.yaml`. Common edits:
+Open `app-blueprint.yaml`. The Blueprint Advisor gets it right ~90% of the time. The other 10% is why you review.
 
-| What to check | Fix if wrong |
-|---|---|
-| Agent types | Change `type: SequentialAgent` to `type: ParallelAgent` |
-| Tool assignment | Change `assigned_to: extract_details` to `assigned_to: fnol_coordinator` |
-| Missing tool | Add entry to `tools.mcp_servers:` (check `memory/approved-tools.md`) |
-| Model | Change `platform.model:` |
+**What to check — the assignment audit:**
+
+For each tool in the YAML, verify the `assigned_to` agent makes sense:
+
+| In the YAML | Ask yourself | If wrong |
+|---|---|---|
+| `bigquery-policy → assigned_to: verify_policy` | "Does verify_policy need BigQuery?" Yes — spec says "verify coverage by querying BigQuery" | ✓ Correct |
+| `cloud-sql-claims → assigned_to: extract_details` | "Does extract_details write to Cloud SQL?" No — it extracts from caller input. Cloud SQL writes happen at coordinator level. | ✗ Change to `fnol_coordinator` |
+| `body-shop-network → assigned_to: enrichment_fan_out` | "Is body shop part of enrichment?" Yes — spec says "simultaneously enrich... body shop" | ✓ Correct |
+| `bigquery skill → assigned_to: verify_policy` | "Is the BigQuery skill on the same agent as bigquery-mcp?" Yes — both on verify_policy | ✓ Correct |
+
+**Common assignment mistakes and how to fix them:**
+
+| Mistake | Why it happens | How to fix |
+|---|---|---|
+| **Write tool on a leaf agent** | Spec says "extract and save" in one sentence — Blueprint Advisor assigns Cloud SQL to `extract_details` | Move `assigned_to` to the coordinator. Write operations are usually coordinator-level. |
+| **Tool on wrong parallel branch** | Spec mentions "fraud scoring" and "police report" in the same paragraph — Blueprint Advisor mixes up which goes where | Check which branch name matches the tool's purpose. Edit `assigned_to`. |
+| **Missing tool entirely** | Spec mentions a data source the tool registry doesn't have | Add the tool manually to the YAML. Then request it be added to the registry (see `memory/approved-tools.md`). |
+| **MCP when it should be A2A (or vice versa)** | Tool registry has the integration registered as the wrong type | This is rare — the registry determines the type. Report to platform engineering. |
+| **Skill on wrong agent** | Skill's `compatible_tools` matched the wrong MCP server | Move the skill's `assigned_to` to match the agent that uses the related tool. |
+
+**Pro tip:** Read the YAML top-to-bottom and mentally trace the FNOL workflow. For each agent, ask: "Does this agent have access to every data source it needs, and ONLY the data sources it needs?" An agent with too many tools has too much scope. An agent missing a tool will fail at runtime.
 
 ### 2.7 `/tasks` — See the breakdown
 
@@ -887,16 +917,67 @@ The existing CI/CD pipelines handle everything — they build the Docker images 
 
 ## 4. Writing Effective Specs — Signal Words That Help
 
-### Words that help pattern selection (agentic)
+### Words that trigger pattern selection
 
-| What you write | What the Blueprint Advisor infers |
-|---|---|
-| "First... Then... After that" | Sequential pipeline (SequentialAgent) |
-| "Simultaneously" / "In parallel" | Parallel fan-out (ParallelAgent) |
-| "Generate... validate... refine until" | Loop (LoopAgent) |
-| "If [condition], route to [human]" | Human-in-the-loop |
-| "they operate their own" | External A2A agent connection |
-| "our proprietary" | FunctionTool stub (you implement) |
+The Blueprint Advisor reads your Workflow section and searches the pattern catalog. These words help it find the right patterns:
+
+| What you write | What the Blueprint Advisor searches for | Pattern found |
+|---|---|---|
+| "First... Then... After that" | `sequential ordered dependency` | SequentialAgent |
+| "Simultaneously" / "In parallel" | `parallel concurrent independent` | ParallelAgent |
+| "Generate... validate... refine until" | `loop iterative threshold` | LoopAgent |
+| "If [condition], route to [human]" | `human approval async routing` | HITL (LlmAgent + LongRunningFunctionTool) |
+| "Coordinate across multiple domains" | `coordinator dispatcher multi-domain` | LlmAgent as root with sub_agents |
+| "Search documents and reason" | `agentic RAG retrieval reasoning` | LlmAgent + Vertex AI Search |
+
+### Words that trigger tool discovery
+
+The Blueprint Advisor reads your Data Sources and External Integrations sections and searches the tool registry. The tool registry is chunked at the **individual tool level** — so specific language helps it find the exact tool, not just the server:
+
+| What you write | What the Blueprint Advisor searches for | What it finds |
+|---|---|---|
+| "BigQuery — analytical queries, read-only" | `BigQuery analytical query read-only` | `execute_query` tool on bigquery-mcp server |
+| "Cloud SQL — create claim records, transactional" | `Cloud SQL transactional INSERT UPDATE` | `execute_sql` tool on cloudsql-mcp server |
+| "Search policy documents for coverage" | `Vertex AI Search document retrieval` | `search_documents` tool on vertex-search-mcp |
+| "body shop — they operate their own quoting service" | `body shop repair estimate` | `get_repair_estimate` task on body-shop-network A2A agent |
+| "our proprietary fraud detection model" | (no search — ownership signal) | FunctionTool stub (you implement) |
+
+**Key distinction — ownership signals determine MCP vs A2A:**
+
+| What you write | Blueprint Advisor infers | Connection type |
+|---|---|---|
+| "BigQuery" / "Cloud SQL" / "our data warehouse" | We operate it | MCP server (`MCPToolset`) |
+| "they operate their own" / "partner API" / "municipal system" | External partner | A2A agent (`AgentTool`) |
+| "our proprietary" / "internal model" | Company-owned logic | FunctionTool stub (no external connection) |
+
+You don't need to specify whether something is MCP or A2A. The tool registry knows. Just describe what it is and who operates it.
+
+### Words that drive correct tool-to-agent assignment
+
+The Blueprint Advisor assigns tools to agents based on **co-occurrence** — which data source you mention in the same sentence as which workflow step. This is why sentence structure matters:
+
+**Good — clear co-occurrence (Blueprint Advisor assigns correctly):**
+
+```markdown
+## Workflow
+1. First, verify the policyholder's coverage by querying our BigQuery
+   policy data warehouse.
+```
+
+The Blueprint Advisor reads: "verify" (→ agent: verify_policy) + "BigQuery" (→ tool: bigquery-mcp) in the same sentence → assigns bigquery-mcp to verify_policy. ✅
+
+**Bad — ambiguous co-occurrence (Blueprint Advisor may assign incorrectly):**
+
+```markdown
+## Workflow
+1. First, verify the policyholder's coverage.
+## Data Sources
+- BigQuery — policy data warehouse
+```
+
+BigQuery is mentioned in the Data Sources section, not in the workflow step. The Blueprint Advisor doesn't know which agent needs BigQuery — it might assign it to the root coordinator instead of verify_policy. ❌
+
+**Fix:** Mention the data source **in the workflow step** where it's used, not just in the Data Sources section.
 
 ### Words that help brownfield detection
 
@@ -910,12 +991,14 @@ The existing CI/CD pipelines handle everything — they build the Docker images 
 
 ### Common mistakes
 
-| Mistake | Better approach |
-|---|---|
-| "uses BigQuery" (no workload type) | "BigQuery (analytical queries, read-only)" |
-| "body shop API" (no ownership) | "body shop — they operate their own API" |
-| "process the claim" (vague workflow) | Break into explicit steps with ordering words |
-| One spec for multiple apps | One spec per application. Multiple apps = multiple specs. |
+| Mistake | Why it's a problem | Better approach |
+|---|---|---|
+| "uses BigQuery" (no workload type) | Blueprint Advisor can't distinguish `execute_query` (analytical) from `execute_sql` (transactional) | "BigQuery (analytical queries, read-only)" |
+| "body shop API" (no ownership) | Blueprint Advisor doesn't know if it's MCP or A2A | "body shop — they operate their own API" |
+| "process the claim" (vague workflow) | Blueprint Advisor can't determine ordering or parallelism | Break into explicit steps with ordering words |
+| Data source in Data Sources section only | Tool assigned to wrong agent (no co-occurrence) | Mention the data source IN the workflow step where it's used |
+| "extract and save to Cloud SQL" in one step | Write tool assigned to leaf agent instead of coordinator | Split: "extract details" (leaf) then "save claim record" (coordinator step) |
+| One spec for multiple apps | Too many concerns, confused tool assignments | One spec per application |
 
 ---
 
@@ -1093,7 +1176,247 @@ describe('GreetingService', () => {
 
 ---
 
-## 8. Deployment Rules — What NOT to Do
+## 8. Reading Blueprint Advisor Confidence Scores
+
+The Blueprint Advisor returns each recommendation with a confidence score. Confidence comes from how strongly your spec matched the catalog — not from the LLM's reasoning. Understanding the score helps you decide what to trust and what to question.
+
+### What confidence means
+
+| Tier | Score range | What it means | What you should do |
+|---|---|---|---|
+| **High** | ≥ 0.85 with clear gap to next result | The catalog has a clear winner — search returned one obvious match | Trust it. Verify `assigned_to` is on the right agent and move on. |
+| **Medium** | 0.65–0.85, or top score is high but next is close | Multiple candidates matched. The Blueprint Advisor picked the best, but alternatives exist. | Check the `alternatives:` field in the YAML. Pick the one that matches your intent. |
+| **Low** | < 0.65 | Search couldn't find a confident match. Either the spec is ambiguous or the catalog doesn't have what you need. | Don't accept the recommendation. Either rewrite the spec to be more specific, or contact platform engineering if you think a tool is missing from the registry. |
+
+### Example: Medium confidence with alternatives
+
+```yaml
+tools:
+  mcp_servers:
+    - name: bigquery-policy
+      assigned_to: verify_policy
+      confidence: 0.78          # Medium — alternatives present
+      alternatives:
+        - name: bigquery-claims-history
+          score: 0.71
+          reason: "Also matches 'BigQuery analytical' but in claims domain"
+```
+
+The Blueprint Advisor picked `bigquery-policy` because your spec mentioned policy data. But it's telling you `bigquery-claims-history` is a close second — if you actually need claims history data, switch the assignment.
+
+### Example: Low confidence flag
+
+```yaml
+tools:
+  mcp_servers:
+    - name: TBD
+      assigned_to: verify_policy
+      requires_review: true
+      confidence: 0.52
+      notes: "Spec mentions 'data warehouse' but no specific system. 
+              Please specify BigQuery (analytical) or Cloud SQL (transactional) 
+              and re-run /catalyst.blueprint."
+```
+
+When you see `requires_review: true`, the Blueprint Advisor is telling you it can't make a confident recommendation. Don't run `/catalyst.generate` — fix the spec first.
+
+---
+
+## 9. When the Blueprint Advisor Gets It Wrong
+
+Even with good specs, the Blueprint Advisor sometimes misses. Here are the most common failure modes and how to diagnose them.
+
+### Failure mode 1: Tool assigned to wrong agent
+
+**Symptom:** Generated code has `cloud-sql-claims` connected to `extract_details`, but `extract_details` doesn't actually write to Cloud SQL — the coordinator does.
+
+**Why it happened:** Your spec said *"extract details and save to Cloud SQL"* in one sentence. The Blueprint Advisor saw co-occurrence between "extract" and "Cloud SQL" and assigned them together.
+
+**How to fix:**
+1. In the YAML, change `assigned_to: extract_details` to `assigned_to: fnol_coordinator`
+2. To prevent this recurring, rewrite the spec to separate the actions: *"Extract incident details from the caller's description. The coordinator records the claim in our Cloud SQL claims database."*
+
+### Failure mode 2: Search returns alternatives instead of a clear winner
+
+**Symptom:** Multiple `alternatives:` fields in the YAML. The Blueprint Advisor isn't sure which tool you wanted.
+
+**Why it happened:** Your spec is ambiguous. Either you used generic language ("data warehouse") or your data sources overlap (multiple BigQuery datasets in the registry).
+
+**How to fix:**
+1. Pick the right alternative manually in the YAML, or
+2. Rewrite the spec to be specific. "Query BigQuery" is ambiguous if there are 3 BigQuery datasets in the registry. "Query the policy data warehouse in BigQuery" is unambiguous.
+
+### Failure mode 3: A tool you need isn't in the recommendation
+
+**Symptom:** Your spec mentions a system, but no MCP server or A2A agent for it appears in the YAML.
+
+**Why it happened:** Two possibilities:
+- The tool isn't in the registry (catalog gap)
+- The tool is in the registry but enrichment metadata doesn't match your spec language
+
+**How to diagnose:**
+1. Check `memory/approved-tools.md` to see if the tool exists
+2. If it exists but wasn't found, the issue is enrichment metadata. Add the tool manually to the YAML and report the search miss to platform engineering.
+3. If it doesn't exist, this is a registry gap. Submit a request via platform engineering JIRA.
+
+### Failure mode 4: Pattern composition that doesn't make architectural sense
+
+**Symptom:** Generated YAML composes patterns that shouldn't be composed (e.g., LoopAgent with HITL sub-agent).
+
+**Why it happened:** Your spec described both iteration and human approval, and the Blueprint Advisor combined them naively. The pattern composition validator should have caught this — if it didn't, it's a validator gap.
+
+**How to fix:**
+1. Re-architect the YAML so iteration happens before human approval, not within it
+2. Re-run `/catalyst.generate` — the validator should now pass
+3. Report the missed composition rule to EA
+
+### Failure mode 5: Brownfield signals ignored
+
+**Symptom:** You wrote "EXISTING database — DO NOT create new" but the YAML still includes Terraform for a new database.
+
+**Why it happened:** The brownfield signal was buried or contradicted elsewhere in the spec.
+
+**How to fix:**
+1. Set `infrastructure.terraform.action: SKIP` manually in the YAML
+2. Strengthen the spec: put "EXISTING" / "DO NOT create new" in BOTH the Dependencies section AND the Infrastructure Requirements section
+
+### When to fix the YAML vs rewrite the spec
+
+| Situation | Action |
+|---|---|
+| One or two field-level mistakes (wrong `assigned_to`) | Fix the YAML directly. Cheaper than re-running. |
+| Multiple field-level mistakes, but pattern is correct | Fix the YAML. Note the pattern in your team's spec-writing guide. |
+| Wrong pattern selected (Sequential when you meant Parallel) | Rewrite the spec with clearer ordering language, re-run /catalyst.blueprint |
+| Multiple `requires_review: true` fields | Rewrite the spec entirely. The Blueprint Advisor is telling you the spec is too ambiguous. |
+| Tool you need isn't in the registry | Add manually to YAML + submit JIRA request to platform engineering |
+
+### When to escalate to platform engineering
+
+| Issue | How to escalate |
+|---|---|
+| Tool missing from registry | Platform engineering JIRA: include tool name, vendor, business case, contact info |
+| Search consistently returns wrong tool for your data source | Platform engineering JIRA: include 3+ examples of spec language → wrong recommendation |
+| Pattern composition that should have been blocked | EA office hours: bring the YAML and explain why the composition is invalid |
+| Acceptance metrics on dashboard show your LOB at < 60% | Schedule spec quality review with EA |
+
+---
+
+## 10. Spec Quality Self-Check
+
+Run this 10-question checklist before `/catalyst.blueprint`. A spec that passes all 10 gets ~95% Blueprint Advisor accuracy. A spec that fails several gets ~60%.
+
+### The checklist
+
+| # | Question | Why it matters |
+|---|---|---|
+| 1 | Does each workflow step start with an ordering word ("First," "Then," "Simultaneously," "Refine until," "If")? | These trigger pattern selection. Missing them produces wrong topology. |
+| 2 | Is each data source mentioned in a workflow step (not only in the Data Sources section)? | Co-occurrence drives tool-to-agent assignment. No co-occurrence = wrong assignment. |
+| 3 | Does each external integration include "they operate" or "we operate" language? | Determines MCP vs A2A vs FunctionTool. Ambiguous ownership produces wrong connection type. |
+| 4 | Does each database/data source specify workload type (analytical, transactional, retrieval)? | Determines which specific tool on the MCP server is selected. |
+| 5 | Are FunctionTool stubs explicitly marked "our proprietary" or "internal model"? | Tells the Blueprint Advisor not to search for these — they're stubs. |
+| 6 | If brownfield: are "EXISTING" / "DO NOT create" signals in BOTH Dependencies and Infrastructure sections? | Brownfield signals must be unambiguous to skip infrastructure generation. |
+| 7 | Is the Workflow section a sequence of explicit steps (not a wishlist or paragraph)? | Wishlists can't be parsed for ordering. |
+| 8 | Are write actions ("create record," "update status") attributed to the coordinator, not extraction or enrichment steps? | Write tools assigned at coordinator scope are usually correct. Writes attributed to leaf agents are usually wrong. |
+| 9 | If two systems serve similar purposes (BigQuery + Cloud SQL), is each one's purpose disambiguated? | Two analytical systems mentioned in one step produces ambiguous matches. |
+| 10 | Is the spec for a single application (not multiple applications combined)? | Multi-app specs produce confused tool assignments. |
+
+### Example — running the checklist on a real spec
+
+**Spec text:**
+
+> "We need an agent for FNOL. It checks coverage and gets repair estimates."
+
+| # | Pass/Fail | Why |
+|---|---|---|
+| 1 | ❌ Fail | No ordering words. Will not produce a clear pattern. |
+| 2 | ❌ Fail | No data sources mentioned in workflow. |
+| 3 | ❌ Fail | No ownership signals. |
+| 4 | ❌ Fail | No workload types. |
+| 5 | ❌ Fail | No proprietary callouts. |
+| 6 | N/A | Greenfield. |
+| 7 | ❌ Fail | One paragraph, not steps. |
+| 8 | ❌ Fail | No write actions specified. |
+| 9 | N/A | No similar systems. |
+| 10 | ✓ Pass | Single app. |
+
+**Score: 1/10. The Blueprint Advisor will struggle.**
+
+**Improved spec:**
+
+> "## Workflow
+> 1. First, verify coverage by querying our BigQuery policy data warehouse (analytical, read-only).
+> 2. Then, extract incident details from the caller's description.
+> 3. Simultaneously enrich with: weather data, police report (municipal — they operate it), repair estimates (body shop network — they operate their own quoting service).
+> 4. Generate a claim summary, validate against our quality rubric, refine until quality > 0.85.
+> 5. The coordinator records the claim in our Cloud SQL claims database (transactional, read-write).
+> 6. If severity is high, route to a human adjuster.
+> 
+> ## Internal Capabilities
+> - Our proprietary fraud detection model
+> - Our proprietary severity classifier"
+
+**Score: 10/10. The Blueprint Advisor will produce high-confidence recommendations.**
+
+---
+
+## 11. Reporting Issues to Platform Engineering
+
+The Blueprint Advisor improves over time based on developer feedback. Reporting issues isn't a complaint — it's how the system gets smarter.
+
+### How to report a missing tool
+
+**When:** You wrote a spec that mentioned a system, but no tool for it appeared in the recommendation.
+
+**Where:** Platform engineering JIRA — `AGENTCATALYST-TOOLS` queue.
+
+**What to include:**
+- Tool name and vendor
+- Endpoint (if known)
+- Business case (which use case needs it, why existing tools don't suffice)
+- Owner contact (vendor TAM or internal team that operates it)
+
+**Timeline:** Tool registration takes 1–2 weeks. Tool starts in `preview` state for 30 days, then `active`.
+
+### How to report a wrong pattern recommendation
+
+**When:** Your spec was clear, but the Blueprint Advisor picked the wrong pattern.
+
+**Where:** EA office hours OR EA `AGENTCATALYST-PATTERNS` queue.
+
+**What to include:**
+- The spec text (especially the Workflow section)
+- The recommended pattern
+- The pattern you expected
+- Why the recommendation is wrong (which signal phrases the Blueprint Advisor missed or misinterpreted)
+
+**Timeline:** EA reviews monthly. System prompt or pattern catalog updates ship in the next quarterly release.
+
+### How to report search quality issues
+
+**When:** The Blueprint Advisor consistently picks the wrong tool for the same kind of spec language across multiple use cases.
+
+**Where:** Platform engineering JIRA — `AGENTCATALYST-SEARCH` queue.
+
+**What to include:**
+- 3+ examples of spec language that produced wrong tool recommendations
+- The tool you expected
+- The tool that was recommended
+
+**Timeline:** Platform engineering reviews telemetry weekly. Enrichment metadata or system prompt updates ship within 2 weeks.
+
+### What platform engineering does with your reports
+
+| Report type | Action taken |
+|---|---|
+| Missing tool | Tool added to registry with full enrichment metadata |
+| Wrong pattern | Pattern catalog metadata updated, system prompt heuristics revised |
+| Search quality issue | Enrichment metadata for affected tools updated, regression suite expanded with your examples |
+
+Your reports become test cases in the regression suite — preventing future regressions for everyone.
+
+---
+
+## 12. Deployment Rules — What NOT to Do
 
 | ❌ Never do this | ✅ Do this instead |
 |---|---|
@@ -1106,7 +1429,7 @@ The `company-cicd` skill explicitly tells the coding agent: "Generate pipeline f
 
 ---
 
-## 9. Troubleshooting
+## 13. Troubleshooting
 
 | Problem | Cause | Fix |
 |---|---|---|
@@ -1118,18 +1441,25 @@ The `company-cicd` skill explicitly tells the coding agent: "Generate pipeline f
 | Brownfield generates new infrastructure | Spec missing "EXISTING" / "DO NOT create" signals | Add explicit brownfield language to spec (see Section 4) |
 | Generated code doesn't compile | Skill version mismatch | Check ADK/Spring Boot version matches skill expectations |
 | Oracle connection fails locally | Wrong JDBC URL or missing credentials | Check `application.yml` datasource config, ensure Oracle RDS is accessible from your machine |
+| Blueprint Advisor consistently picks wrong tool for my data source | Tool registry enrichment metadata is incomplete or doesn't match your spec language | Submit feedback via platform engineering JIRA (`AGENTCATALYST-SEARCH` queue) with 3+ examples of your spec language → wrong recommendation. See Section 11. |
+| Search returns alternatives instead of a clear winner (multiple `alternatives:` fields in YAML) | Spec is ambiguous — multiple tools or patterns match equally well | Run the Spec Quality Self-Check (Section 10). Disambiguate the spec or pick the right alternative manually in the YAML. |
+| Generated code fails because tool no longer exists | Tool was deprecated since the blueprint was generated | Check tool deprecation list. Run `catalyst migrate` if available, or update YAML manually to use the replacement tool. Re-run `/catalyst.generate`. |
+| Pattern composition validator rejects YAML | YAML composes patterns that aren't compatible (e.g., LoopAgent + HITL sub-agent) | Read the validator error — it specifies which composition rule was violated. Either restructure the YAML or rewrite the spec to use compatible patterns. |
+| YAML has `requires_review: true` fields | Blueprint Advisor returned low-confidence results (< 0.65) | Don't run `/catalyst.generate`. Read the `notes:` field for what's ambiguous. Rewrite the spec to be more specific and re-run `/catalyst.blueprint`. |
 
 ### Getting help
 
 | Channel | When |
 |---|---|
 | `#agentcatalyst` Slack | General questions, peer help |
-| Platform Engineering JIRA | Bugs, new skill/tool requests |
-| EA office hours | Pattern questions, spec reviews, architecture guidance |
+| Platform Engineering JIRA — `AGENTCATALYST-TOOLS` | Missing tool requests |
+| Platform Engineering JIRA — `AGENTCATALYST-SEARCH` | Search quality issues, wrong recommendations |
+| Platform Engineering JIRA — `AGENTCATALYST-PATTERNS` | Wrong pattern selection |
+| EA office hours | Pattern questions, spec reviews, architecture guidance, complex composition issues |
 
 ---
 
-## 10. Reference — All Commands
+## 14. Reference — All Commands
 
 | Command | What it does |
 |---|---|
@@ -1146,7 +1476,7 @@ The `company-cicd` skill explicitly tells the coding agent: "Generate pipeline f
 
 ---
 
-## 11. Preset File Map
+## 15. Preset File Map
 
 Every file in the `.specify/` folder serves a specific purpose:
 
@@ -1185,7 +1515,7 @@ Complete preset source code is in **Appendix A of the Architecture Document** (`
 
 ---
 
-## 12. FAQ
+## 16. FAQ
 
 **Q: Can I write the YAML manually?**
 A: Yes. The coding agent doesn't care who produced the YAML. Write it by hand, copy from a teammate, or use any tool.
