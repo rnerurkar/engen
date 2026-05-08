@@ -625,6 +625,24 @@ infrastructure:
 
 **All modules must be from the company's approved Terraform module registry.** Check `memory/infra-standards.md` for available modules and current versions.
 
+### diagrams
+
+The Blueprint Advisor generates three Mermaid diagrams at the bottom of the YAML in a `diagrams:` section. These are not separate files — they're part of the same `agent-blueprint.yaml` you already review.
+
+| Diagram | What you see | What to check |
+|---|---|---|
+| **Component** | Agent tree with boxes for each agent, connected to their tools (MCP servers as cylinders, A2A as hexagons, FunctionTools as parallelograms) | "Does each agent connect to the right tools? Are any tools orphaned or assigned to the wrong agent?" |
+| **Sequence** | Step-by-step message flow showing what happens at runtime — Sequential phases in order, Parallel branches side-by-side, Loop iterations, HITL routing | "Does the flow match my spec's Workflow section? Are the parallel branches correct? Does HITL route on the right condition?" |
+| **Infrastructure** | GCP services inside VPC-SC boundary, external partners outside, CI/CD pipeline connections | "Are all the services I need inside the perimeter? Are external partners shown correctly?" |
+
+**How to view them:** Open `agent-blueprint.yaml` in VSCode. If you have a Mermaid preview extension installed (most setups do), the diagrams render automatically in the preview pane. You can review the YAML fields on the left and see the architecture visually on the right.
+
+**How to edit them:** The diagrams are Mermaid text — you can edit agent names, add notes, adjust layout. If you change the `agents:` or `tools:` sections and re-run `/catalyst.blueprint`, the diagrams regenerate to match.
+
+**How to export them:** If you need PNG/SVG for documentation or a presentation, your CI pipeline can render them automatically. Or locally: `npx -p @mermaid-js/mermaid-cli mmdc -i diagram.mmd -o diagram.png`.
+
+**Pro tip:** During PR review, GitHub and GitLab render Mermaid blocks natively. Your team sees the architecture diagram right in the PR — no extra steps needed.
+
 ---
 
 ## 6. Re-scaffolding — Iterating on the Design
