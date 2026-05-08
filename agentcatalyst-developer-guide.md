@@ -75,8 +75,7 @@ The EA team has already set up everything you need. You don't have to configure 
 | Node.js | 18+ | Required by some coding agents |
 | `gh` CLI | Latest | `brew install gh` — needed for `gh skill install` |
 | `gcloud` CLI | Latest | `brew install google-cloud-sdk` |
-| `agents-cli` | Latest | `pip install google-adk` (includes agents-cli) |
-| `agents-cli` | Latest | `uvx google-agents-cli setup  # installs CLI + 7 skills` |
+| `agents-cli` | Latest | `uvx google-agents-cli setup` (installs CLI + Google's 7 skills) |
 | Git | Latest | Standard |
 
 ### 1.2 One-time setup
@@ -89,24 +88,70 @@ gcloud config set project YOUR_PROJECT_ID
 # 2. Authenticate with GitHub (for skill installation)
 gh auth login
 
-# 3. Install the AgentCatalyst preset
+# 3. Install agents-cli + Google's 7 skills
+uvx google-agents-cli setup
+
+# 4. Install company overlay skills (4 skills)
+gemini skills install github.com/company/agentcatalyst-skills --scope user
+
+# 5. Install the AgentCatalyst Spec Kit preset
 specify preset add agentcatalyst
 
-# 4. Install company overlay skills
-npx skills add company/agentcatalyst-skills
-
-# 5. Verify agents-cli and skills are available
+# 6. Verify everything is installed
 agents-cli --version
 ```
 
-### 1.3 VSCode setup
+### 1.3 Verify your skills are visible
+
+Open your coding agent and check that all 11 skills are discovered (7 Google + 4 company):
+
+```
+> /skills list
+
+  google-agents-cli-workflow       [built-in]  Always active
+  google-agents-cli-adk-code       [built-in]  ADK Python API reference
+  google-agents-cli-scaffold       [built-in]  Scaffold commands
+  google-agents-cli-eval           [built-in]  Evaluation methodology
+  google-agents-cli-deploy         [built-in]  Deployment workflows
+  google-agents-cli-publish        [built-in]  Gemini Enterprise registration
+  google-agents-cli-observability  [built-in]  Cloud Trace, logging
+  company-cicd                     [user]      Company CI/CD (Jenkins + Harness)
+  company-terraform-patterns       [user]      Company Terraform modules
+  company-observability            [user]      Dynatrace + Splunk + OTel
+  company-security                 [user]      Model Armor + VPC-SC + CMEK
+```
+
+**If company skills don't appear:** Run `gemini skills install github.com/company/agentcatalyst-skills --scope user` and then `/skills reload`.
+
+**Where skills live on disk:** After installation, company skills are in `~/.agents/skills/` (user scope, available in every project). Alternatively, skills can be checked into your project repo at `.agents/skills/` (workspace scope, shared with the team via git).
+
+| Scope | Directory | Who installs | Available where |
+|---|---|---|---|
+| User (global) | `~/.agents/skills/` | Developer installs once | Every project on this machine |
+| Workspace (project) | `.agents/skills/` in repo root | Checked into git by team | Everyone who clones this repo |
+| Built-in | Bundled with agents-cli | `uvx google-agents-cli setup` | Google's 7 skills — everywhere |
+
+### 1.4 VSCode setup
 
 Open VSCode and ensure your coding agent is active:
 - **GitHub Copilot:** Check the Copilot icon in the status bar is active
 - **Claude Code:** Ensure the Claude extension is installed and authenticated
 - **Cursor:** Open Cursor (it's a VSCode fork with AI built in)
+- **Gemini CLI:** Open the terminal and run `gemini` to start a session
 
 Open the Copilot Chat panel (or equivalent) — this is where you'll type the `/specify`, `/plan`, and `/catalyst.*` commands.
+
+### 1.5 How skills work (30-second primer)
+
+Skills are instruction manuals that your coding agent reads before writing code. Without skills, your coding agent guesses how to write ADK code. With skills, it follows specific, up-to-date instructions.
+
+**Google's 7 skills** teach your coding agent ADK best practices — the right imports, the right class constructors, the right way to evaluate and observe agents.
+
+**Company's 4 overlay skills** teach your coding agent your company's specific patterns — which Terraform modules to use, how to configure Dynatrace, which Jenkins templates to reference, and how to set up Model Armor.
+
+Your coding agent activates skills on-demand. When you say "generate Terraform," it activates `company-terraform-patterns`. When you say "generate ADK agent classes," it activates `google-agents-cli-adk-code`. It only loads the full instructions when it needs them — keeping the context window lean.
+
+**One important rule:** The company's `company-cicd` skill overrides Google's `google-agents-cli-deploy` skill. This means when you ask the coding agent to "handle deployment," it generates Jenkinsfile + Harness pipeline definitions instead of running `agents-cli deploy` directly. See Section 11 (Deployment Rules) for details.
 
 ---
 
@@ -624,9 +669,9 @@ One of the biggest advantages of skill-guided generation: you can change the YAM
 | Generated code doesn't compile | Skill version mismatch or ADK version change | Check `agents-cli --version` is latest. Report to platform engineering. |
 | Blueprint Advisor recommends wrong pattern | Spec is ambiguous | Rewrite the Workflow section with clearer ordering words (see Section 4). |
 | YAML is missing a tool I need | Blueprint Advisor didn't find it | Check `memory/approved-tools.md` for available tools. Add the tool manually to the YAML. If the tool isn't approved yet, request it from platform engineering. |
-| Coding agent tries to run `agents-cli deploy` | Default workflow skill overriding company rules | Verify company overlay skills are installed (`npx skills add company/agentcatalyst-skills`). Check `GEMINI.md` has the workflow override table. Re-run `/catalyst.generate` which includes explicit skip instructions. |
+| Coding agent tries to run `agents-cli deploy` | Default workflow skill overriding company rules | Verify company overlay skills are installed (`gemini skills install github.com/company/agentcatalyst-skills --scope user`). Check `GEMINI.md` has the workflow override table. Re-run `/catalyst.generate` which includes explicit skip instructions. |
 | Coding agent generates Cloud Build config | Default deploy skill used instead of company-cicd | Same fix as above — ensure company skills override. Delete any generated `cloudbuild.yaml` and re-run `/catalyst.generate`. |
-| Company overlay skills not visible to coding agent | Skills not installed or wrong directory | Run `npx skills add company/agentcatalyst-skills`. Check with `/skills` command in your coding agent to verify all 11 skills are visible (7 Google + 4 company). |
+| Company overlay skills not visible to coding agent | Skills not installed or wrong directory | Run `gemini skills install github.com/company/agentcatalyst-skills --scope user`. Check with `/skills` command in your coding agent to verify all 11 skills are visible (7 Google + 4 company). |
 
 ### Getting help
 
@@ -724,38 +769,69 @@ A: The AgentCatalyst preset replaces the default `GEMINI.md` with a company vers
 
 ## 11. Deployment Rules — What NOT to Do
 
-This section exists because `agents-cli` ships with a `deploy` command and a `deploy` skill that your coding agent might try to use. **In this company, direct deployment from a developer's machine is not permitted.**
+This section exists because `agents-cli` ships with `deploy`, `eval`, and `simulate` commands that your coding agent might try to use. **In this company, none of these are permitted from your developer machine. All deployment and evaluation happens via CI/CD.**
 
 ### The rules
 
 | ❌ Never do this | ✅ Do this instead |
 |---|---|
 | `agents-cli deploy` | Commit code → PR → Jenkins (Terraform) → Harness (canary deploy) |
+| `agents-cli eval` | Write evalsets locally; Harness runs them via Arize against the deployed agent |
+| `agents-cli simulate` | Write simulation scenarios locally; Harness runs them via Arize multi-turn evaluation |
 | `agents-cli publish` | Agent registration is a post-deployment step in the Harness pipeline |
 | Generate Cloud Build config | Company uses Jenkins, not Cloud Build |
 | Provision GCP resources from your machine | Jenkins runs Terraform after PR merge |
-| Modify `GEMINI.md` workflow override section | Leave the override intact — it prevents your coding agent from deploying directly |
+| Modify `GEMINI.md` workflow override section | Leave the override intact — it prevents your coding agent from running these commands |
 
 ### Why these rules exist
 
-`agents-cli deploy` pushes code directly from your laptop to Agent Runtime or Cloud Run. This means:
-- **No code review** — your PR hasn't been approved by your team
-- **No Terraform** — infrastructure isn't provisioned via the company's approved modules
+**For `agents-cli deploy`** — pushing code directly from your laptop means:
+- **No code review** — your PR hasn't been approved
+- **No Terraform** — infrastructure isn't provisioned via approved modules
 - **No canary deployment** — the agent goes straight to 100% traffic
 - **No rollback** — if it breaks, there's no automated rollback
-- **No audit trail** — the deployment isn't tracked in Jenkins/Harness
+- **No audit trail** — the deployment isn't tracked
 
-The company's CI/CD pipeline exists to catch problems before they reach production. Bypassing it is like bypassing the fire alarm — it works until there's a fire.
+**For `agents-cli eval` and `agents-cli simulate`** — these commands call **Agent Evaluation Service** and **Agent Simulation Service** respectively, which are **pre-GA preview services**. Production GCP projects in this company often don't have preview APIs enabled, for two reasons:
+1. **No SLA** — preview services can have downtime or be deprecated without notice
+2. **Compliance** — some regulated environments only permit GA services
 
-### How `/catalyst.generate` enforces this
+If your coding agent calls these from a developer workstation, it might work in your project but break for someone else. The CI/CD pipeline uses **Arize** instead, which is a GA SaaS that runs reliably in any environment.
 
-The `/catalyst.generate` command includes explicit instructions telling the coding agent:
-1. Follow the AgentCatalyst lifecycle, NOT the default agents-cli workflow
-2. Generate Jenkinsfile + harness-pipeline.yaml (using `company-cicd` skill)
-3. Generate Terraform modules (using `company-terraform-patterns` skill)
-4. DO NOT run `agents-cli deploy`, `agents-cli publish`, or any direct provisioning
+### How evaluation actually works
 
-Three override layers reinforce this: the `company-cicd` skill, the project's `GEMINI.md`, and the `/catalyst.generate` command itself. Your coding agent sees the same instruction from three sources — no ambiguity.
+Your job as a developer:
+
+1. **Write evalsets locally** in `tests/evalsets/`:
+   ```json
+   // tests/evalsets/fnol-basic.json
+   [
+     {
+       "test_id": "fnol-001",
+       "input": "I was in a car accident on I-85. Policy P-12345.",
+       "expected_tool_calls": ["bigquery-policy.execute_query"],
+       "expected_agent_sequence": ["fnol_coordinator", "intake_pipeline", "verify_policy"],
+       "expected_output_contains": ["policy verified", "active coverage"],
+       "max_latency_ms": 3000
+     }
+   ]
+   ```
+
+2. **Run unit tests locally** with `pytest` (uses mocks, no GCP services required):
+   ```bash
+   pytest tests/unit/   # Fast feedback, runs on every save
+   ```
+
+3. **Commit evalsets with your code**. Don't run `agents-cli eval` — Harness will run Arize against the deployed agent.
+
+4. **After PR merge**, Harness pipeline:
+   - Deploys agent to non-prod
+   - Runs Arize evaluation against your evalsets
+   - Quality gates: pass rate ≥ 95%, p95 latency ≤ 3s, hallucination ≤ 0.15
+   - If gates pass, promotes to pre-prod, runs again
+   - If gates pass, canary deploys to prod
+
+5. **View results** in Arize dashboard (link is in the Harness pipeline output).
 
 ### What happens after you commit
 
@@ -775,14 +851,132 @@ Jenkins pipeline triggers automatically:
     ↓
 Harness pipeline triggers automatically:
     1. Build container image
-    2. Deploy to Non-Prod (run tests + agent eval)
-    3. Deploy to Pre-Prod (canary at 10% traffic)
-    4. Validate SLOs (latency, error rate, success rate)
+    2. Deploy to Non-Prod
+    3. Run Arize evaluation against Non-Prod agent
+       (uses your evalsets in tests/evalsets/)
+    4. Quality gate: pass_rate ≥ 95%, p95_latency ≤ 3s
+    5. If passing, deploy to Pre-Prod (canary at 10% traffic)
+    6. Run Arize evaluation against Pre-Prod
+    7. Validate SLOs (latency, error rate, success rate)
     5. If SLOs pass → deploy to Production (progressive rollout)
     6. If SLOs fail → automatic rollback
 ```
 
 You don't need to do anything after merging your PR. The pipelines handle everything.
+
+---
+
+## 12. A Concrete Deployment Scenario — FNOL Agent Merge to Production
+
+To make the CI/CD model concrete, here's exactly what happens when you merge a PR for an FNOL agent change. Two distinct pipelines run in sequence — Jenkins for infrastructure, Harness for application. Understanding both helps you debug failures and write better evalsets.
+
+```
+1. Developer merges PR to main branch
+        │
+        ▼
+2. JENKINS pipeline triggers (agent-infra-plan-apply-v3)
+        │
+        ├─ Checkout code, including deployment/terraform/
+        │
+        ├─ Terraform init
+        │   └─ Loads state from GCS backend
+        │
+        ├─ Terraform plan
+        │   └─ Generates plan.json showing what will change
+        │
+        ├─ OPA policy check
+        │   ├─ "All Cloud SQL must use CMEK" ✓
+        │   ├─ "All buckets must be private" ✓
+        │   ├─ "Agent must run in VPC-SC perimeter" ✓
+        │   └─ All policies pass
+        │
+        ├─ Terraform apply
+        │   └─ Updates infrastructure (e.g., adds new MCP server config,
+        │      updates Vertex AI Search data store, rotates secrets)
+        │
+        ├─ Infrastructure health check
+        │   ├─ Cloud SQL responding ✓
+        │   ├─ Vertex AI Search index up to date ✓
+        │   ├─ Model Armor config valid ✓
+        │   └─ All healthy
+        │
+        └─ Trigger Harness pipeline
+            └─ POST to Harness API with build context
+                │
+                ▼
+3. HARNESS pipeline triggers (agent-deploy-canary-v4)
+        │
+        ├─ Build container image
+        │   ├─ Docker build with new agent code
+        │   └─ Push to Artifact Registry as agents/fnol-coordinator:abc123
+        │
+        ├─ Deploy to Non-Prod
+        │   ├─ gcloud agents deploy fnol-coordinator --version abc123 ...
+        │   └─ Agent Engine routes 100% non-prod traffic to new version
+        │
+        ├─ Arize evaluation against Non-Prod
+        │   ├─ Run all evalsets in tests/evalsets/
+        │   ├─ Pass rate: 97% ✓ (threshold 95%)
+        │   ├─ p95 latency: 2.1s ✓ (threshold 3s)
+        │   ├─ Hallucination score: 0.08 ✓ (threshold 0.15)
+        │   └─ All gates pass — proceed
+        │
+        ├─ Approval gate (manual)
+        │   └─ Tech lead approves promotion to Pre-Prod
+        │
+        ├─ Deploy to Pre-Prod (canary 10%)
+        │   ├─ 10% of pre-prod traffic to new version
+        │   ├─ Monitor for 30 minutes
+        │   │   ├─ Dynatrace: p95 latency 2.3s ✓
+        │   │   ├─ Dynatrace: error rate 0.02% ✓
+        │   │   └─ Arize: hallucination drift +0.01 ✓
+        │   └─ Promote to 100% pre-prod
+        │
+        ├─ Arize evaluation against Pre-Prod
+        │   └─ All gates pass
+        │
+        ├─ Deploy to Prod (progressive)
+        │   ├─ Canary 10% (30 min monitoring)
+        │   ├─ Canary 25% (30 min monitoring)
+        │   ├─ Canary 50% (30 min monitoring)
+        │   └─ Full rollout 100%
+        │
+        └─ Deployment complete
+            └─ Slack notification + Splunk audit log entry
+```
+
+### What happens when something fails
+
+If anything fails — Terraform plan rejected by OPA, Arize gates fail, SLOs violated during canary — Harness automatically rolls back to the previous agent version. Jenkins doesn't roll back infrastructure (Terraform state needs careful manual handling), but the failed Terraform apply is visible in Jenkins for platform engineering to address.
+
+### Why this two-plane model matters
+
+The reason AgentCatalyst forbids `agents-cli deploy` and forces this two-plane model is governance. Each plane enforces a specific control:
+
+| Governance concern | How it's enforced |
+|---|---|
+| Infrastructure follows company standards | Jenkins runs OPA policy checks before Terraform apply |
+| All changes are traceable | Every deployment has Jenkins run ID + Harness execution ID logged in Splunk |
+| Production deployments require approval | Harness manual approval gate before pre-prod promotion |
+| Quality gates protect production | Arize evaluation must pass before each environment promotion |
+| Bad deployments don't take down production | Canary deployment + automatic SLO-based rollback in Harness |
+| No one can bypass the pipeline | `agents-cli deploy` is forbidden by three-layer skill override; CI/CD is the only path |
+
+If you ran `agents-cli deploy` from your workstation, none of this would happen. The agent would go straight to 100% traffic with no policy checks, no quality gates, no canary, no rollback, no audit trail. That's the failure mode AgentCatalyst prevents.
+
+### Jenkins vs Harness — what each one is for
+
+| Question | Jenkins | Harness |
+|---|---|---|
+| What does it deploy? | Infrastructure (cloud resources) | Application (agent code) |
+| What tool does it run? | Terraform | Container deployment + traffic shifting |
+| How often does it run? | Infrequently (weeks) | Frequently (multiple times per day) |
+| Rollback strategy | Re-run Terraform (manual, careful) | Automatic traffic shift to previous version |
+| Pipeline ownership | Platform engineering | Your team (with platform-provided template) |
+| Unit of change | Terraform plan | Container image |
+| Gate types | OPA policy checks | Arize quality gates + SLO validation |
+
+Both are essential. Jenkins ensures the agent's environment is correct. Harness ensures the agent's deployment is safe. Together they take your agent from `git push` to production at enterprise scale.
 
 ---
 

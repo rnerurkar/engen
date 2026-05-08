@@ -496,6 +496,114 @@ The platform engineering team runs a weekly ingestion pipeline that populates th
               tools/tasks that no longer exist.
 ```
 
+### How the Blueprint Advisor calls Vertex AI Search (wire-level)
+
+The Blueprint Advisor's three FunctionTools (`search_patterns`, `search_skills`, `search_tools`) each invoke the Vertex AI Search REST API. Understanding the wire-level interaction matters for performance tuning, cost analysis, and troubleshooting.
+
+**API endpoint:**
+
+```
+POST https://discoveryengine.googleapis.com/v1/projects/{PROJECT}/locations/{LOCATION}/collections/default_collection/dataStores/{DATASTORE_ID}/servingConfigs/default_search:search
+```
+
+Three data stores → three different `{DATASTORE_ID}` values:
+- `agentcatalyst-patterns-{archetype}` — pattern catalog per archetype
+- `agentcatalyst-skills` — skill catalog (shared across archetypes)
+- `agentcatalyst-tools` — MCP tools + A2A tasks (shared)
+
+**Authentication:** The Blueprint Advisor runs on Agent Engine with workload identity federation. Its service account has the `roles/discoveryengine.viewer` role on the data stores. No developer credentials are involved.
+
+**Request body example** (formulated by Blueprint Advisor for a pattern search):
+
+```json
+{
+  "query": "sequential ordered dependency pipeline",
+  "pageSize": 5,
+  "queryExpansionSpec": {
+    "condition": "AUTO"
+  },
+  "spellCorrectionSpec": {
+    "mode": "AUTO"
+  },
+  "contentSearchSpec": {
+    "snippetSpec": {
+      "returnSnippet": true,
+      "maxSnippetCount": 1
+    },
+    "extractiveContentSpec": {
+      "maxExtractiveAnswerCount": 1
+    }
+  },
+  "filter": "archetype: ANY(\"agentic\") AND visibility: ANY(\"active\")"
+}
+```
+
+**Response structure:**
+
+```json
+{
+  "results": [
+    {
+      "id": "pattern_sequential-pipeline",
+      "document": {
+        "name": "projects/.../documents/pattern_sequential-pipeline",
+        "structData": {
+          "name": "sequential-pipeline",
+          "adk_classes": ["SequentialAgent"],
+          "use_case_signals": ["ordered steps", "dependency chain"],
+          "composable_with": ["parallel-fan-out", "loop", "human-in-the-loop"],
+          "complexity": "low"
+        },
+        "derivedStructData": {
+          "snippets": [
+            { "snippet": "Use when tasks must execute in a specific order...", "snippet_status": "SUCCESS" }
+          ]
+        }
+      },
+      "modelScores": {
+        "relevance_score": 0.94
+      }
+    }
+  ],
+  "totalSize": 3,
+  "attributionToken": "...",
+  "guidedSearchResult": {},
+  "summary": {}
+}
+```
+
+**Hybrid retrieval** — Vertex AI Search combines two ranking signals:
+
+| Signal | What it does | Driven by |
+|---|---|---|
+| **Semantic** | Compares query embedding to document embeddings (cosine similarity) | The `query` field in the request |
+| **Metadata** | Filters and boosts based on structured fields | The `filter` field + structured data in documents |
+
+The `relevance_score` (0.0–1.0) returned per result combines both signals. The Blueprint Advisor uses this score directly for confidence-tier classification (high ≥ 0.85, medium 0.65–0.85, low < 0.65).
+
+**Filtering semantics:**
+
+```
+filter: "archetype: ANY(\"agentic\") AND visibility: ANY(\"active\")"
+```
+
+This excludes patterns that are deprecated (`visibility: deprecated`) or in preview (`visibility: preview`) — restricting search to production-ready content. The same filter pattern applies to tools (filter for `lifecycle_state: active`) and skills (filter for `version_status: stable`).
+
+**Cost model:** Vertex AI Search charges per query plus per indexed document. With 3 data stores totaling ~150–200 documents and an estimated 50 Blueprint Advisor invocations per day across all developers, projected cost is **~$50–100/month** at moderate enterprise scale. This is included in the GCP infrastructure line item ($500–1,500/month).
+
+**Why developers don't query Vertex AI Search directly:**
+
+| Concern | Direct workstation→Vertex AI Search | Via Blueprint Advisor |
+|---|---|---|
+| **Authentication** | Each developer needs reader IAM role on data stores | Only Blueprint Advisor's service account needs the role |
+| **Data exposure** | Tool registry (with sensitive endpoints) accessible from any workstation | Tool registry only readable by Blueprint Advisor in GCP |
+| **Query reasoning** | Coding agent must formulate queries, parse results, merge across data stores | Blueprint Advisor (LLM) handles all of this with system prompt |
+| **Network requirements** | Workstation needs egress to discoveryengine.googleapis.com | Workstation only needs HTTPS to one endpoint (Agent Engine) |
+| **Auditability** | Hard to track who searched what | Centralized logs at Blueprint Advisor |
+| **Response shaping** | Each coding agent re-implements YAML assembly | Blueprint Advisor returns ready-to-use YAML |
+
+The Blueprint Advisor is the **only** entity that calls Vertex AI Search. Developers' coding agents call only the Blueprint Advisor API. This isolation is central to AgentCatalyst's security model.
+
 ### The 11 agentic patterns (Phase 1 catalog)
 
 Each pattern is documented with 8 mandatory sections:
@@ -984,9 +1092,170 @@ AgentCatalyst generates CI/CD pipeline definitions. The company's pipelines exec
 | Stage | Tool | What happens |
 |---|---|---|
 | PR Review | GitHub | Team reviews generated code + engineer implementations. |
-| Non-Prod | Jenkins + Harness | Terraform apply (infra), build, unit tests, integration tests, eval. |
-| Pre-Prod | Harness | Canary deployment (10% traffic), SLO validation. |
+| Non-Prod | Jenkins + Harness | Terraform apply (infra), build, unit tests, integration tests, **Arize evaluation against deployed agent (agentic archetype)**. |
+| Pre-Prod | Harness | Canary deployment (10% traffic), **Arize evaluation against pre-prod (agentic)**, SLO validation. |
 | Production | Harness | Progressive rollout, monitoring, automatic rollback. |
+
+### Evaluation pattern — Arize via CI/CD (no preview services)
+
+For the agentic archetype, AgentCatalyst evaluates deployed agents using **Arize** triggered by the Harness pipeline. This avoids dependency on Agent Evaluation Service and Agent Simulation Service (both pre-GA preview services) — making AgentCatalyst deployable to any GCP project, including locked-down environments where preview APIs are not enabled.
+
+For non-agentic archetypes (microservices, pipelines, APIs), evaluation uses standard Java/Python testing frameworks (JUnit, pytest, integration tests) — Arize is specifically for LLM-based agent evaluation.
+
+**Evaluation flow (agentic archetype):**
+
+```
+Developer writes evalsets locally
+  tests/evalsets/fnol-basic.json    ← input/expected JSON
+  
+git commit + push
+  └─► Jenkins pipeline
+        ├─ Terraform apply (infra)
+        ├─ Build container image
+        ├─ Local unit tests (pytest with mocks)
+        └─ Trigger Harness
+              │
+              ▼ Harness pipeline (per environment)
+              ├─ Deploy agent to Agent Engine (non-prod)
+              ├─ Run Arize evaluation suite against deployed agent
+              │   ├─ Tool trajectory accuracy
+              │   ├─ Response quality
+              │   ├─ Latency p95
+              │   ├─ Hallucination scores
+              │   └─ Multi-turn coherence
+              ├─ Quality gate
+              │   ├─ pass_rate ≥ 0.95 → promote
+              │   ├─ p95_latency ≤ 3000ms → promote
+              │   ├─ hallucination_score ≤ 0.15 → promote
+              │   └─ Otherwise → block + notify
+              ├─ Repeat for pre-prod
+              └─ Canary deploy to prod with Arize observability
+```
+
+**Where Arize lives in the architecture:**
+
+| Component | Location | Notes |
+|---|---|---|
+| Arize SaaS account | External (arize.com) | Provisioned by platform engineering, shared across all AgentCatalyst projects |
+| Arize CLI (`arize-eval-cli`) | Harness pipeline runners | Installed via pip in pipeline container |
+| Arize API credentials | Harness Secret Manager | `ARIZE_API_KEY_SECRET`, `ARIZE_SPACE_KEY_SECRET` |
+| Evaluation results | Arize dashboard + Splunk | Results streamed to Arize for visualization, mirrored to Splunk for compliance audit |
+
+The `company-cicd` skill generates Harness pipeline YAML with Arize stages. Developers don't write the Arize integration manually.
+
+**Local evaluation (developer workstation):** Limited to unit tests with mocks via `pytest`. End-to-end evaluation requires the agent to be deployed, which happens only in CI/CD. This prevents "works on my machine" deployment surprises.
+
+**Generic evaluation platform:** If Arize isn't an option for your enterprise, the same pattern works with LangSmith, Patronus AI, Maxim, or a custom solution. The pipeline stage is the integration point — what runs inside the stage can be swapped without changing the architecture. The `company-cicd` skill encapsulates this choice.
+
+### A concrete deployment scenario — FNOL agent merge to production
+
+To make the two-plane CI/CD model concrete, here's what actually happens when a developer merges a PR for an FNOL agent change:
+
+```
+1. Developer merges PR to main branch
+        │
+        ▼
+2. JENKINS pipeline triggers (agent-infra-plan-apply-v3)
+        │
+        ├─ Checkout code, including deployment/terraform/
+        │
+        ├─ Terraform init
+        │   └─ Loads state from GCS backend
+        │
+        ├─ Terraform plan
+        │   └─ Generates plan.json showing what will change
+        │
+        ├─ OPA policy check
+        │   ├─ "All Cloud SQL must use CMEK" ✓
+        │   ├─ "All buckets must be private" ✓
+        │   ├─ "Agent must run in VPC-SC perimeter" ✓
+        │   └─ All policies pass
+        │
+        ├─ Terraform apply
+        │   └─ Updates infrastructure (e.g., adds new MCP server config,
+        │      updates Vertex AI Search data store, rotates secrets)
+        │
+        ├─ Infrastructure health check
+        │   ├─ Cloud SQL responding ✓
+        │   ├─ Vertex AI Search index up to date ✓
+        │   ├─ Model Armor config valid ✓
+        │   └─ All healthy
+        │
+        └─ Trigger Harness pipeline
+            └─ POST to Harness API with build context
+                │
+                ▼
+3. HARNESS pipeline triggers (agent-deploy-canary-v4)
+        │
+        ├─ Build container image
+        │   ├─ Docker build with new agent code
+        │   └─ Push to Artifact Registry as agents/fnol-coordinator:abc123
+        │
+        ├─ Deploy to Non-Prod
+        │   ├─ gcloud agents deploy fnol-coordinator --version abc123 ...
+        │   └─ Agent Engine routes 100% non-prod traffic to new version
+        │
+        ├─ Arize evaluation against Non-Prod
+        │   ├─ Run all evalsets in tests/evalsets/
+        │   ├─ Pass rate: 97% ✓ (threshold 95%)
+        │   ├─ p95 latency: 2.1s ✓ (threshold 3s)
+        │   ├─ Hallucination score: 0.08 ✓ (threshold 0.15)
+        │   └─ All gates pass — proceed
+        │
+        ├─ Approval gate (manual)
+        │   └─ Tech lead approves promotion to Pre-Prod
+        │
+        ├─ Deploy to Pre-Prod (canary 10%)
+        │   ├─ 10% of pre-prod traffic to new version
+        │   ├─ Monitor for 30 minutes
+        │   │   ├─ Dynatrace: p95 latency 2.3s ✓
+        │   │   ├─ Dynatrace: error rate 0.02% ✓
+        │   │   └─ Arize: hallucination drift +0.01 ✓
+        │   └─ Promote to 100% pre-prod
+        │
+        ├─ Arize evaluation against Pre-Prod
+        │   └─ All gates pass
+        │
+        ├─ Deploy to Prod (progressive)
+        │   ├─ Canary 10% (30 min monitoring)
+        │   ├─ Canary 25% (30 min monitoring)
+        │   ├─ Canary 50% (30 min monitoring)
+        │   └─ Full rollout 100%
+        │
+        └─ Deployment complete
+            └─ Slack notification + Splunk audit log entry
+```
+
+**Failure handling.** If anything fails — Terraform plan rejected by OPA, Arize gates fail, SLOs violated during canary — Harness automatically rolls back to the previous agent version. Jenkins doesn't roll back infrastructure (Terraform state would need careful manual handling), but the failed Terraform apply is visible in Jenkins for platform engineering to address.
+
+### Why the two-plane model matters for AgentCatalyst's value proposition
+
+The reason AgentCatalyst forbids direct deployment from developer workstations and forces this two-plane model is governance. Each plane enforces a specific control:
+
+| Governance concern | How it's enforced |
+|---|---|
+| Infrastructure follows company standards | Jenkins runs OPA policy checks before Terraform apply |
+| All changes are traceable | Every deployment has Jenkins run ID + Harness execution ID logged in Splunk |
+| Production deployments require approval | Harness manual approval gate before pre-prod promotion |
+| Quality gates protect production | Arize evaluation must pass before each environment promotion |
+| Bad deployments don't take down production | Canary deployment + automatic SLO-based rollback in Harness |
+| No one can bypass the pipeline | Direct deployment is forbidden by three-layer skill override; CI/CD is the only path |
+
+If a developer bypassed the pipeline and deployed directly from their workstation, none of this happens. The agent goes straight to 100% traffic with no policy checks, no quality gates, no canary, no rollback, no audit trail. That is the failure mode AgentCatalyst is designed to prevent.
+
+### Jenkins vs Harness — purpose summary
+
+| Question | Jenkins | Harness |
+|---|---|---|
+| What does it deploy? | Infrastructure (cloud resources) | Application (agent code) |
+| What tool does it run? | Terraform | Container deployment + traffic shifting |
+| How often does it run? | Infrequently (weeks) | Frequently (multiple times per day) |
+| Rollback strategy | Re-run Terraform (manual, careful) | Automatic traffic shift to previous version |
+| Pipeline ownership | Platform engineering | Application team (with platform-provided template) |
+| Unit of change | Terraform plan | Container image |
+| Gate types | OPA policy checks | Arize quality gates + SLO validation |
+
+Both are essential. Jenkins ensures the agent's environment is correct. Harness ensures the agent's deployment is safe. Together they form the deployment pipeline that lets AgentCatalyst safely take agents from `git push` to production at enterprise scale.
 
 ---
 

@@ -22,7 +22,7 @@ graph LR
     PLAN["/plan\n\nTechnical\ndecisions"]
     BA["Blueprint\nAdvisor\n\nPattern + tool\nselection"]
     REV["Developer\nReview\n\nEdit YAML\nif needed"]
-    SCAFFOLD["agents-cli\n+ skills\n\nSkill-guided\ncode generation"]
+    SCAFFOLD["agents-cli\nscaffold\n\nDeterministic\ncode generation"]
     CICD["Company CI/CD\n\nNon-Prod →\nPre-Prod → Prod"]
 
     SPEC --> PLAN --> BA --> REV --> SCAFFOLD --> CICD
@@ -42,12 +42,12 @@ graph LR
 
 ![AgentCatalyst — How It Works](AgentCatalyst-SLT-Interaction-Diagram.png)
 
-*The diagram above shows the complete flow: a developer captures requirements via a structured template (Phase 1), the Blueprint Advisor recommends an architecture as a YAML file (Phase 2), the coding agent uses agents-cli skills + company overlay skills to generate the entire project (Phase 3), the company's existing CI/CD deploys it (Phase 4), and the agent runs on GCP with full security and monitoring (Phase 5). The developer's total hands-on time is under 1 hour for the 80% that's auto-generated — the remaining 20% is business logic that requires domain expertise.*
+*The diagram above shows the complete flow: a developer captures requirements via a structured template (Phase 1), the Blueprint Advisor recommends an architecture as a YAML file (Phase 2), agents-cli deterministically scaffolds the entire project using company skills (Phase 3), the company's existing CI/CD deploys it (Phase 4), and the agent runs on GCP with full security and monitoring (Phase 5). The developer's total hands-on time is under 1 hour for the 80% that's auto-generated — the remaining 20% is business logic that requires domain expertise.*
 
 ### Key principles
 
 1. **Spec-driven, not prompt-driven.** Requirements are captured in a structured template — not free-form chat. Every developer produces the same quality of input regardless of experience level.
-2. **AI-advised, human-decided.** The Blueprint Advisor recommends an architecture; the developer reviews and edits the YAML before code generation. The human is always in control.
+2. **AI-advised, human-decided.** The Blueprint Advisor recommends an architecture; the developer reviews and edits the YAML before scaffolding. The human is always in control.
 3. **Skill-guided code generation.** The coding agent uses Google's 7 agents-cli skills + company overlay skills to generate agent code from the YAML blueprint. The skills ensure consistency with ADK best practices and company standards across all teams.
 4. **Company-grounded.** Generation & Lifecycle templates embed company best practices — naming conventions, folder structure, security defaults, observability standards. The 50th agent looks like the 1st.
 5. **Open tools, no vendor lock-in.** Spec Kit is GitHub open source. ADK is Google open source. agents-cli is Google open source. The YAML is a standard configuration file. Company overlay skills are the only company-specific component. No proprietary platform required.
@@ -74,7 +74,7 @@ Google ships three Agent Garden templates through `agents-cli`:
 | `adk_a2a` | Multi-agent starter with A2A protocol support |
 | `agentic_rag` | RAG agent with Vertex AI Search integration |
 
-These templates are excellent starting points — but they solve a **different problem**. They answer: *"How do I create an ADK project?"* AgentCatalyst answers: *"How do I capture structured requirements, get AI-assisted architecture advice, and generate a complete production-ready agent with company infrastructure, security, observability, and CI/CD — in under an hour?"*
+These templates are excellent starting points — but they solve a **different problem**. They answer: *"How do I create an ADK project?"* AgentCatalyst answers: *"How do I capture structured requirements, get AI-assisted architecture advice, and scaffold a complete production-ready agent with company infrastructure, security, observability, and CI/CD — in under an hour?"*
 
 Google's templates provide the skeleton. `agents-cli` fills it with company-specific organs — proper Terraform modules, Dynatrace observability, Model Armor screening, Jenkins/Harness pipelines, and naming conventions that pass your company's code review on the first PR.
 
@@ -82,7 +82,7 @@ Google's templates provide the skeleton. `agents-cli` fills it with company-spec
 
 Google Cloud Next '26 (April 2026) shipped the managed primitives AgentCatalyst depends on: Agent Runtime / Agent Engine *(GA)*, Model Armor *(GA)*, `agents-cli` with Agent Garden templates, and the official Agent Skills repository. GitHub shipped Spec Kit (open source, 30+ coding agent integrations) and `gh skill` (GitHub CLI with provenance verification). ADK reached GA stability with `SequentialAgent`, `ParallelAgent`, `LoopAgent`, `LlmAgent`, `MCPToolset`, `AgentTool`, and `SkillToolset` as production-ready classes.
 
-Before these, building a standardized agent development accelerator required hand-rolling every layer — the framework, the runtime, the skills mechanism, the specification workflow, and the code generation pipeline. After them, the primitives exist. AgentCatalyst is the opinionated company layer that makes them work together as a paved road.
+Before these, building a standardized agent development accelerator required hand-rolling every layer — the framework, the runtime, the skills mechanism, the specification workflow, and the scaffolding engine. After them, the primitives exist. AgentCatalyst is the opinionated company layer that makes them work together as a paved road.
 
 ---
 
@@ -516,7 +516,7 @@ sequenceDiagram
 
 ### agent-blueprint.yaml schema
 
-The YAML output follows a fixed schema. The coding agent validates against this schema before generating code.
+The YAML output follows a fixed schema. `agents-cli` validates against this schema before scaffolding.
 
 ```yaml
 metadata:
@@ -621,15 +621,15 @@ infrastructure:
 
 `agents-cli` is Google's unified CLI for the full ADK agent development lifecycle. It ships with **7 skills** that teach any coding agent (Copilot, Claude Code, Gemini CLI, Cursor, Codex) how to build, evaluate, and deploy ADK agents:
 
-| # | Skill | What it teaches the coding agent | Used by AgentCatalyst? |
-|---|---|---|---|
-| 1 | `google-agents-cli-workflow` | Full lifecycle (scaffold → build → evaluate → deploy → publish → observe), code preservation rules, model selection guidance, troubleshooting. Always active. | **YES** — always active |
-| 2 | `google-agents-cli-adk-code` | ADK Python API reference — agents, tools, orchestration patterns, callbacks, state management. The coding agent uses this to write correct ADK code. | **YES** — core skill for code generation |
-| 3 | `google-agents-cli-scaffold` | Project scaffolding commands (`scaffold create`, `scaffold enhance`, `scaffold upgrade`), template options, deployment targets, prototype-first workflow. | **YES** — creates project structure |
-| 4 | `google-agents-cli-eval` | Evaluation methodology — eval metrics, evalset schema, LLM-as-judge, tool trajectory scoring, common failure causes. | **YES** — local dev evaluation before commit |
-| 5 | `google-agents-cli-deploy` | Deployment workflows — Agent Runtime, Cloud Run, GKE, service accounts, rollback, production infrastructure. | **NO** — enterprise deployment goes through Jenkins + Harness pipelines, not `agents-cli deploy`. Direct deploy from a developer's machine bypasses code review, canary deployment, and promotion gates. |
-| 6 | `google-agents-cli-publish` | Gemini Enterprise Agent Platform registration — making agents discoverable via Agent Cards. | **OPTIONAL** — called as a post-deployment step in Harness pipeline if the agent should be discoverable. Not used during development. |
-| 7 | `google-agents-cli-observability` | Cloud Trace, prompt-response logging, BigQuery Agent Analytics, third-party integrations (AgentOps, Phoenix, MLflow), troubleshooting. | **PARTIALLY** — supplements company-observability skill. Cloud Trace setup from this skill; Dynatrace + Splunk from company skill. |
+| # | Skill | What it teaches the coding agent |
+|---|---|---|
+| 1 | `google-agents-cli-workflow` | Full lifecycle (scaffold → build → evaluate → deploy → publish → observe), code preservation rules, model selection guidance, troubleshooting. Always active. |
+| 2 | `google-agents-cli-adk-code` | ADK Python API reference — agents, tools, orchestration patterns, callbacks, state management. The coding agent uses this to write correct ADK code. |
+| 3 | `google-agents-cli-scaffold` | Project scaffolding commands (`scaffold create`, `scaffold enhance`, `scaffold upgrade`), template options, deployment targets, prototype-first workflow. |
+| 4 | `google-agents-cli-eval` | Evaluation methodology — eval metrics, evalset schema, LLM-as-judge, tool trajectory scoring, common failure causes. |
+| 5 | `google-agents-cli-deploy` | Deployment workflows — Agent Runtime, Cloud Run, GKE, service accounts, rollback, production infrastructure. |
+| 6 | `google-agents-cli-publish` | Gemini Enterprise Agent Platform registration — making agents discoverable via Agent Cards. |
+| 7 | `google-agents-cli-observability` | Cloud Trace, prompt-response logging, BigQuery Agent Analytics, third-party integrations (AgentOps, Phoenix, MLflow), troubleshooting. |
 
 **Installation (one-time):**
 ```bash
@@ -641,17 +641,126 @@ This installs the CLI and injects all 7 skills into the coding agent's environme
 
 The 7 Google skills cover ADK best practices and GCP deployment. Company overlay skills extend them with enterprise-specific patterns:
 
-| Company Skill | What it teaches | Replaces or extends |
+| Company Skill | What it teaches | Extends which Google skill |
 |---|---|---|
-| `company-terraform-patterns` | How to use company TF modules from `github.com/company/tf-modules` — module naming, version pinning, variable population, backend config. | Replaces `google-agents-cli-deploy` for infrastructure provisioning (company uses Jenkins + Terraform, not `agents-cli deploy`) |
-| `company-observability` | Dynatrace OneAgent config, custom metrics, dashboard-as-code, Splunk threat rules, OTel Collector forwarding pipeline. | Extends `google-agents-cli-observability` with Dynatrace + Splunk (Google skill covers Cloud Trace only) |
-| `company-cicd` | Jenkins pipeline templates (`agent-infra-plan-apply-v3`), Harness deployment templates (`agent-deploy-canary-v4`), company pipeline standards. | Replaces `google-agents-cli-deploy` for agent deployment (company uses Harness canary pipelines, not `agents-cli deploy`) |
-| `company-security` | Model Armor configuration, VPC-SC perimeter setup, CMEK key ring references, Secret Manager patterns, company security standards. | Extends `google-agents-cli-scaffold` with company security defaults |
+| `company-terraform-patterns` | How to use company TF modules from `github.com/company/tf-modules` — module naming, version pinning, variable population, backend config. | `google-agents-cli-deploy` |
+| `company-observability` | Dynatrace OneAgent config, custom metrics, dashboard-as-code, Splunk threat rules, OTel Collector forwarding pipeline. | `google-agents-cli-observability` |
+| `company-cicd` | Jenkins pipeline templates (`agent-infra-plan-apply-v3`), Harness deployment templates (`agent-deploy-canary-v4`), company pipeline standards. | `google-agents-cli-deploy` |
+| `company-security` | Model Armor configuration, VPC-SC perimeter setup, CMEK key ring references, Secret Manager patterns, company security standards. | `google-agents-cli-scaffold` |
 
 Company skills are installed alongside Google's skills:
 ```bash
 npx skills add company/agentcatalyst-skills
 ```
+
+### Skill installation — how skills get onto the developer's machine
+
+Skills live in specific directories that the coding agent scans. The `.agents/skills/` path is the cross-agent standard that works with Gemini CLI, Claude Code, Cursor, and others:
+
+| Scope | Directory | Who installs | When it applies |
+|---|---|---|---|
+| **User skills** (global) | `~/.agents/skills/` | Developer installs once | Available in every project on this machine |
+| **Workspace skills** (project) | `.agents/skills/` in the repo root | Checked into the project repo | Available to everyone who clones the repo |
+| **Built-in skills** | Bundled with agents-cli | `uvx google-agents-cli setup` | Google's 7 skills — available everywhere |
+
+**Installation method 1: `gemini skills install` (recommended for individual developers):**
+
+```bash
+# Install all 4 company skills to user scope (available in every project)
+gemini skills install github.com/company/agentcatalyst-skills --scope user
+```
+
+After installation, the skills land in `~/.agents/skills/`:
+
+```
+~/.agents/skills/
+├── company-cicd/
+│   └── SKILL.md
+├── company-terraform-patterns/
+│   └── SKILL.md
+├── company-observability/
+│   └── SKILL.md
+└── company-security/
+    └── SKILL.md
+```
+
+**Installation method 2: Check into the project repo (recommended for team-wide consistency):**
+
+```bash
+# Copy company skills into the project's .agents/skills/ directory
+cp -r /path/to/agentcatalyst-skills/* .agents/skills/
+git add .agents/skills/
+git commit -m "Add AgentCatalyst company overlay skills"
+```
+
+Now every developer who clones the project automatically gets the skills — no individual installation needed.
+
+**Cross-agent compatibility:** The `.agents/skills/` directory and the `SKILL.md` format are an open standard. The same skill files work across all major coding agents:
+
+| Coding agent | Skills directory | Discovery |
+|---|---|---|
+| Gemini CLI | `~/.agents/skills/` or `~/.gemini/skills/` | Automatic on session start |
+| Claude Code | `~/.agents/skills/` or `~/.claude/skills/` | Automatic on session start |
+| Cursor | `~/.agents/skills/` or `~/.cursor/skills/` | Automatic on session start |
+| GitHub Copilot | Via Spec Kit preset `memory/` files | Loaded when Spec Kit commands run |
+
+### Skill discovery and activation — how the coding agent knows which skill to use
+
+The lifecycle has three phases: discovery, activation, and execution.
+
+**Phase 1 — Discovery (automatic, every session start):**
+
+When the developer opens a coding agent session, the agent scans all skill directories and loads **only the `name:` and `description:`** from each `SKILL.md` frontmatter into its system prompt. The full instruction body is NOT loaded yet — this is progressive disclosure that keeps the context window lean.
+
+The developer can verify with `/skills list`:
+
+```
+> /skills list
+  google-agents-cli-workflow       [built-in]  Always active
+  google-agents-cli-adk-code       [built-in]  ADK Python API reference
+  google-agents-cli-scaffold       [built-in]  Scaffold commands
+  google-agents-cli-eval           [built-in]  Evaluation methodology
+  google-agents-cli-deploy         [built-in]  Deployment workflows
+  google-agents-cli-publish        [built-in]  Gemini Enterprise registration
+  google-agents-cli-observability  [built-in]  Cloud Trace, logging
+  company-cicd                     [user]      Company CI/CD (Jenkins + Harness)
+  company-terraform-patterns       [user]      Company Terraform modules
+  company-observability            [user]      Dynatrace + Splunk + OTel
+  company-security                 [user]      Model Armor + VPC-SC + CMEK
+```
+
+If company skills don't appear, run `gemini skills install github.com/company/agentcatalyst-skills --scope user` and then `/skills reload`.
+
+**Phase 2 — Activation (on-demand, when the task matches):**
+
+When the coding agent receives a task, it matches the task against each skill's `description:` field and activates the most relevant skill. Upon activation:
+- The full `SKILL.md` body is loaded into the conversation context
+- The skill's directory is added to the agent's allowed file paths (so it can read bundled templates and examples)
+- The agent prioritizes the skill's instructions for the current task
+
+The matching works through the `description:` field:
+
+| Developer's instruction | Matches `description:` of | Skill activated |
+|---|---|---|
+| "Generate ADK agent classes from the YAML" | "ADK Python API reference — agents, tools, orchestration" | `google-agents-cli-adk-code` |
+| "Generate Terraform for this agent" | "Company Terraform modules and version pinning" | `company-terraform-patterns` |
+| "Set up CI/CD pipelines" | "Company CI/CD standards... DO NOT use agents-cli deploy" | `company-cicd` |
+| "Deploy this agent" | Matches both `google-agents-cli-deploy` AND `company-cicd` | **`company-cicd` wins** (see precedence) |
+
+**Phase 3 — Precedence (how company skills override Google skills):**
+
+When multiple skills match the same task, precedence determines which one the coding agent follows:
+
+```
+Precedence (highest → lowest):
+  1. Workspace skills  (.agents/skills/ in the project repo)
+  2. User skills       (~/.agents/skills/)
+  3. Built-in skills   (bundled with agents-cli)
+```
+
+Company overlay skills (installed at user or workspace level) take precedence over Google's built-in skills. Additionally, the `company-cicd` skill's `description:` explicitly says "DO NOT use agents-cli deploy" — so even if both skills are activated, the coding agent sees the prohibition and follows the company skill.
+
+The `GEMINI.md` file in the project root adds a blanket precedence rule: *"When Google's agents-cli skills conflict with company overlay skills, always follow the company skill."*
 
 ### Enterprise lifecycle override — why the coding agent skips `agents-cli deploy`
 
@@ -675,12 +784,12 @@ When `agents-cli scaffold create` runs, it generates a default `GEMINI.md` file.
 |---|---|
 | scaffold | ✅ Use `agents-cli scaffold create` (same) |
 | build | ✅ Use `google-agents-cli-adk-code` skill (same) |
-| evaluate | ✅ Use `agents-cli eval run` locally (same) |
+| **evaluate** | ❌ DO NOT use `agents-cli eval` or `agents-cli simulate` (preview services). Generate Arize evaluation stages in `harness-pipeline.yaml`. See `company-cicd` skill. Local sanity tests only via `pytest`. |
 | **deploy** | ❌ DO NOT use `agents-cli deploy`. Generate `Jenkinsfile` + `harness-pipeline.yaml` + Terraform. See `company-cicd` skill. |
 | **publish** | ❌ Skip. Agent registration happens post-deployment via Harness pipeline. |
 | observe | ⚠️ Use `company-observability` skill (Dynatrace + Splunk) instead of default Cloud Trace only. |
 
-The `GEMINI.md` also states: *"When Google's agents-cli skills conflict with company overlay skills, always follow the company skill. Company skills override Google defaults for deployment, observability, security, and infrastructure."*
+The `GEMINI.md` also states: *"When Google's agents-cli skills conflict with company overlay skills, always follow the company skill. Company skills override Google defaults for deployment, observability, security, infrastructure, and evaluation. Preview GCP services (Agent Evaluation, Agent Simulation) are NEVER used — Arize via Harness pipeline is the evaluation mechanism."*
 
 **Override Layer 3 — The `/catalyst.generate` command specifies the exact sequence.**
 
@@ -716,7 +825,7 @@ With agents-cli skills + company overlay skills installed, the coding agent gene
 2. **Coding agent + `google-agents-cli-adk-code` skill** — reads `agent-blueprint.yaml` and generates ADK agent classes, MCP connections, A2A clients, FunctionTool stubs (LLM-guided, skill-constrained)
 3. **Coding agent + company overlay skills** — generates company-specific Terraform modules, Dynatrace config, Jenkins/Harness pipelines, Model Armor callbacks (LLM-guided, skill-constrained)
 4. **`gh skill install`** — installs agent skills at pinned versions with provenance verification (deterministic)
-5. **`agents-cli eval run`** — runs evaluation harness against test cases (deterministic)
+5. **Local pytest sanity tests** — unit tests with mocks (no GCP services required). End-to-end evaluation happens later in the Harness pipeline via Arize.
 
 **The skills constrain the LLM's output.** The coding agent doesn't invent ADK patterns from general knowledge — it follows the specific patterns documented in `google-agents-cli-adk-code`. It doesn't guess at Terraform module paths — it follows `company-terraform-patterns`. The skills act as guardrails that keep the generated code consistent with both Google's ADK standards and company enterprise patterns.
 
@@ -820,8 +929,9 @@ Standard prompt + response screening configuration.
 | 2–5. Generate ADK code | ❌ LLM-guided | Coding agent interprets YAML + skills. Functionally equivalent but not byte-identical across runs. |
 | 6. Install skills | ✅ Yes | `gh skill install` — CLI command with SHA verification |
 | 7–10. Generate infra + observability + CI/CD | ❌ LLM-guided | Coding agent interprets YAML + company skills |
-| 11. Run local evaluation | ✅ Yes | `agents-cli eval run` — CLI command (local dev only, before commit) |
-| 12. Deploy to GCP | ✅ Yes | **NOT via agents-cli** — Jenkins provisions infrastructure (Terraform), Harness deploys agent (canary pipeline). Company CI/CD handles all deployment. |
+| 11. Local sanity tests | ✅ Yes | `pytest` — runs unit tests with mocks (no GCP required) |
+| 12. Evaluation | ❌ Deferred to CI/CD | Arize evaluation runs in Harness pipeline against deployed non-prod/pre-prod agents |
+| 13. Deploy | ❌ Deferred to CI/CD | Jenkins runs Terraform; Harness deploys via canary (NEVER `agents-cli deploy`) |
 
 **The YAML blueprint constrains WHAT is generated. The skills constrain HOW it's expressed. The coding agent fills in the details.** Two runs produce functionally equivalent code — same agent classes, same tool wiring, same infrastructure — but variable names, comments, and code organization may vary. This is by design: it makes AgentCatalyst work with any coding agent that supports skills.
 
@@ -834,9 +944,177 @@ AgentCatalyst generates CI/CD pipeline definitions. The company's pipelines exec
 | Stage | Tool | What happens |
 |---|---|---|
 | PR Review | GitHub | Team reviews generated code + FunctionTool implementations. Standard branch protection. |
-| Non-Prod | Jenkins + Harness | Terraform apply (infra), build, unit tests, integration tests, agent eval against test datasets. |
-| Pre-Prod | Harness | Canary deployment (10% traffic), performance validation, SLO checks. |
+| Non-Prod | Jenkins + Harness | Terraform apply (infra), build, unit tests, integration tests, **Arize evaluation against deployed agent**. |
+| Pre-Prod | Harness | Canary deployment (10% traffic), **Arize evaluation against pre-prod**, performance validation, SLO checks. |
 | Production | Harness | Progressive rollout, monitoring, automatic rollback if SLOs violated. |
+
+### Evaluation pattern — Arize via CI/CD (no preview services)
+
+AgentCatalyst evaluates agents using **Arize** triggered by the Harness pipeline. This replaces direct dependency on Agent Evaluation Service and Agent Simulation Service (both pre-GA preview services). The result: AgentCatalyst is deployable to any GCP project — including locked-down environments where preview APIs are not enabled.
+
+**Evaluation flow:**
+
+```
+Developer writes evalsets locally
+  tests/evalsets/fnol-basic.json    ← input/expected JSON
+  
+git commit + push
+  └─► Jenkins pipeline
+        ├─ Terraform apply (infra)
+        ├─ Build container image
+        ├─ Local unit tests (pytest with mocks)
+        └─ Trigger Harness
+              │
+              ▼ Harness pipeline (per environment)
+              ├─ Deploy agent to Agent Engine (non-prod)
+              ├─ Run Arize evaluation suite against deployed agent
+              │   ├─ Captures: tool trajectory, response quality,
+              │   │            latency p95, hallucination scores,
+              │   │            multi-turn coherence
+              │   └─ Posts results to Arize dashboard
+              ├─ Quality gate
+              │   ├─ pass_rate ≥ 0.95 → promote to pre-prod
+              │   ├─ p95_latency ≤ 3000ms → promote
+              │   ├─ hallucination_score ≤ 0.15 → promote
+              │   └─ Otherwise → block + notify team
+              ├─ Repeat for pre-prod environment
+              └─ Canary deploy to prod with Arize observability
+```
+
+**Where Arize lives in the architecture:**
+
+| Component | Location | Notes |
+|---|---|---|
+| Arize SaaS account | External (arize.com) | Provisioned by platform engineering, shared across all AgentCatalyst projects |
+| Arize CLI (`arize-eval-cli`) | Harness pipeline runners | Installed via pip in pipeline container |
+| Arize API credentials | Harness Secret Manager | `ARIZE_API_KEY_SECRET`, `ARIZE_SPACE_KEY_SECRET` |
+| Evaluation results | Arize dashboard + Splunk | Results streamed to Arize for visualization, mirrored to Splunk for compliance audit |
+
+**The `company-cicd` skill generates Harness pipeline YAML** that includes Arize evaluation stages. Developers don't write the Arize integration manually — it's part of the generated `harness-pipeline.yaml`.
+
+**Local evaluation (developer workstation):** Limited to unit tests with mocks via `pytest`. Developers cannot run end-to-end evaluations locally — that requires the agent to be deployed, which only happens in CI/CD. This is intentional: it prevents "works on my machine" deployment surprises.
+
+**Why this pattern is better than `agents-cli eval`:**
+
+| Concern | `agents-cli eval` (preview) | Arize via CI/CD |
+|---|---|---|
+| Preview API dependency | Yes — fails if disabled | No — Arize is a GA SaaS |
+| Locked-down environments | Cannot deploy | Deploys anywhere |
+| Quality gate enforcement | Manual | Automated in Harness |
+| Multi-environment evaluation | Manual repetition | Pipeline runs at each stage |
+| Audit trail | Limited | Centralized in Arize + Splunk |
+| Cost predictability | Unknown (preview) | Subscription-based |
+| Cross-project visibility | None | Arize dashboard spans all agents |
+
+### A concrete deployment scenario — FNOL agent merge to production
+
+To make the two-plane CI/CD model concrete, here's what actually happens when a developer merges a PR for an FNOL agent change:
+
+```
+1. Developer merges PR to main branch
+        │
+        ▼
+2. JENKINS pipeline triggers (agent-infra-plan-apply-v3)
+        │
+        ├─ Checkout code, including deployment/terraform/
+        │
+        ├─ Terraform init
+        │   └─ Loads state from GCS backend
+        │
+        ├─ Terraform plan
+        │   └─ Generates plan.json showing what will change
+        │
+        ├─ OPA policy check
+        │   ├─ "All Cloud SQL must use CMEK" ✓
+        │   ├─ "All buckets must be private" ✓
+        │   ├─ "Agent must run in VPC-SC perimeter" ✓
+        │   └─ All policies pass
+        │
+        ├─ Terraform apply
+        │   └─ Updates infrastructure (e.g., adds new MCP server config,
+        │      updates Vertex AI Search data store, rotates secrets)
+        │
+        ├─ Infrastructure health check
+        │   ├─ Cloud SQL responding ✓
+        │   ├─ Vertex AI Search index up to date ✓
+        │   ├─ Model Armor config valid ✓
+        │   └─ All healthy
+        │
+        └─ Trigger Harness pipeline
+            └─ POST to Harness API with build context
+                │
+                ▼
+3. HARNESS pipeline triggers (agent-deploy-canary-v4)
+        │
+        ├─ Build container image
+        │   ├─ Docker build with new agent code
+        │   └─ Push to Artifact Registry as agents/fnol-coordinator:abc123
+        │
+        ├─ Deploy to Non-Prod
+        │   ├─ gcloud agents deploy fnol-coordinator --version abc123 ...
+        │   └─ Agent Engine routes 100% non-prod traffic to new version
+        │
+        ├─ Arize evaluation against Non-Prod
+        │   ├─ Run all evalsets in tests/evalsets/
+        │   ├─ Pass rate: 97% ✓ (threshold 95%)
+        │   ├─ p95 latency: 2.1s ✓ (threshold 3s)
+        │   ├─ Hallucination score: 0.08 ✓ (threshold 0.15)
+        │   └─ All gates pass — proceed
+        │
+        ├─ Approval gate (manual)
+        │   └─ Tech lead approves promotion to Pre-Prod
+        │
+        ├─ Deploy to Pre-Prod (canary 10%)
+        │   ├─ 10% of pre-prod traffic to new version
+        │   ├─ Monitor for 30 minutes
+        │   │   ├─ Dynatrace: p95 latency 2.3s ✓
+        │   │   ├─ Dynatrace: error rate 0.02% ✓
+        │   │   └─ Arize: hallucination drift +0.01 ✓
+        │   └─ Promote to 100% pre-prod
+        │
+        ├─ Arize evaluation against Pre-Prod
+        │   └─ All gates pass
+        │
+        ├─ Deploy to Prod (progressive)
+        │   ├─ Canary 10% (30 min monitoring)
+        │   ├─ Canary 25% (30 min monitoring)
+        │   ├─ Canary 50% (30 min monitoring)
+        │   └─ Full rollout 100%
+        │
+        └─ Deployment complete
+            └─ Slack notification + Splunk audit log entry
+```
+
+**Failure handling.** If anything fails — Terraform plan rejected by OPA, Arize gates fail, SLOs violated during canary — Harness automatically rolls back to the previous agent version. Jenkins doesn't roll back infrastructure (Terraform state would need careful manual handling), but the failed Terraform apply is visible in Jenkins for platform engineering to address.
+
+### Why the two-plane model matters for AgentCatalyst's value proposition
+
+The reason AgentCatalyst forbids `agents-cli deploy` and forces this two-plane model is governance. Each plane enforces a specific control:
+
+| Governance concern | How it's enforced |
+|---|---|
+| Infrastructure follows company standards | Jenkins runs OPA policy checks before Terraform apply |
+| All changes are traceable | Every deployment has Jenkins run ID + Harness execution ID logged in Splunk |
+| Production deployments require approval | Harness manual approval gate before pre-prod promotion |
+| Quality gates protect production | Arize evaluation must pass before each environment promotion |
+| Bad deployments don't take down production | Canary deployment + automatic SLO-based rollback in Harness |
+| No one can bypass the pipeline | `agents-cli deploy` is forbidden by three-layer skill override; CI/CD is the only path |
+
+If a developer ran `agents-cli deploy` from their workstation, none of this happens. The agent goes straight to 100% traffic with no policy checks, no quality gates, no canary, no rollback, no audit trail. That is the failure mode AgentCatalyst is designed to prevent.
+
+### Jenkins vs Harness — purpose summary
+
+| Question | Jenkins | Harness |
+|---|---|---|
+| What does it deploy? | Infrastructure (cloud resources) | Application (agent code) |
+| What tool does it run? | Terraform | Container deployment + traffic shifting |
+| How often does it run? | Infrequently (weeks) | Frequently (multiple times per day) |
+| Rollback strategy | Re-run Terraform (manual, careful) | Automatic traffic shift to previous version |
+| Pipeline ownership | Platform engineering | Application team (with platform-provided template) |
+| Unit of change | Terraform plan | Container image |
+| Gate types | OPA policy checks | Arize quality gates + SLO validation |
+
+Both are essential. Jenkins ensures the agent's environment is correct. Harness ensures the agent's deployment is safe. Together they form the deployment pipeline that lets AgentCatalyst safely take agents from `git push` to production at enterprise scale.
 
 ---
 
@@ -893,9 +1171,7 @@ Start at **Layer 1** where the developer runs `/specify` and fills in the struct
 
 Flow to **Layer 2** where the developer runs `/catalyst.blueprint`. The coding agent sends `spec.md` + `plan.md` to the Blueprint Advisor on Agent Runtime. The Blueprint Advisor queries Vertex AI Search three times — patterns, skills, tools — and assembles `agent-blueprint.yaml`. The developer reviews and edits the YAML.
 
-Flow to **Layer 3** where the developer instructs the coding agent to generate the project. The coding agent runs `agents-cli scaffold create` for the project structure, then uses Google's `google-agents-cli-adk-code` skill to generate ADK agent classes, MCP connections, A2A clients, and FunctionTool stubs from the YAML. Company overlay skills guide the generation of Terraform modules, Dynatrace config, and CI/CD pipeline definitions. The developer runs `agents-cli eval run` locally to validate before committing.
-
-Flow to **Layer 4** where the developer commits and opens a PR. The company's Jenkins pipeline runs Terraform to provision infrastructure. The company's Harness pipeline deploys the agent through Non-Prod → Pre-Prod → Prod with canary deployment and SLO validation. **`agents-cli deploy` is not used** — all deployment goes through the company's governed CI/CD pipelines.
+Flow to **Layer 3** where the developer instructs the coding agent to generate the project. The coding agent runs `agents-cli scaffold create` for the project structure, then uses Google's `google-agents-cli-adk-code` skill to generate ADK agent classes, MCP connections, A2A clients, and FunctionTool stubs from the YAML. Company overlay skills guide the generation of Terraform modules, Dynatrace config, Jenkins/Harness pipelines (with Arize evaluation stages), and Model Armor callbacks. The coding agent NEVER calls `agents-cli eval`, `agents-cli simulate`, or `agents-cli deploy` — preview services and direct deployment are explicitly forbidden.
 
 Flow to **Layer 4** where the developer commits, opens a PR, and the company's Jenkins/Harness pipelines take the code through Non-Prod → Pre-Prod → Prod.
 
@@ -957,7 +1233,7 @@ graph TB
 
 **Step 4:** Developer reviews YAML, makes minor edits. (~10 min)
 
-**Step 5:** Developer runs `/catalyst.generate`. The coding agent uses `agents-cli scaffold create` for the project structure, then applies agents-cli skills + company overlay skills to generate the complete project:
+**Step 5:** Developer runs `/catalyst.generate`. `agents-cli` scaffolds the complete project:
 
 ```
 fnol-agent/
@@ -1036,7 +1312,7 @@ Before rolling out AgentCatalyst to all agent development teams:
 | Skill catalog | EA + domain teams | Domain teams author skills. EA reviews and approves for catalog inclusion. Skills ingested into Vertex AI Search. |
 | Tool registry | Platform engineering | MCP servers and A2A agents registered in Apigee API Hub. Platform eng validates endpoints and auth. |
 | Blueprint Advisor system prompt | EA + Platform eng | Joint ownership. System prompt changes reviewed by both EA (for accuracy) and platform eng (for behavior). |
-| Company overlay skills | Platform engineering | Platform eng maintains 4 company skills. Changes via PR with review by EA. Skills tested with example prompts to verify consistent output. |
+| `agents-cli` templates | Platform engineering | Platform eng maintains templates. Changes via PR with snapshot test validation. EA consulted on pattern changes. |
 | AgentCatalyst preset | EA | EA maintains preset files (templates, commands, memory). Published to internal preset catalog. |
 | Agent development standards | EA | Published as company coding standards. Referenced in `agents-cli` validation (Step 12). |
 
@@ -1045,7 +1321,7 @@ Before rolling out AgentCatalyst to all agent development teams:
 | Request | Process |
 |---|---|
 | "I need a new pattern in the catalog" | Open a request with EA. EA evaluates, documents the pattern (8 sections), and adds to catalog. |
-| "agents-cli doesn't support technology X" | Platform engineering authors a new company overlay skill for the technology. No CLI code changes needed — just a new skill document in the company skills repo. |
+| "agents-cli doesn't support technology X" | Open a request with platform engineering. They author a new skill-based template + scaffold step + YAML schema field. |
 | "The Blueprint Advisor recommends the wrong pattern for my use case" | Report to EA. They review the pattern catalog's applicability criteria and search metadata. May refine the pattern documentation to improve search relevance. |
 | "I need a new skill in the catalog" | Author the skill following company skill standards. Submit to EA for review. EA adds to catalog on approval. |
 
@@ -1057,7 +1333,7 @@ Before rolling out AgentCatalyst to all agent development teams:
 |---|---|
 | A development accelerator — speeds up the path from idea to generated code | A runtime platform — it generates code; the code runs on Agent Engine |
 | AI-advised architecture — Blueprint Advisor recommends; developer decides | AI-decided architecture — the developer always has final say |
-| Skill-guided code generation — agents-cli skills + company skills ensure consistency | A proprietary code generator — uses Google's open-source agents-cli |
+| Skill-guided code generation — same YAML → same output, every time | LLM-generated code — no AI variability in the scaffold |
 | Company-grounded — templates embed company patterns | Generic — every company's templates are different |
 | Open tools — Spec Kit + ADK + agents-cli + YAML + company skills | Proprietary platform — no vendor lock-in |
 | A spec-driven workflow with structured templates | A conversational workflow — no free-form chat |
@@ -1067,14 +1343,14 @@ Before rolling out AgentCatalyst to all agent development teams:
 
 ## Conclusion — The Road Ahead
 
-AgentCatalyst gives every development team a standardized, AI-assisted path from business requirements to production-ready agent code. The developer describes their problem in a structured template. The Blueprint Advisor recommends an architecture. The coding agent, guided by Google's agents-cli skills and company overlay skills, generates the complete project — grounded in company patterns, ready for the company's CI/CD.
+AgentCatalyst gives every development team a standardized, AI-assisted path from business requirements to production-ready agent code. The developer describes their problem in a structured template. The Blueprint Advisor recommends an architecture. `agents-cli` scaffolds the complete project — grounded in company patterns, ready for the company's CI/CD.
 
-The 50th agent generated through AgentCatalyst follows the same company patterns as the 1st. Naming conventions are consistent. Terraform modules are pinned. Observability is pre-configured. CI/CD pipelines use approved templates. The team's code review time drops because every generated project looks familiar.
+The 50th agent scaffolded by `agents-cli` follows the same company patterns as the 1st. Naming conventions are consistent. Terraform modules are pinned. Observability is pre-configured. CI/CD pipelines use approved templates. The team's code review time drops because every scaffolded project looks familiar.
 
 **Next steps:**
 1. Build the 11-pattern knowledge base (8 sections + 176 HA/DR scenarios per pattern) and ingest into Vertex AI Search
 2. Deploy the Blueprint Advisor on Agent Runtime with company-curated system prompt
-3. Author 4 company overlay skills (Terraform patterns, observability, CI/CD, security) and publish to company skills repo
+3. Build `agents-cli` with company skill-based scaffold templates
 4. Create the AgentCatalyst Spec Kit preset and publish internally
 5. Pilot with the FNOL use case end-to-end
 6. Establish governance: pattern catalog ownership, template change process, skill approval workflow
@@ -1542,6 +1818,73 @@ After generation:
 
 ---
 
+### templates/gemini-md-template.md
+
+This template replaces the default `GEMINI.md` that `agents-cli scaffold create` generates. After scaffolding, the `/catalyst.generate` command copies this into the project root as `GEMINI.md`.
+
+```markdown
+---
+template: agentcatalyst-gemini-md
+version: "1.0.0"
+description: Project-level instruction file for coding agents — overrides default agents-cli workflow
+usage: Automatically placed in project root by /catalyst.generate
+---
+
+# Agent Project — AgentCatalyst Enterprise Workflow
+
+## Project Information
+
+- **Agent name:** ${metadata.name}
+- **Blueprint:** agent-blueprint.yaml
+- **Garden template:** ${metadata.garden_template}
+- **Generated by:** AgentCatalyst /catalyst.generate
+
+## Workflow Override — READ THIS FIRST
+
+This project follows the **AgentCatalyst enterprise lifecycle**, which differs
+from the default agents-cli workflow. You MUST follow the company workflow.
+
+### What to use vs what to skip
+
+| Default agents-cli step | Company override | Reason |
+|---|---|---|
+| `agents-cli scaffold create` | ✅ USE | Creates project structure from Garden template |
+| `google-agents-cli-adk-code` skill | ✅ USE | Generates correct ADK code patterns |
+| `agents-cli eval run` | ❌ DO NOT USE | Calls Agent Evaluation Service (preview). Production projects may not have preview APIs enabled. Use Arize via Harness pipeline instead. |
+| `agents-cli simulate` | ❌ DO NOT USE | Calls Agent Simulation Service (preview). Same reasoning — use Arize multi-turn evaluation in Harness. |
+| `agents-cli deploy` | ❌ DO NOT USE | Company deploys via Jenkins (Terraform) + Harness (canary). Direct deploy bypasses governance. |
+| `agents-cli publish` | ❌ DO NOT USE | Agent registration is a post-deployment step in the Harness pipeline |
+| `google-agents-cli-observability` | ⚠️ SUPPLEMENT | Use alongside `company-observability` skill — Dynatrace + Splunk in addition to Cloud Trace |
+
+### Skill priority rule
+
+When Google's agents-cli skills conflict with company overlay skills,
+**ALWAYS follow the company skill**. Company skills override Google
+defaults for: deployment, observability, security, infrastructure,
+and evaluation. Preview GCP services (Agent Evaluation Service,
+Agent Simulation Service) are NEVER used at any stage.
+
+### Company overlay skills (must be installed)
+
+| Skill | Purpose | Overrides |
+|---|---|---|
+| `company-terraform-patterns` | Company Terraform modules + version pinning | Replaces `agents-cli deploy` for infrastructure |
+| `company-observability` | Dynatrace + Splunk + OTel Collector | Extends `google-agents-cli-observability` |
+| `company-cicd` | Jenkins + Harness pipeline templates | Replaces `agents-cli deploy` for agent deployment |
+| `company-security` | Model Armor + VPC-SC + CMEK + Secret Manager | Extends `google-agents-cli-scaffold` |
+
+If company skills are not installed, run:
+`npx skills add company/agentcatalyst-skills`
+
+## What requires engineer implementation
+
+Files marked `<<< ENGINEER MUST WRITE >>>` or containing
+`raise NotImplementedError("Engineer must implement")` require
+domain-specific business logic. Everything else is generated.
+```
+
+---
+
 ### memory/adk-reference.md
 
 ```markdown
@@ -1731,78 +2074,4 @@ Do NOT write raw Terraform resources — use module references.
 - Model Armor: enabled by default
 - DLP: enabled by default for agents handling PII
 - Service accounts: one per agent, least privilege, no key export
-```
-
----
-
-### templates/gemini-md-template.md
-
-This template replaces the default `GEMINI.md` that `agents-cli scaffold create` generates. After scaffolding, the `/catalyst.generate` command copies this into the project root as `GEMINI.md` (or `AGENTS.md` / `.cursorrules` depending on the coding agent).
-
-```markdown
----
-template: agentcatalyst-gemini-md
-version: "1.0.0"
-description: Project-level instruction file for coding agents — overrides default agents-cli workflow
-usage: Automatically placed in project root by /catalyst.generate
----
-
-# Agent Project — AgentCatalyst Enterprise Workflow
-
-## Project Information
-
-- **Agent name:** ${metadata.name}
-- **Blueprint:** agent-blueprint.yaml
-- **Garden template:** ${metadata.garden_template}
-- **Generated by:** AgentCatalyst /catalyst.generate
-
-## Workflow Override — READ THIS FIRST
-
-This project follows the **AgentCatalyst enterprise lifecycle**, which differs
-from the default agents-cli workflow. You MUST follow the company workflow.
-
-### What to use vs what to skip
-
-| Default agents-cli step | Company override | Reason |
-|---|---|---|
-| `agents-cli scaffold create` | ✅ USE | Creates project structure from Garden template |
-| `google-agents-cli-adk-code` skill | ✅ USE | Generates correct ADK code patterns |
-| `agents-cli eval run` | ✅ USE (local dev only) | Local evaluation before commit |
-| `agents-cli deploy` | ❌ DO NOT USE | Company deploys via Jenkins (Terraform) + Harness (canary). Direct deploy bypasses governance. |
-| `agents-cli publish` | ❌ DO NOT USE | Agent registration is a post-deployment step in the Harness pipeline |
-| `google-agents-cli-observability` | ⚠️ SUPPLEMENT | Use alongside `company-observability` skill — Dynatrace + Splunk in addition to Cloud Trace |
-
-### Skill priority rule
-
-When Google's agents-cli skills conflict with company overlay skills,
-**ALWAYS follow the company skill**. Company skills override Google
-defaults for: deployment, observability, security, and infrastructure.
-
-### Company overlay skills (must be installed)
-
-| Skill | Purpose | Overrides |
-|---|---|---|
-| `company-terraform-patterns` | Company Terraform modules + version pinning | Replaces `agents-cli deploy` for infrastructure |
-| `company-observability` | Dynatrace + Splunk + OTel Collector | Extends `google-agents-cli-observability` |
-| `company-cicd` | Jenkins + Harness pipeline templates | Replaces `agents-cli deploy` for agent deployment |
-| `company-security` | Model Armor + VPC-SC + CMEK + Secret Manager | Extends `google-agents-cli-scaffold` |
-
-If company skills are not installed, run:
-`npx skills add company/agentcatalyst-skills`
-
-## Project Structure
-
-After generation, the project follows this structure:
-
-- `app/` — Agent code (root agent, sub-agents, tools, connections)
-- `deployment/terraform/` — Infrastructure as code (company TF modules)
-- `observability/` — Dynatrace + OTel config
-- `ci-cd/` — Jenkinsfile + Harness pipeline (NOT Cloud Build)
-- `agent-blueprint.yaml` — The blueprint that generated this project
-
-## What requires engineer implementation
-
-Files marked `<<< ENGINEER MUST WRITE >>>` or containing
-`raise NotImplementedError("Engineer must implement")` require
-domain-specific business logic. Everything else is generated.
 ```

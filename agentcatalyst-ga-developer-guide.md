@@ -1084,27 +1084,31 @@ For agents, create evaluation datasets that test the agent's tool-calling behavi
 // tests/evalsets/fnol-basic.json
 [
   {
+    "test_id": "fnol-001-policy-verification",
     "input": "I was in a car accident on I-85. My policy number is P-12345.",
-    "expected_tool_calls": ["bigquery-policy"],
-    "expected_agent_sequence": ["verify_policy", "extract_details"],
-    "expected_output_contains": ["policy verified", "incident details"]
+    "expected_tool_calls": ["bigquery-policy.execute_query"],
+    "expected_agent_sequence": ["fnol_coordinator", "intake_pipeline", "verify_policy"],
+    "expected_output_contains": ["policy verified", "active coverage"],
+    "max_latency_ms": 3000
   },
   {
+    "test_id": "fnol-002-high-severity-routing",
     "input": "The damage is about $30,000 and there were injuries.",
     "expected_tool_calls": ["severity_classifier"],
     "expected_output_contains": ["high severity"],
-    "expected_routing": "adjuster_review"
+    "expected_routing": "adjuster_review",
+    "max_latency_ms": 2000
   }
 ]
 ```
 
-Run evaluation locally with the Gen AI Evaluation Service (GA):
+These evalsets are run by the **Harness pipeline against the deployed agent via Arize** — not locally. You commit them with your code; the pipeline takes care of execution.
 
-```python
-from vertexai.evaluation import EvalTask
-eval_task = EvalTask(dataset="tests/evalsets/fnol-basic.json", metrics=["tool_trajectory", "response_quality"])
-result = eval_task.evaluate(model="gemini-2.0-flash")
-```
+Why not run them locally? Two reasons:
+1. **No preview API dependency** — Arize is GA SaaS, available everywhere. Agent Evaluation Service (preview) might not be enabled in your project.
+2. **Real environment validation** — local evaluation against mocked agents can pass while real deployment fails. Arize evaluates the actually deployed agent.
+
+For local fast-feedback testing, write **unit tests with mocks** (covered in the next subsection).
 
 ### Microservices: Spring Boot + Angular tests
 
@@ -1422,14 +1426,145 @@ Your reports become test cases in the regression suite — preventing future reg
 |---|---|
 | Deploy directly from your machine | Commit → PR → Jenkins → Harness |
 | Run `agents-cli deploy` (if installed) | Company-cicd skill generates pipeline files instead |
+| Run `agents-cli eval` or `agents-cli simulate` | Write evalsets locally; Harness runs them via Arize against the deployed agent |
 | Generate Cloud Build config | Company uses Jenkins |
 | Provision GCP/AWS resources manually | Jenkins runs Terraform after PR merge |
 
-The `company-cicd` skill explicitly tells the coding agent: "Generate pipeline files. Do not deploy directly." Three override layers (skill + GEMINI.md + command) reinforce this.
+The `company-cicd` skill explicitly tells the coding agent: "Generate pipeline files. Do not deploy directly. Do not call preview GCP services." Three override layers (skill + GEMINI.md + command) reinforce this.
+
+### How evaluation works in production
+
+Local testing (your machine):
+- `pytest tests/unit/` — unit tests with mocks (fast feedback)
+- Don't try to run end-to-end evaluation locally — it requires the agent to be deployed
+
+CI/CD (after PR merge):
+- Harness deploys agent to non-prod
+- Harness runs your evalsets via Arize against the non-prod agent
+- Quality gates check: pass rate ≥ 95%, p95 latency ≤ 3s, hallucination ≤ 0.15
+- If gates pass, the same flow runs in pre-prod, then prod canary
+
+This pattern avoids any dependency on Agent Evaluation Service or Agent Simulation Service (both pre-GA preview services). AgentCatalyst is deployable to any GCP project — including locked-down environments where preview APIs are not enabled.
+
+Your evalsets in `tests/evalsets/` are the input. Harness + Arize handle the rest.
 
 ---
 
-## 13. Troubleshooting
+## 13. A Concrete Deployment Scenario — FNOL Agent Merge to Production
+
+To make the CI/CD model concrete, here's exactly what happens when you merge a PR for an FNOL agent change. Two distinct pipelines run in sequence — Jenkins for infrastructure, Harness for application. Understanding both helps you debug failures and write better evalsets.
+
+```
+1. Developer merges PR to main branch
+        │
+        ▼
+2. JENKINS pipeline triggers (agent-infra-plan-apply-v3)
+        │
+        ├─ Checkout code, including deployment/terraform/
+        │
+        ├─ Terraform init
+        │   └─ Loads state from GCS backend
+        │
+        ├─ Terraform plan
+        │   └─ Generates plan.json showing what will change
+        │
+        ├─ OPA policy check
+        │   ├─ "All Cloud SQL must use CMEK" ✓
+        │   ├─ "All buckets must be private" ✓
+        │   ├─ "Agent must run in VPC-SC perimeter" ✓
+        │   └─ All policies pass
+        │
+        ├─ Terraform apply
+        │   └─ Updates infrastructure (e.g., adds new MCP server config,
+        │      updates Vertex AI Search data store, rotates secrets)
+        │
+        ├─ Infrastructure health check
+        │   ├─ Cloud SQL responding ✓
+        │   ├─ Vertex AI Search index up to date ✓
+        │   ├─ Model Armor config valid ✓
+        │   └─ All healthy
+        │
+        └─ Trigger Harness pipeline
+            └─ POST to Harness API with build context
+                │
+                ▼
+3. HARNESS pipeline triggers (agent-deploy-canary-v4)
+        │
+        ├─ Build container image
+        │   ├─ Docker build with new agent code
+        │   └─ Push to Artifact Registry as agents/fnol-coordinator:abc123
+        │
+        ├─ Deploy to Non-Prod
+        │   ├─ gcloud agents deploy fnol-coordinator --version abc123 ...
+        │   └─ Agent Engine routes 100% non-prod traffic to new version
+        │
+        ├─ Arize evaluation against Non-Prod
+        │   ├─ Run all evalsets in tests/evalsets/
+        │   ├─ Pass rate: 97% ✓ (threshold 95%)
+        │   ├─ p95 latency: 2.1s ✓ (threshold 3s)
+        │   ├─ Hallucination score: 0.08 ✓ (threshold 0.15)
+        │   └─ All gates pass — proceed
+        │
+        ├─ Approval gate (manual)
+        │   └─ Tech lead approves promotion to Pre-Prod
+        │
+        ├─ Deploy to Pre-Prod (canary 10%)
+        │   ├─ 10% of pre-prod traffic to new version
+        │   ├─ Monitor for 30 minutes
+        │   │   ├─ Dynatrace: p95 latency 2.3s ✓
+        │   │   ├─ Dynatrace: error rate 0.02% ✓
+        │   │   └─ Arize: hallucination drift +0.01 ✓
+        │   └─ Promote to 100% pre-prod
+        │
+        ├─ Arize evaluation against Pre-Prod
+        │   └─ All gates pass
+        │
+        ├─ Deploy to Prod (progressive)
+        │   ├─ Canary 10% (30 min monitoring)
+        │   ├─ Canary 25% (30 min monitoring)
+        │   ├─ Canary 50% (30 min monitoring)
+        │   └─ Full rollout 100%
+        │
+        └─ Deployment complete
+            └─ Slack notification + Splunk audit log entry
+```
+
+### What happens when something fails
+
+If anything fails — Terraform plan rejected by OPA, Arize gates fail, SLOs violated during canary — Harness automatically rolls back to the previous agent version. Jenkins doesn't roll back infrastructure (Terraform state needs careful manual handling), but the failed Terraform apply is visible in Jenkins for platform engineering to address.
+
+### Why this two-plane model matters
+
+The reason AgentCatalyst forbids direct deployment from your workstation and forces this two-plane model is governance. Each plane enforces a specific control:
+
+| Governance concern | How it's enforced |
+|---|---|
+| Infrastructure follows company standards | Jenkins runs OPA policy checks before Terraform apply |
+| All changes are traceable | Every deployment has Jenkins run ID + Harness execution ID logged in Splunk |
+| Production deployments require approval | Harness manual approval gate before pre-prod promotion |
+| Quality gates protect production | Arize evaluation must pass before each environment promotion |
+| Bad deployments don't take down production | Canary deployment + automatic SLO-based rollback in Harness |
+| No one can bypass the pipeline | Direct deployment is forbidden by three-layer skill override; CI/CD is the only path |
+
+If you bypassed the pipeline and deployed directly, none of this happens. The agent would go straight to 100% traffic with no policy checks, no quality gates, no canary, no rollback, no audit trail. That's the failure mode AgentCatalyst prevents.
+
+### Jenkins vs Harness — what each one is for
+
+| Question | Jenkins | Harness |
+|---|---|---|
+| What does it deploy? | Infrastructure (cloud resources) | Application (agent code) |
+| What tool does it run? | Terraform | Container deployment + traffic shifting |
+| How often does it run? | Infrequently (weeks) | Frequently (multiple times per day) |
+| Rollback strategy | Re-run Terraform (manual, careful) | Automatic traffic shift to previous version |
+| Pipeline ownership | Platform engineering | Your team (with platform-provided template) |
+| Unit of change | Terraform plan | Container image |
+| Gate types | OPA policy checks | Arize quality gates + SLO validation |
+
+Both are essential. Jenkins ensures the agent's environment is correct. Harness ensures the agent's deployment is safe. Together they take your agent from `git push` to production at enterprise scale.
+
+---
+
+## 14. Troubleshooting
 
 | Problem | Cause | Fix |
 |---|---|---|
