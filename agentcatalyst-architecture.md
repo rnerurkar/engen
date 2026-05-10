@@ -612,6 +612,18 @@ The `agent-blueprint.yaml` includes a `diagrams:` section containing three Merma
 
 **Developer workflow:** After `/catalyst.blueprint`, the developer opens the YAML in VSCode. The Mermaid preview extension renders diagrams inline. The developer reviews YAML fields with diagrams visible side-by-side — visual verification catches assignment mistakes that reading YAML alone would miss. In PR review, GitHub/GitLab renders Mermaid natively so the team reviews architecture visually.
 
+### Enhanced spec template — business logic capture
+
+The spec template includes four sections beyond workflow and data sources that enable the coding agent to generate business logic — not just scaffolding. When filled out, the coding agent generates 90-95% of the code including business rules. When omitted, the coding agent generates 80% (scaffolding only) and the developer implements business logic manually (+$5.5K per use case).
+
+**Business Rules section:** Structured conditions (inputs, outputs, if/then rules, edge cases, validation) for each decision point. The Blueprint Advisor converts these into `business_rules:` blocks in the YAML. The coding agent generates working implementations.
+
+**Transformation Rules section:** Field mappings and formulas for each data transformation. Converted to `transformations:` blocks. The coding agent generates data transformation functions.
+
+**Error Handling section:** Timeout behavior, failure fallbacks, partial-data handling, and retry policies for each external dependency. Converted to `error_handling:` blocks. The coding agent generates try/catch blocks with circuit breakers.
+
+**Acceptance Criteria section:** GIVEN/WHEN/THEN assertions for each workflow step. The Blueprint Advisor converts these into starter golden dataset entries and pre-populated evalsets in `tests/evalsets/`. This closes the loop between requirements and testing.
+
 ### What `agents-cli` generates vs what engineers implement
 
 | Generated component | What agents-cli generates | Engineer effort |
@@ -964,63 +976,37 @@ AgentCatalyst generates CI/CD pipeline definitions. The company's pipelines exec
 | Pre-Prod | Harness | Canary deployment (10% traffic), **Arize evaluation against pre-prod**, performance validation, SLO checks. |
 | Production | Harness | Progressive rollout, monitoring, automatic rollback if SLOs violated. |
 
-### Evaluation pattern — Arize via CI/CD (no preview services)
+### EvalOps — three-layer evaluation lifecycle (no preview services)
 
-AgentCatalyst evaluates agents using **Arize** triggered by the Harness pipeline. This replaces direct dependency on Agent Evaluation Service and Agent Simulation Service (both pre-GA preview services). The result: AgentCatalyst is deployable to any GCP project — including locked-down environments where preview APIs are not enabled.
+AgentCatalyst implements a multi-layered EvalOps strategy that fuses automated velocity with human judgment. All evaluation runs on GA services — Arize for automated evaluation, AutoSxS for baseline comparison, and human review for edge-case triage. `agents-cli eval`, `agents-cli simulate`, and `agents-cli deploy` are all forbidden by three-layer skill override. Agent Evaluation Service and Agent Simulation Service (both pre-GA preview services) are NOT used.
 
-**Evaluation flow:**
+**Layer 1: Inner Loop (automated velocity — pre-commit)**
 
-```
-Developer writes evalsets locally
-  tests/evalsets/fnol-basic.json    ← input/expected JSON
-  
-git commit + push
-  └─► Jenkins pipeline
-        ├─ Terraform apply (infra)
-        ├─ Build container image
-        ├─ Local unit tests (pytest with mocks)
-        └─ Trigger Harness
-              │
-              ▼ Harness pipeline (per environment)
-              ├─ Deploy agent to Agent Engine (non-prod)
-              ├─ Run Arize evaluation suite against deployed agent
-              │   ├─ Captures: tool trajectory, response quality,
-              │   │            latency p95, hallucination scores,
-              │   │            multi-turn coherence
-              │   └─ Posts results to Arize dashboard
-              ├─ Quality gate
-              │   ├─ pass_rate ≥ 0.95 → promote to pre-prod
-              │   ├─ p95_latency ≤ 3000ms → promote
-              │   ├─ hallucination_score ≤ 0.15 → promote
-              │   └─ Otherwise → block + notify team
-              ├─ Repeat for pre-prod environment
-              └─ Canary deploy to prod with Arize observability
-```
+Developers get instant feedback in their IDE. The `company-cicd` skill generates a pre-commit evaluation hook (`tests/eval_inner_loop.py`) that runs a lightweight subset of evalsets (5-10 cases) against the local agent using the Vertex AI Evaluation SDK, checking safety, fluency, groundedness, and tool trajectory. Scores are compared against `tests/baseline_scores.json` — if any metric drops more than 10%, the commit is blocked. Completes in under 60 seconds.
 
-**Where Arize lives in the architecture:**
+**Layer 2: Deep Dive (agent debugging — ADK tracing + Arize Phoenix)**
 
-| Component | Location | Notes |
-|---|---|---|
-| Arize SaaS account | External (arize.com) | Provisioned by platform engineering, shared across all AgentCatalyst projects |
-| Arize CLI (`arize-eval-cli`) | Harness pipeline runners | Installed via pip in pipeline container |
-| Arize API credentials | Harness Secret Manager | `ARIZE_API_KEY_SECRET`, `ARIZE_SPACE_KEY_SECRET` |
-| Evaluation results | Arize dashboard + Splunk | Results streamed to Arize for visualization, mirrored to Splunk for compliance audit |
+The `company-observability` skill generates ADK tracing instrumentation and Arize Phoenix integration. Every agent in the topology gets OpenTelemetry spans capturing LLM calls, tool calls, agent-to-agent delegation, and loop iterations. During local development, traces export to Phoenix at `localhost:6006`. In non-prod/pre-prod, traces export to a shared Phoenix instance for team debugging.
 
-**The `company-cicd` skill generates Harness pipeline YAML** that includes Arize evaluation stages. Developers don't write the Arize integration manually — it's part of the generated `harness-pipeline.yaml`.
+**Layer 3: Outer Loop (governance + HITL — 3-phase Harness pipeline)**
 
-**Local evaluation (developer workstation):** Limited to unit tests with mocks via `pytest`. Developers cannot run end-to-end evaluations locally — that requires the agent to be deployed, which only happens in CI/CD. This is intentional: it prevents "works on my machine" deployment surprises.
+The `company-cicd` skill generates a 3-phase Harness pipeline: Phase A runs Arize evaluation with quality gates (pass_rate, latency, hallucination). Phase B runs AutoSxS comparison against the current baseline across the Golden Dataset, flagging edge cases. Phase C routes flagged cases to a human triage queue where reviewers make final approve/reject decisions.
+
+**Golden Dataset lifecycle:** The spec template includes an Acceptance Criteria section. The Blueprint Advisor converts acceptance criteria into starter golden dataset entries. A production feedback pipeline samples failing cases from production, routes them to human annotation, and adds them back to the golden dataset. A quarterly meta-evaluation pipeline audits whether automated evaluation metrics still align with human intent.
 
 **Why this pattern is better than `agents-cli eval`:**
 
-| Concern | `agents-cli eval` (preview) | Arize via CI/CD |
+| Concern | `agents-cli eval` (preview) | EvalOps via CI/CD |
 |---|---|---|
 | Preview API dependency | Yes — fails if disabled | No — Arize is a GA SaaS |
 | Locked-down environments | Cannot deploy | Deploys anywhere |
+| Pre-commit regression checks | None | Layer 1 inner loop catches regressions in seconds |
+| Agent debugging | Limited | Layer 2 Phoenix traces show full reasoning chain |
+| Baseline comparison | None | Layer 3 AutoSxS compares against golden dataset |
+| Human oversight | None | Layer 3 HITL triage for edge cases |
+| Golden dataset management | None | Full lifecycle: creation → curation → production feedback → meta-eval |
 | Quality gate enforcement | Manual | Automated in Harness |
-| Multi-environment evaluation | Manual repetition | Pipeline runs at each stage |
 | Audit trail | Limited | Centralized in Arize + Splunk |
-| Cost predictability | Unknown (preview) | Subscription-based |
-| Cross-project visibility | None | Arize dashboard spans all agents |
 
 ### A concrete deployment scenario — FNOL agent merge to production
 

@@ -1002,6 +1002,149 @@ BigQuery is mentioned in the Data Sources section, not in the workflow step. The
 
 ---
 
+## 4a. Capturing Business Logic in the Spec
+
+If you want the coding agent to generate business logic — not just scaffolding — add these four sections to your spec. When present, the coding agent generates 90-95% of the code. When omitted, you write business logic manually (~55 additional hours per use case).
+
+### Business Rules
+
+For each decision point in your workflow, write the rules:
+
+```markdown
+### Severity Classification
+
+**Inputs:**
+- damage_estimate (float) — from extract_details output
+- injuries_reported (boolean) — from extract_details output
+- fraud_score (float) — from fraud_scoring output
+
+**Rules (evaluated in order):**
+1. IF damage_estimate > 25000 OR injuries_reported THEN level=high, routing=adjuster_review
+2. IF fraud_score > 0.7 THEN level=high, routing=adjuster_review
+3. IF damage_estimate > 10000 THEN level=medium, routing=auto_approve
+4. OTHERWISE level=low, routing=auto_approve
+
+**Edge cases:**
+- WHEN damage_estimate is missing THEN level=high, reason="missing data"
+- WHEN fraud_score unavailable (timeout) THEN proceed without it, flag for manual review
+
+**Validation:**
+- damage_estimate must be >= 0
+- fraud_score must be between 0.0 and 1.0
+```
+
+The Blueprint Advisor converts this into a `business_rules:` block in the YAML. The coding agent generates working `classify_severity()` with all conditions, edge cases, and validation — not a stub.
+
+### Transformation Rules
+
+For each data transformation, write the mapping:
+
+```markdown
+### Claim Summary
+
+**Input:** Enrichment results (weather, police, fraud, coverage)
+**Output:** ClaimSummary
+
+**Mapping:**
+- summary.total_damage = body_shop_estimate + rental_cost
+- summary.risk_score = (fraud_score × 0.6) + (severity_numeric × 0.4)
+- summary.weather_factor = IF conditions IN ["heavy rain","ice","fog"] THEN "adverse" ELSE "normal"
+```
+
+### Error Handling
+
+For each external dependency, write the fallback:
+
+```markdown
+### Body Shop A2A Agent
+- Timeout (> 30s): Use cached average estimate. Flag for manual review.
+- Failure: Skip enrichment. Set repair_estimate = null. Route to adjuster.
+- Retry policy: 2 retries, exponential backoff (1s, 3s).
+```
+
+### Acceptance Criteria
+
+For each workflow step, write GIVEN/WHEN/THEN assertions. These auto-generate your evalsets:
+
+```markdown
+### Policy Verification
+- GIVEN policyholder "P-12345" with active coverage
+  WHEN verify_policy runs
+  THEN output contains policy_status=active AND coverage_type=comprehensive
+
+- GIVEN policyholder "P-99999" with expired coverage
+  WHEN verify_policy runs
+  THEN routing changes to adjuster_review
+```
+
+The Blueprint Advisor converts these into starter golden dataset entries and pre-populated evalsets in `tests/evalsets/`. Your acceptance criteria become your automated evaluation — no separate test-writing step.
+
+---
+
+## 4b. EvalOps — Your Evaluation Workflow
+
+AgentCatalyst generates a complete evaluation lifecycle. You don't need to set this up — the `company-cicd` and `company-observability` skills generate everything.
+
+### What gets generated for you
+
+| Generated file | What it does | When it runs |
+|---|---|---|
+| `tests/eval_inner_loop.py` | Pre-commit hook — runs 5-10 evalsets locally via Vertex AI Evaluation SDK. Blocks commit if any metric drops >10%. | Every `git commit` |
+| `.pre-commit-config.yaml` | Wires the inner loop evaluator as a pre-commit hook | Automatic |
+| `tests/baseline_scores.json` | Baseline scores to compare against | Updated after each successful deployment |
+| `observability/adk-tracing-config.py` | ADK tracing instrumentation — captures LLM calls, tool calls, loop iterations | Every agent run (local + deployed) |
+| `observability/phoenix-config.py` | Arize Phoenix config — traces visible at `localhost:6006` during local dev | Local development |
+| `golden-dataset/golden-v1.json` | Starter golden dataset from your acceptance criteria | Blueprint Advisor generates |
+| `harness-pipeline.yaml` | 3-phase pipeline: Arize eval → AutoSxS comparison → HITL triage | Every PR merge |
+
+### Your daily workflow with EvalOps
+
+```
+Edit code or prompts
+  ↓
+git commit
+  ↓
+Pre-commit hook runs inner loop (< 60 seconds)
+  ├─ Pass → commit proceeds
+  └─ Fail → "Groundedness dropped 18%. Review prompt changes."
+  ↓
+Push + PR merge
+  ↓
+Harness pipeline:
+  Phase A: Arize eval (pass/fail gates)
+  Phase B: AutoSxS vs baseline (edge case detection)
+  Phase C: Human triage (reviewers approve/reject flagged cases)
+  ↓
+Production with Arize monitoring
+  ↓
+Drift detected? → Failing cases sampled → Human annotates
+  → Golden dataset updated → Next deployment tested against real failures
+```
+
+### Debugging with Phoenix traces
+
+When an evaluation fails, open Phoenix at `localhost:6006` to see the full trace:
+
+```
+fnol_coordinator (2.3s)
+├── intake_pipeline (0.8s)
+│   ├── verify_policy (0.5s)
+│   │   └── BigQuery execute_query (0.3s) ← see actual SQL
+│   └── extract_details (0.3s)
+│       └── LLM call: input="caller said..." output="structured={...}"
+├── enrichment_fan_out (1.1s)
+│   ├── weather_check (0.4s)
+│   ├── police_report (0.8s) ← A2A call, full request/response
+│   └── fraud_scoring (0.2s) ← FunctionTool, see input/output
+└── claim_summary_loop (0.4s)
+    ├── iteration 1: quality=0.72 → retry
+    └── iteration 2: quality=0.91 → exit ✓
+```
+
+This shows you exactly which agent failed, which tool returned bad data, and whether a loop converged — instead of just seeing a pass/fail score.
+
+---
+
 ## 5. Understanding the YAML Blueprint
 
 ### Agentic blueprint — key fields

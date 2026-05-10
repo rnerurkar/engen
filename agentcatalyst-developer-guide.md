@@ -556,6 +556,36 @@ The Blueprint Advisor uses your spec text to search the pattern catalog. Certain
 
 ---
 
+## 4a. Capturing Business Logic in the Spec
+
+If you want the coding agent to generate business logic — not just scaffolding — add four sections to your spec: Business Rules (structured conditions for each decision point), Transformation Rules (field mappings and formulas), Error Handling (timeout/failure/retry behavior per dependency), and Acceptance Criteria (GIVEN/WHEN/THEN assertions per workflow step).
+
+When present, the coding agent generates 90-95% of the code. When omitted, you write business logic manually (~55 additional hours per use case).
+
+**Business Rules** — write inputs, rules as IF/THEN, edge cases, and validation. Example: "IF damage > 25000 OR injuries THEN level=high, routing=adjuster_review." The Blueprint Advisor converts this into `business_rules:` in the YAML. The coding agent generates a working implementation, not a stub.
+
+**Transformation Rules** — write field mappings. Example: "summary.total_damage = body_shop_estimate + rental_cost." The coding agent generates data transformation functions with correct field references.
+
+**Error Handling** — write fallback behavior per dependency. Example: "Body Shop A2A timeout > 30s: use cached estimate, flag for manual review. Retry 2× with exponential backoff." The coding agent generates try/catch blocks with circuit breakers.
+
+**Acceptance Criteria** — write GIVEN/WHEN/THEN per workflow step. The Blueprint Advisor converts these into starter golden dataset entries and pre-populated evalsets in `tests/evalsets/`. Your acceptance criteria become your automated evaluation.
+
+---
+
+## 4b. EvalOps — Your Evaluation Workflow
+
+AgentCatalyst generates a complete evaluation lifecycle. The `company-cicd` and `company-observability` skills generate everything automatically.
+
+**What gets generated:** `tests/eval_inner_loop.py` (pre-commit hook — blocks commit if any metric drops >10%), `.pre-commit-config.yaml`, `observability/adk-tracing-config.py` (ADK tracing), `observability/phoenix-config.py` (Arize Phoenix at `localhost:6006`), `golden-dataset/golden-v1.json` (from acceptance criteria), and `harness-pipeline.yaml` (3-phase: Arize eval → AutoSxS comparison → HITL triage).
+
+**Your daily workflow:** Edit code → `git commit` → pre-commit inner loop catches regressions in <60 seconds → push → Harness runs 3-phase eval → production with Arize monitoring → drift detected → failing cases sampled → human annotates → golden dataset updated.
+
+**Debugging with Phoenix:** When evaluation fails, open `localhost:6006` to see the full agent trace — which agent failed, which tool returned bad data, whether a loop converged. This replaces the pass/fail black box with "X-ray vision" into agent reasoning.
+
+Note: `agents-cli eval` is forbidden by three-layer skill override. The pre-commit inner loop + Harness pipeline replaces it entirely.
+
+---
+
 ## 5. Understanding the YAML Blueprint
 
 The `agent-blueprint.yaml` is the single source of truth for what `agents-cli` will scaffold. Here's a field-by-field guide:
