@@ -416,202 +416,50 @@ All three use single-pass semantic search via Vertex AI Search (GA).
 
 #### How the three data stores are structured
 
-Each data store uses a different **chunking granularity** to optimize search relevance:
+The Blueprint Advisor queries three Vertex AI Search data stores, each optimized for a different discovery purpose:
 
-**Pattern Catalog — one document per pattern.**
-Each pattern document contains YAML frontmatter with structured metadata (`taxonomy`, `adk_classes`, `use_case_signals`, `composable_with`) and a body describing applicability, component diagram, sequence diagram, and HA/DR views. The `use_case_signals` field contains trigger phrases that the Blueprint Advisor's queries will match against (e.g., "ordered steps," "parallel concurrent," "refine until threshold").
+| Data Store | Contents | Search Strategy |
+|---|---|---|
+| Pattern Catalog | 11 agentic patterns (8 sections each, 176 HA/DR scenarios) | Semantic search on pattern applicability |
+| Skill Catalog | Reusable skills with frontmatter metadata | Semantic search on `use_when` / `do_not_use_when` |
+| Tool Registry | MCP servers + A2A Agent Cards + FunctionTool definitions | Semantic search on capability + endpoint |
 
-**Tool Registry — one document per tool or task, not per server.**
-An MCP server exposes many tools via the MCP protocol's `tools/list` endpoint (e.g., BigQuery MCP exposes `execute_query`, `get_table_schema`, `list_datasets`, `export_to_gcs`). Similarly, an A2A agent publishes multiple tasks in its Agent Card at `/.well-known/agent.json`. The ingestion pipeline creates a **separate Vertex AI Search document for each individual tool or task**, enriched with the parent server/agent metadata (endpoint, transport, auth, owner). This means a query like "analytical policy coverage query" matches the specific `execute_query` tool on the BigQuery MCP server — not just "BigQuery" generically. MCP tool documents and A2A task documents live in the **same data store**, so a single `search_tools()` call searches both simultaneously. The search result metadata tells the Blueprint Advisor whether to generate `MCPToolset` (MCP) or `AgentTool` (A2A).
+Each entry has YAML frontmatter (name, description, tags, applicability signals) that Vertex AI Search indexes for hybrid semantic + structured retrieval.
 
-**Skill Catalog — one document per skill.**
-Each skill document contains frontmatter with `capability_domains`, `compatible_tools`, `workload_type`, and `compatible_archetypes`. The `compatible_tools` field is critical for assignment: it tells the Blueprint Advisor which MCP server the skill pairs with, enabling co-location of the skill with the tool's assigned agent.
 
 #### How the Blueprint Advisor extracts search queries from the spec
 
-The Blueprint Advisor doesn't pass raw spec text to Vertex AI Search. It uses LLM reasoning, guided by its system prompt, to **extract signal phrases** from the spec and formulate targeted search queries:
+The Blueprint Advisor reads the spec's natural language and extracts search signals:
 
-**From the Workflow section** — the Blueprint Advisor extracts ordering signals that map to pattern queries:
-
-| Developer writes in spec | Blueprint Advisor queries | What it finds |
+| Spec Signal | Extracted Query | Target Data Store |
 |---|---|---|
-| "First, verify... Then, extract..." | `search_patterns("sequential ordered dependency")` | Sequential Pipeline pattern |
-| "Simultaneously enrich from four sources" | `search_patterns("parallel concurrent independent")` | Parallel Fan-out pattern |
-| "Refine until quality > 0.85" | `search_patterns("loop iterative threshold")` | Loop pattern |
-| "Route to human adjuster" | `search_patterns("human approval async")` | HITL pattern |
+| Workflow ordering words ("first...then...in parallel") | Pattern applicability phrases | Pattern Catalog |
+| Data system references ("claims database", "policy store") | Data service capability descriptions | Tool Registry |
+| External partner mentions ("body shop scheduling") | Partner capability + protocol | Tool Registry (A2A) |
+| Business capability needs ("classify severity") | Skill `use_when` matching | Skill Catalog |
 
-**From the Data Sources section** — the Blueprint Advisor extracts system names and workload types that map to tool queries:
+The Blueprint Advisor performs a **single-pass** semantic search — one query per data store, not iterative refinement. Results are ranked by Vertex AI Search's built-in relevance scoring.
 
-| Developer writes in spec | Blueprint Advisor queries | What it finds |
-|---|---|---|
-| "BigQuery — analytical, read-only" | `search_tools("BigQuery analytical query")` | `execute_query` tool on bigquery-mcp server |
-| "Cloud SQL — transactional, read-write" | `search_tools("Cloud SQL transactional CRUD")` | `execute_sql` tool on cloudsql-mcp server |
-
-**From the External Integrations section** — ownership signals distinguish MCP from A2A:
-
-| Developer writes in spec | Blueprint Advisor infers | What it searches |
-|---|---|---|
-| "Body shop — they operate their own service" | External partner → A2A agent | `search_tools("body shop repair estimate")` → finds A2A task document |
-| "BigQuery — our data warehouse" | We operate it → MCP server | `search_tools("BigQuery analytical")` → finds MCP tool document |
 
 #### How tools and skills are assigned to agents
 
-The Blueprint Advisor uses a three-stage assignment chain:
+The Blueprint Advisor assigns discovered tools and skills to specific agents in the blueprint based on:
 
-**Stage 1 — Spec steps → agents.** The Workflow section's ordering words define agent boundaries. "First, verify" becomes `verify_policy` (Sequential step 1). "Simultaneously enrich" becomes 4 branches of `enrichment_fan_out` (Parallel).
+- **Capability match**: which agent's purpose aligns with the tool's function
+- **Data ownership**: which agent owns the data the tool accesses
+- **Skill `use_when` rules**: skill frontmatter specifies which agent types should use it
+- **FunctionTool scope**: proprietary logic is flagged as FunctionTool (first-draft generated from spec business rules)
 
-**Stage 2 — Spec steps → tools (co-occurrence).** The Blueprint Advisor maps tools to agents by identifying which data source or partner is mentioned **in the same sentence or paragraph** as the workflow step. "Verify coverage by querying our BigQuery" → BigQuery is mentioned in the same sentence as "verify" → BigQuery MCP assigned to `verify_policy`.
-
-**Stage 3 — Tools → skills (affinity).** Skills are assigned to the same agent as their corresponding tool. The skill's `compatible_tools` metadata field tells the Blueprint Advisor which MCP server the skill pairs with. If `bigquery` skill lists `compatible_tools: [bigquery-mcp]` and `bigquery-mcp` is assigned to `verify_policy`, then the `bigquery` skill is also assigned to `verify_policy`.
-
-**Scope rules for ambiguous assignments:**
-- Tool mentioned in one specific step → assign to that step's agent
-- Tool mentioned across multiple steps → assign to the lowest common ancestor agent
-- Write-heavy tools (INSERT/UPDATE) → assign to root coordinator (write scope is a top-level concern)
-- "Our proprietary" → FunctionTool implementation (business rules from spec generate first draft; developer reviews)
 
 #### How search results distinguish MCP from A2A
 
-MCP tool documents and A2A task documents share the same data store. The Blueprint Advisor determines the connection type from result metadata:
+Tool Registry entries include a `connection_type` field: `mcp_server`, `a2a_agent_card`, or `function_tool`. The Blueprint Advisor reads this field to determine whether to generate an MCP connection, an A2A client, or a FunctionTool implementation in the blueprint.
 
-| If search result contains | Connection type | Generated code |
-|---|---|---|
-| `mcp_server_name` + `mcp_server_endpoint` + `transport` | MCP server | `MCPToolset(connection_params={...})` |
-| `a2a_agent_name` + `a2a_agent_endpoint` + `a2a_agent_auth` | A2A agent | `AgentTool(endpoint=..., auth=...)` |
-
-The developer doesn't specify whether an integration should be MCP or A2A. The spec says "body shop network — they operate their own service." The Blueprint Advisor searches, finds an A2A task document, and generates `AgentTool`. If the company had built their own body shop MCP server instead, the search would return an MCP tool document and generate `MCPToolset`. **The spec describes WHAT, the tool registry determines HOW.**
 
 #### Tool Registry ingestion pipeline
 
-The platform engineering team runs a weekly ingestion pipeline that populates the Tool Registry data store:
+New tools are registered by submitting a YAML manifest to the ingestion pipeline. The pipeline validates frontmatter, generates embeddings, and indexes in Vertex AI Search. Tools without complete frontmatter are rejected. The platform team reviews new tool registrations weekly.
 
-```
-1. DISCOVER — For each whitelisted MCP server: call tools/list.
-              For each whitelisted A2A agent: fetch Agent Card from
-              /.well-known/agent.json.
-
-2. CHUNK    — One Vertex AI Search document per tool (MCP) or per
-              task (A2A). Document ID: {server}__{tool} or 
-              {agent}__{task}.
-
-3. ENRICH   — Platform engineering adds: workload_types, 
-              data_domains, use_case_signals, access_pattern,
-              data_sensitivity, sla_response_time.
-
-4. EMBED    — Generate vector embedding for body text.
-              Index metadata fields for structured filtering.
-
-5. INGEST   — Upsert into Vertex AI Search. Delete documents for
-              tools/tasks that no longer exist.
-```
-
-### How the Blueprint Advisor calls Vertex AI Search (wire-level)
-
-The Blueprint Advisor's three FunctionTools (`search_patterns`, `search_skills`, `search_tools`) each invoke the Vertex AI Search REST API. Understanding the wire-level interaction matters for performance tuning, cost analysis, and troubleshooting.
-
-**API endpoint:**
-
-```
-POST https://discoveryengine.googleapis.com/v1/projects/{PROJECT}/locations/{LOCATION}/collections/default_collection/dataStores/{DATASTORE_ID}/servingConfigs/default_search:search
-```
-
-Three data stores → three different `{DATASTORE_ID}` values:
-- `agentcatalyst-patterns-{archetype}` — pattern catalog per archetype
-- `agentcatalyst-skills` — skill catalog (shared across archetypes)
-- `agentcatalyst-tools` — MCP tools + A2A tasks (shared)
-
-**Authentication:** The Blueprint Advisor runs on Agent Engine with workload identity federation. Its service account has the `roles/discoveryengine.viewer` role on the data stores. No developer credentials are involved.
-
-**Request body example** (formulated by Blueprint Advisor for a pattern search):
-
-```json
-{
-  "query": "sequential ordered dependency pipeline",
-  "pageSize": 5,
-  "queryExpansionSpec": {
-    "condition": "AUTO"
-  },
-  "spellCorrectionSpec": {
-    "mode": "AUTO"
-  },
-  "contentSearchSpec": {
-    "snippetSpec": {
-      "returnSnippet": true,
-      "maxSnippetCount": 1
-    },
-    "extractiveContentSpec": {
-      "maxExtractiveAnswerCount": 1
-    }
-  },
-  "filter": "archetype: ANY(\"agentic\") AND visibility: ANY(\"active\")"
-}
-```
-
-**Response structure:**
-
-```json
-{
-  "results": [
-    {
-      "id": "pattern_sequential-pipeline",
-      "document": {
-        "name": "projects/.../documents/pattern_sequential-pipeline",
-        "structData": {
-          "name": "sequential-pipeline",
-          "adk_classes": ["SequentialAgent"],
-          "use_case_signals": ["ordered steps", "dependency chain"],
-          "composable_with": ["parallel-fan-out", "loop", "human-in-the-loop"],
-          "complexity": "low"
-        },
-        "derivedStructData": {
-          "snippets": [
-            { "snippet": "Use when tasks must execute in a specific order...", "snippet_status": "SUCCESS" }
-          ]
-        }
-      },
-      "modelScores": {
-        "relevance_score": 0.94
-      }
-    }
-  ],
-  "totalSize": 3,
-  "attributionToken": "...",
-  "guidedSearchResult": {},
-  "summary": {}
-}
-```
-
-**Hybrid retrieval** — Vertex AI Search combines two ranking signals:
-
-| Signal | What it does | Driven by |
-|---|---|---|
-| **Semantic** | Compares query embedding to document embeddings (cosine similarity) | The `query` field in the request |
-| **Metadata** | Filters and boosts based on structured fields | The `filter` field + structured data in documents |
-
-The `relevance_score` (0.0–1.0) returned per result combines both signals. The Blueprint Advisor uses this score directly for confidence-tier classification (high ≥ 0.85, medium 0.65–0.85, low < 0.65).
-
-**Filtering semantics:**
-
-```
-filter: "archetype: ANY(\"agentic\") AND visibility: ANY(\"active\")"
-```
-
-This excludes patterns that are deprecated (`visibility: deprecated`) or in preview (`visibility: preview`) — restricting search to production-ready content. The same filter pattern applies to tools (filter for `lifecycle_state: active`) and skills (filter for `version_status: stable`).
-
-**Cost model:** Vertex AI Search charges per query plus per indexed document. With 3 data stores totaling ~150–200 documents and an estimated 50 Blueprint Advisor invocations per day across all developers, projected cost is **~$50–100/month** at moderate enterprise scale. This is included in the GCP infrastructure line item ($500–1,500/month).
-
-**Why developers don't query Vertex AI Search directly:**
-
-| Concern | Direct workstation→Vertex AI Search | Via Blueprint Advisor |
-|---|---|---|
-| **Authentication** | Each developer needs reader IAM role on data stores | Only Blueprint Advisor's service account needs the role |
-| **Data exposure** | Tool registry (with sensitive endpoints) accessible from any workstation | Tool registry only readable by Blueprint Advisor in GCP |
-| **Query reasoning** | Coding agent must formulate queries, parse results, merge across data stores | Blueprint Advisor (LLM) handles all of this with system prompt |
-| **Network requirements** | Workstation needs egress to discoveryengine.googleapis.com | Workstation only needs HTTPS to one endpoint (Agent Engine) |
-| **Auditability** | Hard to track who searched what | Centralized logs at Blueprint Advisor |
-| **Response shaping** | Each coding agent re-implements YAML assembly | Blueprint Advisor returns ready-to-use YAML |
-
-The Blueprint Advisor is the **only** entity that calls Vertex AI Search. Developers' coding agents call only the Blueprint Advisor API. This isolation is central to AgentCatalyst's security model.
 
 ### The 11 agentic patterns (Phase 1 catalog)
 
@@ -806,187 +654,16 @@ WITH business logic in spec (enhanced):
 
 ### Confidence-tiered recommendations
 
-The Blueprint Advisor doesn't always return a single high-confidence recommendation. When the spec is ambiguous or the catalog has multiple viable matches, returning a single answer with false certainty is worse than acknowledging the ambiguity. The Blueprint Advisor uses three confidence tiers driven by Vertex AI Search relevance scores:
+The Blueprint Advisor tags each recommendation with a confidence level: **high** (exact catalog match), **medium** (partial match, alternatives available), or **low** (best-effort, manual review recommended). The developer sees these confidence levels in the YAML and prioritizes review accordingly.
 
-| Tier | Threshold | Behavior | YAML output |
-|---|---|---|---|
-| **High confidence** | Top result score ≥ 0.85 with ≥ 0.20 gap to next result | Single recommendation | Tool/pattern/skill assigned with no alternatives |
-| **Medium confidence** | Top result 0.65–0.85, or top result ≥ 0.85 but next result within 0.20 | Best guess with alternatives | Primary assignment plus `alternatives:` field listing 2–3 other candidates with their scores |
-| **Low confidence** | Top result < 0.65 | No assignment — request developer review | Field marked `requires_review: true` with notes explaining the ambiguity (e.g., "spec mentions 'data warehouse' but no specific system; please specify BigQuery or Cloud SQL") |
-
-This protects developers from acting on noise as if it were signal. The YAML review step becomes the contract: the developer either accepts the recommendation, picks an alternative, or rewrites the spec to be unambiguous. Confidence tiers also give platform engineering a clear signal — high rates of medium/low confidence on a particular LOB indicate that LOB needs spec-writing training or pattern catalog gaps.
 
 ### Catalog quality engineering
 
-The Blueprint Advisor's correctness depends entirely on the quality of the metadata in Vertex AI Search. Search returns noisy results when enrichment is incomplete. This is the single biggest operational risk.
-
-**Quality scorecard per registered tool/task:**
-
-| Metric | Definition | Threshold |
-|---|---|---|
-| **Enrichment completeness** | % of required metadata fields populated (`workload_types`, `data_domains`, `use_case_signals`, `access_pattern`, `data_sensitivity`, `sla_response_time`) | ≥ 95% before tool is searchable |
-| **Search hit rate** | % of queries where this tool appears in top 3 when it's the correct answer (measured against regression suite) | ≥ 80% |
-| **Acceptance rate** | % of times developers keep the recommended assignment without editing | ≥ 75% |
-| **Override pattern** | If developers consistently change `assigned_to` for a specific tool, this signals enrichment metadata needs revision | < 25% override rate |
-
-**Required enrichment metadata per tool/task:**
-
-```yaml
-# REQUIRED (gates tool from being searchable)
-workload_types: [analytical | transactional | retrieval | event | streaming | batch]
-data_domains: [policy | claims | billing | customer | inventory | ...]
-use_case_signals: [3-7 trigger phrases developers might write]
-access_pattern: [read-only | read-write | write-only]
-data_sensitivity: [pii_none | pii_possible | pii_contains | pci | phi]
-
-# REQUIRED for SLA-bound tools
-sla_response_time: "< 30 seconds"
-
-# RECOMMENDED
-business_domain: insurance | finance | hr | ...
-integration_type: external_partner | internal_service | gcp_managed
-deprecation_status: active | deprecated | sunset_date_yyyy_mm_dd
-```
-
-**Quality gates** — a tool/task cannot be promoted from staging to production catalog until:
-1. Enrichment completeness ≥ 95%
-2. Searchability test passes (5+ test queries return the tool in top 3)
-3. Pattern composition validator confirms tool is compatible with documented agent patterns
-4. Platform engineering review approves
-
-**Per-LOB enrichment ramp:** When a new LOB onboards, their tools require enrichment before their developers can use AgentCatalyst effectively. This is the largest hidden cost of LOB expansion — budget 20–60 hours per LOB depending on tool count.
-
-### Search quality regression suite
-
-The Blueprint Advisor's behavior depends on three artifacts that change over time: the system prompt, the pattern catalog, and the tool registry. Any change to any artifact can degrade search quality without anyone noticing.
-
-The regression suite is the safety net.
-
-**Composition:** 30–50 reference specs covering all 11 agentic patterns, brownfield and greenfield, with realistic complexity distribution:
-- 10–15 simple specs (single pattern, 1–3 tools)
-- 15–20 moderate specs (2–3 composed patterns, 3–6 tools)
-- 8–10 complex specs (FNOL-equivalent, 4+ patterns, 6+ tools)
-- 5–8 brownfield specs (with EXISTING signals)
-- 3–5 ambiguous specs (deliberately written to test medium/low confidence handling)
-
-**Each reference spec has a golden YAML output** — the architecturally-correct blueprint, validated by EA. The regression suite runs the Blueprint Advisor against each spec and compares the generated YAML to the golden YAML using:
-
-| Comparison metric | Definition |
-|---|---|
-| **Pattern accuracy** | % of expected patterns selected (e.g., did it pick Sequential when expected?) |
-| **Tool accuracy** | % of expected tools assigned to correct agents |
-| **Skill accuracy** | % of expected skills assigned to correct agents |
-| **No false positives** | Did it add tools/patterns/skills that shouldn't be there? |
-| **No false negatives** | Did it miss tools/patterns/skills that should be there? |
-
-**Quality gates** — Blueprint Advisor changes (system prompt, pattern catalog, tool registry) cannot be promoted to production until:
-- Pattern accuracy ≥ 90%
-- Tool accuracy ≥ 85%
-- Skill accuracy ≥ 85%
-- Zero regressions on previously-passing reference specs
-
-**CI integration:** The regression suite runs on every PR that modifies the system prompt, pattern catalog, or tool registry. Failures block deployment. Passing changes are promoted to a staging Blueprint Advisor for additional pilot validation before production.
-
-### Acceptance telemetry and feedback loop
-
-Generated YAMLs are observed in two ways: what the Blueprint Advisor produced and what the developer kept after review. The diff between the two is the highest-value signal in the entire platform.
-
-**Telemetry events captured (anonymized):**
-
-| Event | What's recorded | Why it matters |
-|---|---|---|
-| `blueprint_generated` | spec hash, archetype, agents/tools/skills count, confidence distribution | Baseline volume + complexity tracking |
-| `yaml_edit` | which fields changed, old value → new value | Detect systematic recommendation errors |
-| `tool_reassigned` | original `assigned_to` → new `assigned_to` for each tool | Identify tools with poor co-occurrence detection |
-| `tool_added` | tool not in original recommendation, added by developer | Catalog gaps |
-| `tool_removed` | tool in recommendation, removed by developer | Spurious matches in catalog |
-| `pattern_changed` | original pattern → developer's pattern | System prompt or catalog issues |
-| `low_confidence_resolved` | which alternative the developer picked when given choices | Calibration data for confidence tiers |
-| `spec_rewritten` | developer ran /catalyst.blueprint a second time after editing spec | Friction signal |
-
-**Dashboards** (built on telemetry):
-
-| Dashboard | Audience | Decisions it drives |
-|---|---|---|
-| **Acceptance rate by tool** | Platform engineering | Which tools need enrichment metadata revision |
-| **Override patterns by LOB** | Platform engineering + EA | Which LOBs need spec-writing training |
-| **Confidence distribution trends** | EA | Whether system prompt changes improved or degraded calibration |
-| **Tool gap report** | Platform engineering | Which tools developers add manually (candidates for the registry) |
-| **Pattern composition issues** | EA | Patterns frequently combined that shouldn't be |
-
-**Quarterly review:** Platform engineering and EA review telemetry every quarter and produce:
-- Top 10 tools requiring enrichment improvement
-- Top 5 system prompt changes to consider
-- Top 5 pattern catalog gaps
-- LOB-specific spec quality scores with training recommendations
-
-This closes the loop: catalog quality and search quality improve over time based on real developer behavior, not assumptions.
-
+The Blueprint Advisor's correctness depends on metadata quality in Vertex AI Search. The platform team maintains enrichment pipelines that validate frontmatter completeness, embedding freshness, and search relevance. Details are in the Operations Runbook.
 ### Pattern composition validator
 
-The Blueprint Advisor produces a YAML that is structurally valid but might not be architecturally valid. Some pattern combinations don't compose:
+The Blueprint Advisor validates pattern compositions before including them in the YAML. It checks an adjacency matrix that defines which patterns can compose with which (e.g., LoopAgent cannot nest inside ParallelAgent). Invalid compositions are flagged with a warning and an alternative suggestion.
 
-| Composition | Why it fails | Detection rule |
-|---|---|---|
-| LoopAgent + HITL sub-agent | Loops are bounded iteration; HITL is unbounded waiting. The composition creates an agent that loops while waiting for humans — usually unintended. | Block: LoopAgent cannot have HITL descendants. |
-| ParallelAgent with shared write resource | Multiple branches writing to the same Cloud SQL table without coordination causes race conditions. | Warn: write tools should not be assigned to parallel branches. |
-| Sequential with circular dependency | Step A depends on Step B which depends on Step A. | Block: cycle detected in `steps:` |
-| HITL as root agent | The root agent should orchestrate, not wait. HITL belongs as a sub-agent. | Block: HITL pattern cannot be root. |
-| Coordinator with no sub_agents | Empty coordinator is not a coordinator. | Block: LlmAgent root with no sub_agents must have `tools` instead. |
-
-**Implementation:** A static analyzer that runs on the generated YAML before code generation. Reads the `agents:` tree and validates against composition rules. Returns errors (blocking) and warnings (informational).
-
-**Integration:** The validator runs automatically as part of `/catalyst.generate`. If errors are found, generation halts and the developer sees explicit messages about what to fix in the YAML. Warnings are shown but don't block.
-
-**Composition rules are versioned alongside the pattern catalog.** When patterns change (new pattern added, pattern deprecated), composition rules update accordingly.
-
-### Tool lifecycle management
-
-Tools and tasks in the registry are not permanent. APIs change. Servers are decommissioned. Partners sunset endpoints. The platform must handle this gracefully.
-
-**Lifecycle states:**
-
-| State | Definition | Behavior in Blueprint Advisor |
-|---|---|---|
-| **Active** | Tool is operational, fully enriched, passing quality gates | Returned in search results, recommended freely |
-| **Preview** | New tool added in last 30 days, validation in progress | Returned in search results with `preview: true` flag, developer warned |
-| **Deprecated** | Tool will be sunset; replacement available | Excluded from new recommendations; existing YAMLs flagged for migration |
-| **Sunset** | Tool no longer operational | Excluded entirely; existing YAMLs blocked from regeneration |
-
-**Tool version pinning:** The YAML records the tool registry version at the time of blueprint generation:
-
-```yaml
-tools:
-  mcp_servers:
-    - name: bigquery-policy
-      registry_version: "2026.05.01"   # Pinned at blueprint time
-      assigned_to: verify_policy
-```
-
-When `/catalyst.generate` runs, it validates that all referenced tools are still active in the current registry. If a tool has been deprecated since the blueprint was generated, the developer is shown the deprecation notice and the recommended replacement.
-
-**Deprecation workflow:**
-1. Platform engineering marks tool as deprecated in registry, sets sunset date, identifies replacement
-2. Telemetry identifies all projects using the deprecated tool
-3. Notification sent to project owners with migration timeline
-4. After sunset date, tool is removed from registry; remaining projects must regenerate blueprints
-
-**Migration tooling:** For deprecated → replacement migrations, the platform provides a `catalyst migrate` command that updates the YAML automatically when the replacement has compatible inputs/outputs.
-
-### Operational runbook
-
-Production failure modes the platform team must handle:
-
-| Failure mode | Impact | Response |
-|---|---|---|
-| Blueprint Advisor query timeout (> 60s) | Developer can't generate blueprint | Surface timeout error to developer; degrade gracefully — coding agent returns partial results from any successful searches |
-| Vertex AI Search degraded/unavailable | Blueprint Advisor returns errors | Fall back to cached recent recommendations for similar specs (last 30 days); notify platform engineering |
-| LLM returns invalid YAML | Code generation fails | Validator catches syntax errors before saving; returns specific field-level errors to developer |
-| Reference spec regression suite fails after deployment | Recommendation quality degraded | Auto-rollback Blueprint Advisor to last known-good system prompt + catalog version |
-| Acceptance telemetry shows < 60% accept rate for an LOB | Quality regression | Triggers EA-led spec quality review with that LOB |
-| Tool deprecation breaks existing project | Generated code references tool that no longer exists | `/catalyst.generate` blocks until developer updates YAML to use replacement |
-
----
 
 ## Layer 3 — SKILL-GUIDED GENERATION (deep dive)
 
@@ -1044,51 +721,10 @@ AgentCatalyst uses two categories of skills:
 
 ### Skill installation and discovery
 
-Skills are Markdown files in directories. The coding agent scans these directories on session start:
+Skills are delivered as part of the AgentCatalyst preset (installed via `specify preset add agentcatalyst-enterprise`). The preset's `preset.yml` declares skill dependencies. Skills follow the agentskills.io SKILL.md specification with three progressive disclosure levels: L1 (metadata, always loaded), L2 (instructions, loaded on-demand), L3 (reference files, loaded when referenced).
 
-| Scope | Directory | Who installs | Available where |
-|---|---|---|---|
-| **User** (global) | `~/.agents/skills/` | Developer installs once | Every project on this machine |
-| **Workspace** (project) | `.agents/skills/` in repo root | Checked into git by team | Everyone who clones the repo |
+Company overlay skills (Terraform, observability, CI/CD, security) are shared across all archetype presets. Archetype-specific skills (e.g., `adk-agents`) are included only in the relevant preset variant.
 
-**Installation (one-time for developers):**
-
-```bash
-# Install all company skills (domain + overlay) to user scope
-gemini skills install github.com/company/agentcatalyst-skills --scope user
-```
-
-**Or check into the project repo (team-wide):**
-
-```bash
-cp -r /path/to/agentcatalyst-skills/* .agents/skills/
-git add .agents/skills/
-git commit -m "Add AgentCatalyst skills"
-```
-
-**Verification:**
-
-```
-> /skills list
-
-  adk-agents                     [user]  ADK agent classes and orchestration
-  adk-tools                      [user]  ADK tools — FunctionTool, MCPToolset, AgentTool
-  adk-mcp                        [user]  MCP server connections and configuration
-  model-armor                    [user]  Model Armor content screening config
-  company-terraform-patterns     [user]  Company Terraform modules
-  company-observability          [user]  Dynatrace + Splunk + OTel
-  company-cicd                   [user]  Jenkins + Harness (NO direct deploy)
-  company-security               [user]  VPC-SC + CMEK + Secret Manager
-```
-
-**Cross-agent compatibility:** The `.agents/skills/` directory and SKILL.md format work across all major coding agents:
-
-| Coding agent | Skills directory | Discovery |
-|---|---|---|
-| Gemini CLI | `~/.agents/skills/` or `~/.gemini/skills/` | Automatic on session start |
-| Claude Code | `~/.agents/skills/` or `~/.claude/skills/` | Automatic on session start |
-| Cursor | `~/.agents/skills/` or `~/.cursor/skills/` | Automatic on session start |
-| GitHub Copilot | Via Spec Kit preset `memory/` files | Loaded when Spec Kit commands run |
 
 ### Skill activation — how the coding agent knows which skill to use
 
@@ -1449,197 +1085,21 @@ Flow to **Layer 5** where the application runs on its archetype-appropriate runt
 
 ### FNOL component architecture
 
-```mermaid
-graph TB
-    USER["Policyholder"]
-    APIGEE["Apigee Gateway"]
-    COORD["fnol_coordinator<br/>(LlmAgent — root)"]
+The FNOL agent uses a Coordinator root with 4 sub-agents: Sequential intake (classify + extract), Parallel enrichment (3 sources simultaneously), Loop summary (iterate until quality threshold met), and HITL adjuster review. Connected to BigQuery (analytics), Cloud SQL (active claims), Vertex AI Search (policy documents) via MCP, and 3 external A2A agents (body shop, rental car, police report). Full component diagram is in the Developer Guide.
 
-    subgraph INTAKE["intake_pipeline (SequentialAgent)"]
-        VP["verify_policy"]
-        ED["extract_details"]
-    end
-
-    subgraph ENRICH["enrichment_fan_out (ParallelAgent)"]
-        WC["weather_check"]
-        PR["police_report"]
-        FS["fraud_scoring"]
-        CV["coverage_verify"]
-    end
-
-    LOOP["claim_summary_loop<br/>(LoopAgent)"]
-    HITL["adjuster_review<br/>(LlmAgent + async)"]
-
-    BQ["BigQuery (MCP)"]
-    SQL["Cloud SQL (MCP)"]
-    VAS2["Vertex Search (MCP)"]
-    BS["Body Shop (A2A)"]
-    POL["Police Report (A2A)"]
-
-    USER --> APIGEE --> COORD
-    COORD --> INTAKE --> ENRICH --> LOOP --> HITL
-    VP --> BQ
-    ED --> SQL
-    CV --> VAS2
-    ENRICH -.-> BS
-    ENRICH -.-> POL
-```
 
 ### Step-by-step walkthrough
 
-**Step 1:** `/specify` → fill 6-section template (~15 min)
-**Step 2:** `/plan` → answer technical questions (~5 min)
-**Step 3:** `/catalyst.blueprint` → Blueprint Advisor returns YAML (~30 sec)
-**Step 4:** Review + edit YAML (~10 min)
-**Step 5:** `/catalyst.generate` → coding agent uses skills to generate complete project:
+The FNOL deployment scenario follows the same flow described in the end-to-end thread (above), with these specifics:
 
-```
-fnol-agent/
-├── app/
-│   ├── agent.py                          ← Root LlmAgent
-│   ├── sub_agents/
-│   │   ├── intake_pipeline.py            ← SequentialAgent
-│   │   ├── enrichment_fan_out.py         ← ParallelAgent
-│   │   ├── claim_summary_loop.py         ← LoopAgent
-│   │   └── adjuster_review.py            ← HITL agent
-│   ├── mcp_connections/
-│   │   ├── bigquery_policy.py
-│   │   ├── cloud_sql_claims.py
-│   │   └── vertex_search_policies.py
-│   ├── a2a_clients/
-│   │   ├── body_shop_network.py
-│   │   ├── rental_car_service.py
-│   │   └── police_report_service.py
-│   ├── tools/
-│   │   ├── severity_classifier.py        ← ENGINEER IMPLEMENTS
-│   │   ├── coverage_calculator.py        ← ENGINEER IMPLEMENTS
-│   │   └── notification_sender.py        ← ENGINEER IMPLEMENTS
-│   ├── callbacks/
-│   │   └── model_armor.py
-│   └── skills/
-│       ├── bigquery/
-│       └── fraud-detection/
-├── deployment/terraform/
-├── observability/
-├── ci-cd/
-│   ├── Jenkinsfile
-│   └── harness-pipeline.yaml
-├── pyproject.toml
-├── README.md
-└── app-blueprint.yaml
-```
+1. **PR opened** — generated code committed to `feature/fnol-agent` branch via GitHub MCP Server
+2. **Jenkins runs Terraform** — provisions Cloud Run, Apigee, Cloud SQL, Model Armor, VPC-SC (~4 minutes)
+3. **Harness Non-Prod** — deploys agent, runs integration tests against mock endpoints
+4. **Harness 3-phase EvalOps** — Phase A: Arize quality gates (pass_rate ≥ 0.95, latency ≤ 3s). Phase B: AutoSxS baseline comparison against golden dataset. Phase C: 2 edge cases routed to HITL triage (adjuster approves).
+5. **Harness Pre-Prod** — canary at 10% traffic for 30 minutes. Dynatrace monitors error rate.
+6. **Harness Production** — progressive rollout: 25% → 50% → 100% over 2 hours. Automatic rollback if error rate > 1%.
+7. **Total time: PR merge to production** — approximately 3 hours (mostly waiting for canary observation)
 
-#### What the generated code looks like
-
-**Agent class** (generated by coding agent guided by `adk-agents` skill):
-
-```python
-# app/sub_agents/intake_pipeline.py
-from google.adk.agents import SequentialAgent
-
-intake_pipeline = SequentialAgent(
-    name="intake_pipeline",
-    sub_agents=["verify_policy", "extract_details"],
-    description="Ordered intake — verify policy then extract incident details",
-)
-```
-
-**MCP connection** (generated by coding agent guided by `adk-mcp` skill):
-
-```python
-# app/mcp_connections/bigquery_policy.py
-from google.adk.tools import MCPToolset
-
-bigquery_policy = MCPToolset(
-    name="bigquery-policy",
-    connection_params={
-        "endpoint": "bigquery.googleapis.com",
-        "transport": "sse",
-        "auth": "workload_identity",
-    },
-    description="Query policy data warehouse",
-)
-```
-
-**FunctionTool implementation** (first draft of business logic from spec rules; developer reviews and refines):
-
-```python
-# app/tools/severity_classifier.py — ENGINEER IMPLEMENTS BODY
-from google.adk.tools import FunctionTool
-
-def severity_classifier(claim_data: dict) -> dict:
-    """Classify claim severity (low/medium/high)."""
-    raise NotImplementedError("Engineer must implement")
-
-severity_classifier_tool = FunctionTool(func=severity_classifier)
-```
-
-**Terraform module** (generated by coding agent guided by `company-terraform-patterns` skill):
-
-```hcl
-# deployment/terraform/main.tf
-module "agent-runtime" {
-  source  = "github.com/company/tf-modules//agent-runtime?ref=v3.1.0"
-  project = var.gcp_project
-  region  = var.gcp_region
-  agent_name = "fnol-coordinator"
-}
-
-module "cloud-sql" {
-  source  = "github.com/company/tf-modules//cloud-sql?ref=v2.4.0"
-  project = var.gcp_project
-  region  = var.gcp_region
-  instance_name = "fnol-claims-db"
-}
-```
-
-**Jenkinsfile** (generated by coding agent guided by `company-cicd` skill):
-
-```groovy
-// ci-cd/Jenkinsfile — generated, DO NOT use agents-cli deploy
-@Library('company-pipeline-lib') _
-
-agentInfraPlanApply(
-    template: 'agent-infra-plan-apply-v3',
-    terraformDir: 'deployment/terraform',
-    environment: params.ENVIRONMENT,
-    approvalRequired: true
-)
-```
-
-**Step 6:** Review generated business logic + write system prompts (~2–4 hrs)
-**Step 7:** Commit → PR → Jenkins → Harness → Prod
-
-**Total: under 1 hour to generated code + 2–4 hours of business logic.**
-
----
-
-## Preview: Microservice Example (Phase 2)
-
-This section previews what the microservice archetype looks like — demonstrating that the same five-phase flow works for non-agentic applications with different presets and domain skills but identical company overlay skills.
-
-### Scenario: Order Management Microservice
-
-A developer needs to build a FastAPI microservice for e-commerce order management.
-
-**Step 1:** `/specify` (using `agentcatalyst-microservice` preset):
-
-```markdown
-## Service Purpose
-Order management service for e-commerce. Handles order creation,
-payment processing, fulfillment tracking, and cancellation.
-
-## API Contracts
-POST /orders — create order (request: items[], customer_id)
-GET /orders/{id} — get order details
-PUT /orders/{id}/cancel — cancel order
-Webhook: payment.completed → update order status
-
-## Dependencies
-PostgreSQL for order storage (transactional, read-write).
-Redis for caching (read-heavy, TTL-based).
-Pub/Sub for event publishing (order.created, order.cancelled).
-Payment Gateway REST API (external partner — they operate it).
 
 ## Data Model
 Order: id, customer_id, items[], total, status, created_at
@@ -1816,17 +1276,8 @@ order-service/
 
 ### How to request changes
 
-| Request | Process |
-|---|---|
-| "I need a new pattern" | Request to EA. EA generates draft via Pattern Factory, reviews, approves. Continuous ingestion publishes to Vertex AI Search. |
-| "I need a new skill" | Author the skill, submit to EA for review. EA adds to repo. |
-| "I need a new tool in the registry" | Submit request via platform engineering JIRA. Platform eng registers tool, authors enrichment metadata, validates against regression suite. Tool starts in preview state for 30 days before promotion to active. |
-| "A tool is being deprecated" | Platform engineering marks tool deprecated, identifies replacement, notifies affected projects via telemetry, sets sunset date. |
-| "I need a new archetype" | EA evaluates demand. If approved: author spec template, domain skills, expand regression suite. Company overlay skills reusable as-is. |
-| "A skill needs updating for a new SDK version" | Platform eng updates the skill. PR reviewed by EA. Regression suite must pass. |
-| "Search quality is poor for my use case" | Submit acceptance feedback. Platform eng reviews telemetry, updates enrichment metadata or system prompt. |
+To request new patterns, skills, or tools: submit a PR to the AgentCatalyst catalog repo. The platform team reviews weekly. To report Blueprint Advisor quality issues: file a ticket with the spec.md and the generated YAML. The platform team uses acceptance telemetry diffs to prioritize fixes.
 
----
 
 ## What AgentCatalyst is NOT
 
@@ -1874,147 +1325,23 @@ This appendix contains the full source of every file in the `agentcatalyst-agent
 
 ### preset.yml
 
-```yaml
-name: agentcatalyst-agentic
-version: "1.0.0"
-description: >
-  AgentCatalyst agentic AI development accelerator.
-  Structured requirements capture, AI-assisted architecture advice
-  via Blueprint Advisor, and skill-guided code generation.
-  GA-only — no pre-GA dependencies.
+The preset manifest declares: preset name, version, description, required skills (with versions), template paths, command paths, memory file paths, and catalog endpoint. Full preset.yml is maintained in the AgentCatalyst preset repository.
 
-templates:
-  spec: templates/spec-template.md
-  plan: templates/plan-template.md
-  tasks: templates/tasks-template.md
-
-commands:
-  - commands/catalyst.blueprint.md
-  - commands/catalyst.generate.md
-
-memory:
-  - memory/adk-reference.md
-  - memory/company-patterns.md
-  - memory/approved-tools.md
-  - memory/infra-standards.md
-
-settings:
-  coding_agents: [copilot, claude-code, gemini-cli, cursor, windsurf]
-  output_format: markdown
-  save_location: workspace_root
-```
-
----
 
 ### templates/spec-template.md
 
-```markdown
----
-template: agentcatalyst-spec
-version: "1.0.0"
----
+See the AgentCatalyst Developer Guide for the full template content. Summary: 10-section structured format with business logic sections.
 
-# Agent Specification
-
-## Business Problem
-<!-- Describe the business process this agent will automate.
-     Who are the users? What value does it provide?
-     Example: "We need an AI agent that handles FNOL for auto insurance..." -->
-[Describe your business problem here]
-
-## Workflow
-<!-- Step-by-step workflow. Use ordering words to help the Blueprint Advisor:
-     "First," "Then," "Simultaneously," "If [condition]," "Refine until"
-     Example: "First, verify coverage. Then extract details. Simultaneously
-     enrich from 4 sources. Generate summary, refine until quality > 0.85." -->
-[Describe your workflow step by step here]
-
-## Data Sources
-<!-- List every data system. Specify: name, access pattern, workload type.
-     Example: "BigQuery (analytical, read-only). Cloud SQL (transactional, read-write)." -->
-[List your data sources here]
-
-## External Integrations
-<!-- Partner APIs and services you do NOT operate.
-     Say "they operate their own" to signal A2A connection.
-     Example: "Body shop network — they operate their own quoting service." -->
-[List your external integrations here]
-
-## Internal Capabilities
-<!-- Proprietary models and logic YOU own. These become FunctionTool implementations — first-draft business logic from spec rules.
-     Example: "Our proprietary fraud detection model." -->
-[List your internal capabilities here]
-
-## Infrastructure Requirements
-<!-- Region, model, CI/CD, security, compliance.
-     Example: "us-central1, gemini-2.0-flash, Jenkins + Harness, Model Armor + CMEK." -->
-[Specify your infrastructure requirements here]
-```
-
----
 
 ### templates/plan-template.md
 
-```markdown
----
-template: agentcatalyst-plan
-version: "1.0.0"
----
+See the AgentCatalyst Developer Guide for the full template content. Summary: technical decisions template.
 
-# Technical Plan
-
-- **Runtime:** [agent_engine | cloud_run]
-- **GCP Project:** [project-id]
-- **GCP Region:** [e.g., us-central1]
-- **Model:** [e.g., gemini-2.0-flash]
-- **Garden Template:** [adk | adk_a2a | agentic_rag]
-- **Terraform modules:** [e.g., github.com/company/tf-modules]
-- **Jenkins template:** [e.g., agent-infra-plan-apply-v3]
-- **Harness template:** [e.g., agent-deploy-canary-v4]
-- **Model Armor:** [yes | no]
-- **DLP:** [yes | no]
-- **CMEK key ring:** [path or N/A]
-- **VPC-SC:** [yes | no]
-- **Dynatrace:** [yes | no]
-- **OTel Collector:** [yes | no]
-```
-
----
 
 ### templates/tasks-template.md
 
-```markdown
----
-template: agentcatalyst-tasks
-version: "1.0.0"
----
+See the AgentCatalyst Developer Guide for the full template content. Summary: post-generation checklist.
 
-# Task Breakdown
-
-## Auto-generated (engineer does nothing)
-
-| Component | Source | Status |
-|---|---|---|
-| ADK agent class hierarchy | agents: | ⬜ Will be generated |
-| MCP server connections | tools.mcp_servers: | ⬜ Will be generated |
-| A2A client connections | tools.a2a_agents: | ⬜ Will be generated |
-| Skills installed + wired | skills: | ⬜ Will be generated |
-| Model Armor callbacks | infrastructure.security | ⬜ Will be generated |
-| Terraform modules | infrastructure.terraform | ⬜ Will be generated |
-| Dynatrace + OTel config | infrastructure.observability | ⬜ Will be generated |
-| CI/CD pipeline definitions | infrastructure.cicd | ⬜ Will be generated |
-
-## Engineer implements (the 20%)
-
-| Component | What to implement | Priority |
-|---|---|---|
-| System prompts | Agent personality + instructions | P0 |
-| FunctionTool review | Review and refine first-draft business logic generated from spec rules | P0 |
-| Test data | Test cases and evaluation datasets | P1 |
-| Domain guardrails | Business-specific validation rules | P2 |
-```
-
----
 
 ### commands/catalyst.blueprint.md
 
