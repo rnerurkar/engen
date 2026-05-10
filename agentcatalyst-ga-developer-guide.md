@@ -1833,3 +1833,15 @@ A: The boilerplate is production-ready — correct framework patterns, proper pr
 
 **Q: How does this work with existing IaC that uses AWS (not GCP)?**
 A: The brownfield SPA example in Section 3 uses AWS (ECS Fargate + Oracle RDS). AgentCatalyst generates the application code — it doesn't care about the cloud provider for the infrastructure. The `infrastructure.terraform.action: SKIP` flag tells it to leave existing infrastructure untouched. The company overlay skills for CI/CD would reference Jenkins/Harness templates appropriate for AWS deployment.
+
+---
+
+## Related Documents
+
+| Document | Audience | What it covers |
+|---|---|---|
+| **AgentCatalyst Architecture** (GA or agents-cli variant) | Architects, tech leads | Architectural decisions, layer deep dives, cost model, ROI |
+| **This Developer Guide** | Developers | Step-by-step walkthroughs, code examples, spec writing, troubleshooting |
+| **AgentCatalyst Operations Runbook** | Platform engineering | Wire-level APIs, search quality regression, acceptance telemetry, catalog quality, tool lifecycle, failure modes, escalation |
+
+*The architecture document provides the WHY. This guide provides the HOW. The operations runbook provides the procedures for maintaining the platform.*

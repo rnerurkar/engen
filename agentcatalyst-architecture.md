@@ -1414,3 +1414,15 @@ Do NOT write raw Terraform resources — use module references.
 - DLP: enabled by default for agents handling PII
 - Service accounts: one per agent, least privilege, no key export
 ```
+
+---
+
+## Related Documents
+
+| Document | Audience | What it covers |
+|---|---|---|
+| **This Architecture Document** | Architects, tech leads | Architectural decisions, layer deep dives, cost model, ROI |
+| **AgentCatalyst Developer Guide** (GA or agents-cli variant) | Developers | Step-by-step walkthroughs, full preset file contents, code examples, spec writing, troubleshooting |
+| **AgentCatalyst Operations Runbook** | Platform engineering | Wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix, EvalOps operations |
+
+*Operational procedures (wire-level APIs, regression testing, telemetry, tool lifecycle, failure modes) have been moved to the Operations Runbook to keep this architecture document focused on architectural decisions.*

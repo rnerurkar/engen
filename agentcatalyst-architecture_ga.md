@@ -1516,3 +1516,15 @@ updated: 2026-05-01
 - CI/CD: Jenkins template agent-infra-plan-apply-v3, Harness template agent-deploy-canary-v4
 - CMEK required for production. VPC-SC required for production.
 ```
+
+---
+
+## Related Documents
+
+| Document | Audience | What it covers |
+|---|---|---|
+| **This Architecture Document** | Architects, tech leads | Architectural decisions, layer deep dives, cost model, ROI |
+| **AgentCatalyst Developer Guide** (GA or agents-cli variant) | Developers | Step-by-step walkthroughs, full preset file contents, code examples, spec writing, troubleshooting |
+| **AgentCatalyst Operations Runbook** | Platform engineering | Wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix, EvalOps operations |
+
+*Operational procedures (wire-level APIs, regression testing, telemetry, tool lifecycle, failure modes) have been moved to the Operations Runbook to keep this architecture document focused on architectural decisions.*
