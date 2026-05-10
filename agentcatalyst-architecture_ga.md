@@ -167,9 +167,9 @@ She types `/catalyst.generate`. Now the coding agent (Copilot, in her case) read
 - **`company-observability` skill** teaches it to generate Dynatrace and Splunk configuration, not just the default Cloud Trace.
 - **`company-security` skill** teaches it to generate Model Armor callbacks, VPC-SC references, and CMEK configuration.
 
-The result: a complete project in her workspace — 6 agent class files, 3 MCP connections, 3 A2A clients, 3 FunctionTool stubs (marked "engineer implements"), Model Armor callbacks, complete Terraform, Dynatrace observability config, and Jenkins + Harness pipeline definitions. Every file follows company coding standards because the company skills taught the coding agent those standards.
+The result: a complete project in her workspace — 6 agent class files, 3 MCP connections, 3 A2A clients, 3 FunctionTool files with first-draft business logic (generated from business rules authored in the spec, ready for developer review), Model Armor callbacks, complete Terraform, Dynatrace observability config, and Jenkins + Harness pipeline definitions. Every file follows company coding standards because the company skills taught the coding agent those standards.
 
-She opens `app/tools/severity_classifier.py` and writes the actual classification logic — the 20% that requires her domain expertise. She writes system prompts for each agent — the "personality" and instructions that make each agent behave correctly for insurance claims. The 80% boilerplate was handled by the coding agent guided by skills.
+She opens `app/tools/severity_classifier.py` and reviews the first draft of generated business logic — the IF/THEN conditions she authored in the spec are already implemented as working Python code. This is her starting point, not a black box. She refines the logic, adds edge cases, and writes system prompts for each agent — the "personality" and instructions that make each agent behave correctly for insurance claims. The 80-95% was handled by the coding agent guided by skills. When business rules are authored in the spec, even FunctionTool bodies are generated as a first draft — the developer reviews and makes the code their own.
 
 She commits and opens a PR. Her team reviews it — the generated code looks familiar because every AgentCatalyst project follows the same company patterns. After the PR is merged, Jenkins automatically runs Terraform to provision the infrastructure (Agent Runtime, Cloud SQL, Model Armor, VPC-SC). Then Harness automatically deploys the agent through Non-Prod (testing), Pre-Prod (canary at 10% traffic), and Production (progressive rollout). If anything breaks, Harness rolls back automatically.
 
@@ -468,7 +468,7 @@ The Blueprint Advisor uses a three-stage assignment chain:
 - Tool mentioned in one specific step → assign to that step's agent
 - Tool mentioned across multiple steps → assign to the lowest common ancestor agent
 - Write-heavy tools (INSERT/UPDATE) → assign to root coordinator (write scope is a top-level concern)
-- "Our proprietary" → FunctionTool stub (no search needed, engineer implements)
+- "Our proprietary" → FunctionTool implementation (business rules from spec generate first draft; developer reviews)
 
 #### How search results distinguish MCP from A2A
 
@@ -795,7 +795,7 @@ WITH business logic in spec (enhanced):
 
 ### What the coding agent generates vs what engineers implement
 
-| Generated (~80%) | Engineer implements (~20%) |
+| Generated (80-95% depending on business rules in spec) | Developer reviews and refines (5-20%) |
 |---|---|
 | Application code structure (agent classes / service endpoints / pipeline stages) | Business logic inside stubs |
 | Tool connections (MCP / database / API clients) | System prompts / service behavior |
@@ -1135,7 +1135,7 @@ MCPToolset declarations with endpoints, transport, and auth from `tools.mcp_serv
 **Step 4 — Generate A2A clients** (guided by `adk-tools` skill):
 AgentTool wrappers with endpoints, auth, and timeout from `tools.a2a_agents:`.
 
-**Step 5 — Generate FunctionTool stubs** (guided by `adk-tools` skill):
+**Step 5 — Generate FunctionTool implementations** (guided by `adk-tools` skill):
 Function signature + description. Body: `raise NotImplementedError("Engineer must implement")`.
 
 **Step 6 — Install skills** (deterministic via `gh skill install`):
@@ -1561,7 +1561,7 @@ bigquery_policy = MCPToolset(
 )
 ```
 
-**FunctionTool stub** (body marked for engineer implementation):
+**FunctionTool implementation** (first draft of business logic from spec rules; developer reviews and refines):
 
 ```python
 # app/tools/severity_classifier.py — ENGINEER IMPLEMENTS BODY
@@ -1607,7 +1607,7 @@ agentInfraPlanApply(
 )
 ```
 
-**Step 6:** Implement FunctionTool stubs + system prompts (~2–4 hrs)
+**Step 6:** Review generated business logic + write system prompts (~2–4 hrs)
 **Step 7:** Commit → PR → Jenkins → Harness → Prod
 
 **Total: under 1 hour to generated code + 2–4 hours of business logic.**
@@ -1941,7 +1941,7 @@ version: "1.0.0"
 [List your external integrations here]
 
 ## Internal Capabilities
-<!-- Proprietary models and logic YOU own. These become FunctionTool stubs.
+<!-- Proprietary models and logic YOU own. These become FunctionTool implementations — first-draft business logic from spec rules.
      Example: "Our proprietary fraud detection model." -->
 [List your internal capabilities here]
 
@@ -2009,7 +2009,7 @@ version: "1.0.0"
 | Component | What to implement | Priority |
 |---|---|---|
 | System prompts | Agent personality + instructions | P0 |
-| FunctionTool bodies | Business logic inside each stub | P0 |
+| FunctionTool review | Review and refine first-draft business logic generated from spec rules | P0 |
 | Test data | Test cases and evaluation datasets | P1 |
 | Domain guardrails | Business-specific validation rules | P2 |
 ```
@@ -2068,7 +2068,7 @@ description: Generate agent project from app-blueprint.yaml using skills
 | 3 | Generate ADK agent classes | adk-agents |
 | 4 | Generate MCP connections | adk-mcp |
 | 5 | Generate A2A clients | adk-tools |
-| 6 | Generate FunctionTool stubs | adk-tools |
+| 6 | Generate FunctionTool implementations | adk-tools |
 | 7 | Install skills | gh skill install |
 | 8 | Generate Model Armor callbacks | company-security |
 | 9 | Generate Terraform | company-terraform-patterns |

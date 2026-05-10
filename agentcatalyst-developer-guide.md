@@ -206,7 +206,7 @@ Type `/specify` in the chat. Your coding agent loads the 6-section template from
 | **Workflow** | Step-by-step process using ordering words | Use "First," "Then," "Simultaneously," "If [condition]," "Refine until" — these help the Blueprint Advisor pick the right patterns |
 | **Data Sources** | System name + access pattern + workload type | Always specify analytical vs transactional vs retrieval — this drives tool selection |
 | **External Integrations** | Partner services you don't operate | Say "they operate their own" — this tells the Blueprint Advisor to recommend an A2A connection |
-| **Internal Capabilities** | Your proprietary logic | These become FunctionTool stubs you'll implement |
+| **Internal Capabilities** | Your proprietary logic | These become FunctionTool implementations — first-draft business logic generated from your spec rules, which you review and refine |
 | **Infrastructure** | Region, model, CI/CD, security | Check `memory/infra-standards.md` if unsure about Terraform module versions |
 
 **Example — FNOL Workflow section:**
@@ -262,7 +262,7 @@ Blueprint Advisor recommends:
             ParallelAgent (enrichment), LoopAgent (summary), LlmAgent (HITL)
   3 MCP servers: bigquery-policy, cloud-sql-claims, vertex-search-policies
   3 A2A agents: body-shop-network, rental-car-service, police-report-service
-  3 FunctionTool stubs: severity_classifier, coverage_calculator, notification_sender
+  3 FunctionTool implementations (first draft from spec business rules): severity_classifier, coverage_calculator, notification_sender
   2 skills: bigquery v1.2.0, fraud-detection v2.0.1
 
 Review the YAML and edit any field before running /catalyst.generate.
@@ -542,7 +542,7 @@ The Blueprint Advisor uses your spec text to search the pattern catalog. Certain
 | "Cloud SQL" / "database" / "transactional" / "create records" | Cloud SQL MCP server |
 | "search documents" / "RAG" / "policy corpus" | Vertex AI Search MCP server |
 | "they operate their own" / "partner API" | A2A agent connection |
-| "our proprietary" / "internal model" | FunctionTool stub (you implement) |
+| "our proprietary" / "internal model" | FunctionTool implementation (first draft generated from spec rules; you review and refine) |
 | "EXISTING REST API" | FunctionTool wrapper (brownfield pattern) |
 
 ### Common mistakes to avoid
@@ -698,7 +698,7 @@ One of the biggest advantages of skill-guided generation: you can change the YAM
    diff -r fnol-agent fnol-agent-v2
    ```
 
-2. **Keep custom code separate.** The generated files are marked `# GENERATED — DO NOT EDIT MANUALLY`. Your custom code lives in the FunctionTool stubs and system prompts. If you follow this convention, you can identify generated vs custom code easily.
+2. **Keep custom code separate.** The generated files are marked `# GENERATED — DO NOT EDIT MANUALLY`. Your refinements live in the FunctionTool implementations (reviewing and refining the generated first-draft logic) and system prompts. If you follow this convention, you can identify generated vs custom code easily.
 
 3. **Use git.** Commit before re-scaffolding. After re-scaffold, `git diff` shows exactly what changed.
 
@@ -1204,7 +1204,7 @@ EXAMPLE:
 <!--
 WHAT TO WRITE HERE:
 List any proprietary models, internal APIs, or company-specific business
-logic the agent needs. These will become FunctionTool stubs that engineers
+logic the agent needs. These will become FunctionTool implementations — first-draft business logic that developers review and
 implement with actual business logic.
 
 EXAMPLE:
@@ -1344,7 +1344,7 @@ usage: Run /tasks after receiving agent-blueprint.yaml to generate the task list
 | Component | What to implement | Priority |
 |---|---|---|
 | System prompts | Write agent personality + instructions for each agent node | P0 — agents won't work without prompts |
-| FunctionTool bodies | Implement business logic inside each stub | P0 — core functionality |
+| FunctionTool review | Review and refine first-draft business logic generated from spec rules | P0 — core functionality |
 | Test data | Create test cases and evaluation datasets | P1 — needed before CI/CD |
 | Domain guardrails | Add business-specific validation rules beyond Model Armor | P2 — hardening |
 ```
@@ -1390,7 +1390,7 @@ for AI-assisted architecture recommendations.
 6. Save `agent-blueprint.yaml` to the workspace root
 7. Display a summary of the recommended architecture:
    - Number of agents and their types
-   - Number of MCP servers, A2A agents, and FunctionTool stubs
+   - Number of MCP servers, A2A agents, and FunctionTool implementations
    - Infrastructure summary (Terraform modules, CI/CD templates)
 8. Remind the developer: "Review the YAML and edit any field before
    running /catalyst.generate. The Blueprint Advisor recommends —
@@ -1446,7 +1446,7 @@ from the agent-blueprint.yaml in the current workspace.
    ```
 4. Report results:
    - Total files generated
-   - Files requiring engineer implementation (FunctionTool stubs)
+   - Files for developer review (FunctionTool implementations with first-draft business logic)
    - Any validation warnings from Step 12 (company coding standards)
 5. Open `app/agent.py` for the developer to review the root agent
 
@@ -1557,7 +1557,7 @@ All agent projects MUST follow this folder structure:
 
 - Every generated file includes a header comment:
   `# GENERATED by agents-cli — DO NOT EDIT MANUALLY`
-- FunctionTool stubs include:
+- FunctionTool implementations include (when business rules authored in spec):
   `raise NotImplementedError("Engineer must implement")`
 - System prompt placeholders marked: `<<< ENGINEER MUST WRITE >>>`
 - Zero hardcoded credentials — all secrets via Secret Manager

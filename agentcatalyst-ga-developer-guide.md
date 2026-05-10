@@ -236,7 +236,7 @@ Blueprint Advisor recommends:
             ParallelAgent (enrichment), LoopAgent (summary), LlmAgent (HITL)
   3 MCP servers: bigquery-policy, cloud-sql-claims, vertex-search-policies
   3 A2A agents: body-shop-network, rental-car-service, police-report-service
-  3 FunctionTool stubs: severity_classifier, coverage_calculator, notification_sender
+  3 FunctionTool implementations (first draft from spec business rules): severity_classifier, coverage_calculator, notification_sender
   2 skills: bigquery v1.2.0, fraud-detection v2.0.1
 
 Review the YAML and edit before running /catalyst.generate.
@@ -940,7 +940,7 @@ The Blueprint Advisor reads your Data Sources and External Integrations sections
 | "Cloud SQL — create claim records, transactional" | `Cloud SQL transactional INSERT UPDATE` | `execute_sql` tool on cloudsql-mcp server |
 | "Search policy documents for coverage" | `Vertex AI Search document retrieval` | `search_documents` tool on vertex-search-mcp |
 | "body shop — they operate their own quoting service" | `body shop repair estimate` | `get_repair_estimate` task on body-shop-network A2A agent |
-| "our proprietary fraud detection model" | (no search — ownership signal) | FunctionTool stub (you implement) |
+| "our proprietary fraud detection model" | (no search — ownership signal) | FunctionTool implementation (first draft generated from spec rules; you review and refine) |
 
 **Key distinction — ownership signals determine MCP vs A2A:**
 
@@ -948,7 +948,7 @@ The Blueprint Advisor reads your Data Sources and External Integrations sections
 |---|---|---|
 | "BigQuery" / "Cloud SQL" / "our data warehouse" | We operate it | MCP server (`MCPToolset`) |
 | "they operate their own" / "partner API" / "municipal system" | External partner | A2A agent (`AgentTool`) |
-| "our proprietary" / "internal model" | Company-owned logic | FunctionTool stub (no external connection) |
+| "our proprietary" / "internal model" | Company-owned logic | FunctionTool implementation (first draft from spec rules; no external connection) |
 
 You don't need to specify whether something is MCP or A2A. The tool registry knows. Just describe what it is and who operates it.
 
@@ -1478,7 +1478,7 @@ Run this 10-question checklist before `/catalyst.blueprint`. A spec that passes 
 | 2 | Is each data source mentioned in a workflow step (not only in the Data Sources section)? | Co-occurrence drives tool-to-agent assignment. No co-occurrence = wrong assignment. |
 | 3 | Does each external integration include "they operate" or "we operate" language? | Determines MCP vs A2A vs FunctionTool. Ambiguous ownership produces wrong connection type. |
 | 4 | Does each database/data source specify workload type (analytical, transactional, retrieval)? | Determines which specific tool on the MCP server is selected. |
-| 5 | Are FunctionTool stubs explicitly marked "our proprietary" or "internal model"? | Tells the Blueprint Advisor not to search for these — they're stubs. |
+| 5 | Are FunctionTool implementations explicitly marked "our proprietary" or "internal model"? | Tells the Blueprint Advisor not to search for these — they're implementations generated from your spec rules. |
 | 6 | If brownfield: are "EXISTING" / "DO NOT create" signals in BOTH Dependencies and Infrastructure sections? | Brownfield signals must be unambiguous to skip infrastructure generation. |
 | 7 | Is the Workflow section a sequence of explicit steps (not a wishlist or paragraph)? | Wishlists can't be parsed for ordering. |
 | 8 | Are write actions ("create record," "update status") attributed to the coordinator, not extraction or enrichment steps? | Write tools assigned at coordinator scope are usually correct. Writes attributed to leaf agents are usually wrong. |
