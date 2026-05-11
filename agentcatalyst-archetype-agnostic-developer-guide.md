@@ -25,7 +25,7 @@ gemini skills install github.com/company/agentcatalyst-skills --scope user
 # 4. In VSCode with your coding agent:
 /specify              # fill in the structured template → spec.md
 /plan                 # answer technical questions → plan.md
-/catalyst.blueprint   # Blueprint Advisor returns app-blueprint.yaml
+/catalyst.blueprint   # Connects to Blueprint Advisor MCP Server → returns app-blueprint.yaml
 # review + edit the YAML
 /catalyst.generate    # coding agent generates everything using skills
 ```
@@ -46,7 +46,7 @@ They've already set up everything you need. You don't configure any of this:
 | Pattern catalog (per archetype) | Vertex AI Search | Blueprint Advisor searches this to recommend patterns |
 | Domain skills (per archetype) | `github.com/company/agentcatalyst-skills` | Teach the coding agent how to write correct code for ADK, Spring Boot, etc. |
 | Company overlay skills (shared) | Same repo | Teach Terraform patterns, Dynatrace config, Jenkins/Harness pipelines, security standards |
-| Blueprint Advisor | Agent Runtime (GCP) | The AI that reads your spec and recommends an architecture |
+| Blueprint Advisor MCP Server | Cloud Run (GCP) | LlmAgent exposed as MCP Server. Your coding agent calls `recommend_architecture`, `validate_composition`, `assemble_blueprint` via MCP protocol. |
 | Approved tools registry | Apigee API Hub + `memory/approved-tools.md` | What MCP servers, APIs, and A2A agents you can connect to |
 | Company Terraform modules | `github.com/company/tf-modules` | Pre-approved infrastructure modules |
 
@@ -66,6 +66,8 @@ They've already set up everything you need. You don't configure any of this:
 ---
 
 ## 1. Prerequisites
+
+> **Important:** The AgentCatalyst preset includes a `constitution.md` file that encodes non-negotiable rules your coding agent MUST follow (e.g., never deploy directly, always use company Terraform modules, always generate pre-commit hooks). These are coding agent constraints — NOT meta-skills or decision frameworks (those exist only in AgentForge). Your coding agent reads constitution.md before generating any code.
 
 ### 1.1 Workstation requirements
 
@@ -210,13 +212,13 @@ Observability:   Dynatrace yes, OTel yes, Cloud Trace yes
 
 Saved as `plan.md`. (~5 min)
 
-### 2.5 `/catalyst.blueprint` — Get AI advice
+### 2.5 `/catalyst.blueprint` — Get AI advice via Blueprint Advisor MCP Server
 
 Type `/catalyst.blueprint`. Wait ~30 seconds. `app-blueprint.yaml` appears in your workspace.
 
 **What happens behind the scenes in those 30 seconds:**
 
-The coding agent sends your `spec.md` + `plan.md` to the Blueprint Advisor (an AI running on GCP). The Blueprint Advisor reads your spec and does three searches against the company's curated catalogs:
+The coding agent connects to the **Blueprint Advisor MCP Server** and calls the `recommend_architecture` tool with your `spec.md` + `plan.md`. The server runs the Blueprint Advisor LlmAgent internally — you never interact with it directly. The LlmAgent reads your spec and does three searches against the company's curated catalogs:
 
 1. **Pattern search** — reads your Workflow section's ordering words ("First," "Simultaneously," "Refine until") and searches the pattern catalog to find the right agent topology. "First... then..." → Sequential. "Simultaneously" → Parallel. "Refine until" → Loop.
 
@@ -543,7 +545,7 @@ Use the existing CI/CD from ci-cd/.
 Only generate application code that runs inside the existing containers.
 ```
 
-**Key language:** Notice the repeated "EXISTING" and "DO NOT create new" signals. This tells the Blueprint Advisor and the coding agent to work within the existing infrastructure, not generate new infrastructure.
+**Key language:** Notice the repeated "EXISTING" and "DO NOT create new" signals. This tells the Blueprint Advisor MCP Server (which the coding agent calls via `recommend_architecture`) and the coding agent to work within the existing infrastructure, not generate new infrastructure.
 
 #### Step 3: `/plan` — Technical decisions
 
@@ -556,7 +558,7 @@ Terraform:         SKIP — infrastructure already exists
 CI/CD:             EXISTING Jenkinsfile + harness-pipeline.yaml
 ```
 
-#### Step 4: `/catalyst.blueprint` — Get AI advice
+#### Step 4: `/catalyst.blueprint` — Get AI advice via MCP
 
 The Blueprint Advisor reads the spec and recognizes the brownfield signals. It returns `app-blueprint.yaml` that references existing infrastructure rather than creating new infrastructure:
 
@@ -917,6 +919,8 @@ The existing CI/CD pipelines handle everything — they build the Docker images 
 
 ## 4. Writing Effective Specs — Signal Words That Help
 
+> For the full list of 11 agentic patterns and how the Blueprint Advisor selects them, see the Architecture Document (Layer 2 section).
+
 ### Words that trigger pattern selection
 
 The Blueprint Advisor reads your Workflow section and searches the pattern catalog. These words help it find the right patterns:
@@ -1083,6 +1087,10 @@ The Blueprint Advisor converts these into starter golden dataset entries and pre
 
 ## 4b. EvalOps — Your Evaluation Workflow
 
+> For the full EvalOps architecture (3-layer lifecycle, golden dataset lifecycle, meta-evaluation), see the Architecture Document (Layer 4 section).
+
+> **Golden dataset quality gate:** Your pre-commit hook enforces minimum quality: ≥10 entries per agent, ≥3 edge cases, ≥1 negative test, 100% agent coverage. If your golden dataset doesn't meet these thresholds, the commit is blocked. The entries generated from your acceptance criteria are a starting point — you need to add edge cases and negative tests during development.
+
 AgentCatalyst generates a complete evaluation lifecycle. You don't need to set this up — the `company-cicd` and `company-observability` skills generate everything.
 
 ### What gets generated for you
@@ -1146,6 +1154,10 @@ This shows you exactly which agent failed, which tool returned bad data, and whe
 ---
 
 ## 5. Understanding the YAML Blueprint
+
+> **If the Blueprint Advisor is unavailable:** You can author `app-blueprint.yaml` manually using the YAML schema below and the FNOL example in the Architecture Document (Appendix A.10) as a template. The `/catalyst.generate` command only needs the YAML file — it does not require the MCP Server. You lose the AI-guided recommendation but are not blocked from generating code.
+
+> **How the YAML is created:** Your coding agent calls `recommend_architecture(spec, plan)` on the Blueprint Advisor MCP Server. The server runs the Blueprint Advisor LlmAgent internally (RAG search + LLM reasoning + company system prompt) and returns recommendations with confidence scores. Your coding agent then calls `validate_composition(pattern_tree)` to check your edits, and `assemble_blueprint(selections, spec, plan)` to finalize the YAML. All three calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document for the full MCP Server tool table.
 
 ### Agentic blueprint — key fields
 
@@ -1231,7 +1243,7 @@ git diff   # See exactly what changed
 
 ### What happens to custom code
 
-Files marked `<<< ENGINEER MUST WRITE >>>` or `raise NotImplementedError` are stubs. If you've already implemented them and re-generate, the generated version will overwrite your implementation. **Always commit before re-generating.**
+Files marked `<<< ENGINEER MUST WRITE >>>` (system prompts) or FunctionTool implementations with first-draft business logic may contain your refinements. If you've already reviewed and refined them and then re-generate, the generated version will overwrite your changes. **Always commit before re-generating.**
 
 ---
 
@@ -1526,6 +1538,8 @@ Run this 10-question checklist before `/catalyst.blueprint`. A spec that passes 
 
 ## 11. Reporting Issues to Platform Engineering
 
+> The Platform Engineering team uses the acceptance telemetry pipeline (see Operations Runbook, Section 3) to track Blueprint Advisor quality. Your issue reports supplement this automated telemetry.
+
 The Blueprint Advisor improves over time based on developer feedback. Reporting issues isn't a complaint — it's how the system gets smarter.
 
 ### How to report a missing tool
@@ -1582,6 +1596,10 @@ Your reports become test cases in the regression suite — preventing future reg
 ---
 
 ## 12. Deployment Rules — What NOT to Do
+
+> These rules are enforced by `constitution.md` in your preset. The coding agent reads constitution.md before generating code and will refuse to generate deployment commands or direct infrastructure provisioning. See the Architecture Document (Layer 3) for the full list of non-negotiable rules.
+
+> See the Architecture Document for the full CI/CD architecture (Layer 4 — Jenkins infrastructure plane + Harness application plane with 3-phase EvalOps).
 
 | ❌ Never do this | ✅ Do this instead |
 |---|---|
@@ -1657,7 +1675,7 @@ To make the CI/CD model concrete, here's exactly what happens when you merge a P
         │
         ├─ Deploy to Non-Prod
         │   ├─ gcloud agents deploy fnol-coordinator --version abc123 ...
-        │   └─ Agent Engine routes 100% non-prod traffic to new version
+        │   └─ Cloud Run routes 100% non-prod traffic to new revision
         │
         ├─ Arize evaluation against Non-Prod
         │   ├─ Run all evalsets in tests/evalsets/
@@ -1726,6 +1744,8 @@ Both are essential. Jenkins ensures the agent's environment is correct. Harness 
 ---
 
 ## 14. Troubleshooting
+
+> For platform-level failure modes and escalation procedures, see the Operations Runbook, Section 6 (Failure Modes) and Section 9 (MCP Server Operations). If the Blueprint Advisor MCP Server is unreachable or returning errors, contact Platform Engineering per the escalation matrix in the Operations Runbook.
 
 | Problem | Cause | Fix |
 |---|---|---|
@@ -1823,7 +1843,7 @@ A: Yes. `/specify` in Copilot, `/catalyst.generate` in Claude Code — the prese
 A: That's exactly the scenario in Section 3. Use AgentCatalyst to generate the application code on top of the existing IaC and boilerplate. The coding agent's skills teach it how to write correct Spring Boot / Angular / ADK code that plugs into the existing infrastructure.
 
 **Q: Can I use AgentCatalyst for non-GCP infrastructure (AWS, Azure)?**
-A: For the agentic archetype, GCP is required (Agent Runtime is GCP-only). For microservice/pipeline/API archetypes, the application code is cloud-agnostic — only the company overlay skills (Terraform, CI/CD) are cloud-specific. The SPA brownfield example uses ECS Fargate (AWS).
+A: For the agentic archetype, GCP is required (Cloud Run is GCP-only for the agentic archetype). For microservice/pipeline/API archetypes, the application code is cloud-agnostic — only the company overlay skills (Terraform, CI/CD) are cloud-specific. The SPA brownfield example uses ECS Fargate (AWS).
 
 **Q: Why not just use a project template (like Spring Initializr)?**
 A: Templates give you a blank starter. AgentCatalyst gives you a starter that's already wired to your specific database, your specific APIs, your specific infrastructure, following your company's specific patterns. The Blueprint Advisor reads your spec and generates a YAML that's custom to your use case — not a generic template.
@@ -1838,10 +1858,23 @@ A: The brownfield SPA example in Section 3 uses AWS (ECS Fargate + Oracle RDS). 
 
 ## Related Documents
 
-| Document | Audience | What it covers |
-|---|---|---|
-| **AgentCatalyst Architecture** (GA or agents-cli variant) | Architects, tech leads | Architectural decisions, layer deep dives, cost model, ROI |
-| **This Developer Guide** | Developers | Step-by-step walkthroughs, code examples, spec writing, troubleshooting |
-| **AgentCatalyst Operations Runbook** | Platform engineering | Wire-level APIs, search quality regression, acceptance telemetry, catalog quality, tool lifecycle, failure modes, escalation |
+| Document | Audience | What it covers | When to consult |
+|---|---|---|---|
+| **AgentCatalyst GA Architecture Document** | Architects, tech leads | WHY — architectural decisions, Blueprint Advisor MCP Server design (3-tool architecture), preset-based archetype adaptation, 5-layer architecture, cost model, ROI | When you need to understand why something is designed the way it is |
+| **This Developer Guide** | Developers | HOW — step-by-step walkthroughs (greenfield FNOL + brownfield microservice), spec writing, business logic capture, EvalOps workflow, troubleshooting | When you need to build something |
+| **AgentCatalyst Operations Runbook** | Platform engineering | PROCEDURES — wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix | When you need to debug platform issues or maintain the Blueprint Advisor |
 
-*The architecture document provides the WHY. This guide provides the HOW. The operations runbook provides the procedures for maintaining the platform.*
+### Key cross-references from this guide to the Architecture Document
+
+| This guide section | Architecture doc section | Why you might need it |
+|---|---|---|
+| Section 2-3 (Walkthroughs) | End-to-end thread | Narrative context for what the walkthrough steps do |
+| Section 4 (Writing Specs) | Layer 2 — 11 agentic patterns table | Full list of patterns and selection signals |
+| Section 4a (Business Logic) | Layer 1 — spec template table | How each spec section impacts code generation |
+| Section 4b (EvalOps) | Layer 4 — EvalOps lifecycle | Full 3-layer architecture + golden dataset lifecycle |
+| Section 5 (YAML Blueprint) | Layer 2 — MCP Server tools | How the YAML is created (3 MCP tools) |
+| Section 8 (Confidence Scores) | Layer 2 — Blueprint Advisor | How confidence is determined |
+| Section 12 (Deployment Rules) | Layer 4 — Company CI/CD | Jenkins + Harness architecture |
+| Section 13 (Deployment Scenario) | Architecture doc — FNOL walkthrough | Architectural context for deployment steps |
+
+*The architecture document provides the WHY. This guide provides the HOW. The operations runbook provides the PROCEDURES for maintaining the platform.*

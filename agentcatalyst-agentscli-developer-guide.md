@@ -1,4 +1,20 @@
-# AgentCatalyst — Developer Guide
+# AgentCatalyst — agents-cli GA-Only Developer Guide
+
+**Practical guide for developers building agentic AI applications with AgentCatalyst**
+*Uses agents-cli for scaffolding · GA-only runtime · agents-cli eval/simulate/deploy FORBIDDEN*
+*Companion to: AgentCatalyst agents-cli Architecture Document · AgentCatalyst Operations Runbook*
+
+> This guide covers the HOW — step-by-step walkthroughs, code examples, spec writing, troubleshooting. For architectural decisions (the WHY), see the Architecture Document. For operational procedures (platform maintenance), see the Operations Runbook.
+>
+> **Key difference from the GA Developer Guide:** This variant uses `agents-cli scaffold create` for project setup (gets 7 Google skills bundled for free) but `agents-cli eval`, `agents-cli simulate`, and `agents-cli deploy` are **FORBIDDEN**. All evaluation goes through pre-commit hooks + Harness 3-phase pipeline. All deployment goes through Jenkins + Harness CI/CD.
+
+**Practical guide for developers building agentic AI applications with AgentCatalyst**
+*Uses agents-cli for scaffolding · GA-only runtime · agents-cli eval/simulate/deploy FORBIDDEN*
+*Companion to: AgentCatalyst agents-cli Architecture Document · AgentCatalyst Operations Runbook*
+
+> This guide covers the HOW — step-by-step walkthroughs, code examples, spec writing, troubleshooting. For architectural decisions (the WHY), see the Architecture Document. For operational procedures (platform maintenance), see the Operations Runbook.
+>
+> **Key difference from the GA Developer Guide:** This variant uses `agents-cli scaffold create` for project setup (gets 7 Google skills bundled for free) but `agents-cli eval`, `agents-cli simulate`, and `agents-cli deploy` are **FORBIDDEN**. All evaluation goes through pre-commit hooks + Harness 3-phase pipeline. All deployment goes through Jenkins + Harness CI/CD. Never `agents-cli deploy`.
 
 *Get from "I need an agent" to scaffolded, production-ready code in under 1 hour.*
 
@@ -18,7 +34,7 @@ mkdir my-agent && cd my-agent && specify init --preset agentcatalyst
 # 3. In VSCode with your coding agent:
 /specify          # fill in the 6-section template → spec.md
 /plan             # answer technical questions → plan.md
-/catalyst.blueprint   # Blueprint Advisor returns agent-blueprint.yaml
+/catalyst.blueprint   # Connects to Blueprint Advisor MCP Server → agent-blueprint.yaml
 # review + edit the YAML
 /catalyst.generate    # agents-cli generates everything
 ```
@@ -41,7 +57,7 @@ The EA team has already set up everything you need. You don't have to configure 
 | 11 pattern catalog | Vertex AI Search | The Blueprint Advisor searches this to recommend agent patterns |
 | Skill catalog | Vertex AI Search | The Blueprint Advisor searches this to recommend skills |
 | Tool registry | Apigee API Hub | Approved MCP servers and A2A agents — what you can connect to |
-| Blueprint Advisor | Agent Runtime (GCP) | The AI that reads your spec and recommends an architecture |
+| Blueprint Advisor MCP Server | Cloud Run (GCP) | LlmAgent exposed as MCP Server. Your coding agent calls `recommend_architecture`, `validate_composition`, `assemble_blueprint` via MCP protocol. |
 | `agents-cli` | Internal PyPI | The CLI tool that scaffolds your project from the YAML |
 | Company overlay skills | Company skills repo | 4 skills (Terraform, observability, CI/CD, security) that teach the coding agent company-specific patterns |
 | Company Terraform modules | GitHub (company/tf-modules) | Pre-approved infrastructure modules — you reference them, never write raw TF |
@@ -64,6 +80,10 @@ The EA team has already set up everything you need. You don't have to configure 
 ---
 
 ## 1. Prerequisites
+
+> **Important:** The AgentCatalyst preset includes a `constitution.md` file that encodes non-negotiable rules your coding agent MUST follow (e.g., never deploy directly, never run `agents-cli eval/simulate/deploy`, always use company Terraform modules). These are coding agent constraints — NOT meta-skills or decision frameworks (those exist only in AgentForge). Your coding agent reads constitution.md before generating any code.
+
+> **Important:** The AgentCatalyst preset includes a `constitution.md` file that encodes non-negotiable rules your coding agent MUST follow (e.g., never deploy directly, never run `agents-cli eval/simulate/deploy`, always use company Terraform modules). These are coding agent constraints — NOT meta-skills or decision frameworks (those exist only in AgentForge). Your coding agent reads constitution.md before generating any code.
 
 ### 1.1 Workstation requirements
 
@@ -245,7 +265,7 @@ Saved as `plan.md`. You've spent about 20 minutes total.
 
 ### 2.5 Phase 3: `/catalyst.blueprint` — Get AI advice
 
-Type `/catalyst.blueprint`. The coding agent packages your `spec.md` + `plan.md` and sends them to the Blueprint Advisor.
+Type `/catalyst.blueprint`. The coding agent connects to the Blueprint Advisor MCP Server and calls the `submit_spec_and_plan` tool with your `spec.md` + `plan.md`.
 
 **What happens behind the scenes (you just wait ~30 seconds):**
 1. Blueprint Advisor reads your spec and plan
@@ -521,6 +541,10 @@ def loan_application_lookup(application_id: str) -> dict:
 
 ## 4. Writing Effective Specs — Signal Words That Help
 
+> For the full list of 11 agentic patterns and how the Blueprint Advisor selects them, see the Architecture Document (Layer 2 section).
+
+> For the full list of 11 agentic patterns and how the Blueprint Advisor selects them, see the Architecture Document (Layer 2 section).
+
 The Blueprint Advisor uses your spec text to search the pattern catalog. Certain words and phrases help it find better matches:
 
 ### Words that trigger pattern selection
@@ -574,6 +598,12 @@ When present, the coding agent generates 90-95% of the code. When omitted, you w
 
 ## 4b. EvalOps — Your Evaluation Workflow
 
+> For the full EvalOps architecture (3-layer lifecycle, golden dataset lifecycle, meta-evaluation), see the Architecture Document (Layer 4 section). Remember: `agents-cli eval` is FORBIDDEN in this variant — use the pre-commit hook for local evaluation.
+
+> **Golden dataset quality gate:** Your pre-commit hook enforces minimum quality: ≥10 entries per agent, ≥3 edge cases, ≥1 negative test, 100% agent coverage. If your golden dataset doesn't meet these thresholds, the commit is blocked. The entries generated from your acceptance criteria are a starting point — you need to add edge cases and negative tests during development.
+
+> For the full EvalOps architecture (3-layer lifecycle, golden dataset lifecycle, meta-evaluation), see the Architecture Document (Layer 4 section). Remember: `agents-cli eval` is FORBIDDEN in this variant — use the pre-commit hook for local evaluation.
+
 AgentCatalyst generates a complete evaluation lifecycle. The `company-cicd` and `company-observability` skills generate everything automatically.
 
 **What gets generated:** `tests/eval_inner_loop.py` (pre-commit hook — blocks commit if any metric drops >10%), `.pre-commit-config.yaml`, `observability/adk-tracing-config.py` (ADK tracing), `observability/phoenix-config.py` (Arize Phoenix at `localhost:6006`), `golden-dataset/golden-v1.json` (from acceptance criteria), and `harness-pipeline.yaml` (3-phase: Arize eval → AutoSxS comparison → HITL triage).
@@ -587,6 +617,12 @@ Note: `agents-cli eval` is forbidden by three-layer skill override. The pre-comm
 ---
 
 ## 5. Understanding the YAML Blueprint
+
+> **If the Blueprint Advisor is unavailable:** You can author `app-blueprint.yaml` manually using the YAML schema below and the FNOL example in the Architecture Document (Appendix A.10) as a template. The `/catalyst.generate` command only needs the YAML file — it does not require the MCP Server. You lose the AI-guided recommendation but are not blocked from generating code.
+
+> **How the YAML is created:** Your coding agent calls `recommend_architecture(spec, plan)` on the Blueprint Advisor MCP Server. The server runs the Blueprint Advisor LlmAgent internally (RAG search + LLM reasoning + company system prompt) and returns recommendations with confidence scores. Your coding agent then calls `validate_composition(pattern_tree)` to check your edits, and `assemble_blueprint(selections, spec, plan)` to finalize the YAML. All three calls happen via MCP protocol (v2025-03-26) — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document (Layer 2) for the full MCP Server tool table, security controls, and rate limiting.
+
+> **How the YAML is created:** Your coding agent calls `recommend_architecture(spec, plan)` on the Blueprint Advisor MCP Server. The server runs the Blueprint Advisor LlmAgent internally (RAG search + LLM reasoning + company system prompt) and returns recommendations with confidence scores. Your coding agent then calls `validate_composition(pattern_tree)` to check your edits, and `assemble_blueprint(selections, spec, plan)` to finalize the YAML. All three calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document (Layer 2) for the full MCP Server tool table.
 
 The `agent-blueprint.yaml` is the single source of truth for what `agents-cli` will scaffold. Here's a field-by-field guide:
 
@@ -706,6 +742,8 @@ One of the biggest advantages of skill-guided generation: you can change the YAM
 
 ## 7. Troubleshooting
 
+> For platform-level failure modes and escalation procedures, see the Operations Runbook, Section 6 (Failure Modes) and Section 9 (MCP Server Operations). If the Blueprint Advisor MCP Server is unreachable or returning errors, contact Platform Engineering per the escalation matrix in the Operations Runbook.
+
 ### Common issues
 
 | Problem | Cause | Fix |
@@ -817,6 +855,26 @@ A: The AgentCatalyst preset replaces the default `GEMINI.md` with a company vers
 
 ## 11. Deployment Rules — What NOT to Do
 
+> **CRITICAL for this variant:** `agents-cli eval`, `agents-cli simulate`, and `agents-cli deploy` are **FORBIDDEN**. This is enforced at three layers:
+>
+> | Layer | Enforcement |
+> |---|---|
+> | company-cicd skill | Tells coding agent: "Generate pipeline files. NEVER deploy directly." |
+> | constitution.md | Absolute rule: "NEVER run `agents-cli eval`, `agents-cli simulate`, or `agents-cli deploy`." |
+> | `.agentcli-overrides.yaml` | Disables eval/simulate/deploy at the CLI level — even if the coding agent tries |
+>
+> See the Architecture Document (Layer 3 — FORBIDDEN commands section) for the full rationale and defense-in-depth design.
+
+> **CRITICAL for this variant:** `agents-cli eval`, `agents-cli simulate`, and `agents-cli deploy` are **FORBIDDEN**. This is enforced at three layers:
+>
+> | Layer | Enforcement |
+> |---|---|
+> | company-cicd skill | Tells coding agent: "Generate pipeline files. NEVER deploy directly." |
+> | constitution.md | Absolute rule: "NEVER run `agents-cli eval`, `agents-cli simulate`, or `agents-cli deploy`." |
+> | `.agentcli-overrides.yaml` | Disables eval/simulate/deploy at the CLI level — even if the coding agent tries |
+>
+> All evaluation goes through pre-commit hooks (Layer 1) + Harness 3-phase pipeline (Layer 3). All deployment goes through Jenkins + Harness CI/CD. See the Architecture Document (Layer 3 — FORBIDDEN commands section) for the full rationale.
+
 This section exists because `agents-cli` ships with `deploy`, `eval`, and `simulate` commands that your coding agent might try to use. **In this company, none of these are permitted from your developer machine. All deployment and evaluation happens via CI/CD.**
 
 ### The rules
@@ -894,7 +952,7 @@ Jenkins pipeline triggers automatically:
     1. Terraform init
     2. Terraform plan (generates infrastructure plan)
     3. OPA policy check (validates against company policies)
-    4. Terraform apply (provisions Agent Runtime, Cloud SQL,
+    4. Terraform apply (provisions Cloud Run, Cloud SQL,
        Vertex AI Search, Model Armor, VPC-SC, CMEK)
     ↓
 Harness pipeline triggers automatically:
@@ -914,7 +972,11 @@ You don't need to do anything after merging your PR. The pipelines handle everyt
 
 ---
 
-## 12. A Concrete Deployment Scenario — FNOL Agent Merge to Production
+## 12. A Concrete Deployment Scenario
+
+> See the Architecture Document (Layer 4) for the full CI/CD architecture — Jenkins infrastructure plane + Harness application plane with 3-phase EvalOps. `agents-cli deploy` is FORBIDDEN — all deployment goes through Jenkins + Harness.
+
+> See the Architecture Document for the full CI/CD architecture (Layer 4 — Jenkins infrastructure plane + Harness application plane with 3-phase EvalOps). `agents-cli deploy` is FORBIDDEN — all deployment goes through Jenkins + Harness. — FNOL Agent Merge to Production
 
 To make the CI/CD model concrete, here's exactly what happens when you merge a PR for an FNOL agent change. Two distinct pipelines run in sequence — Jenkins for infrastructure, Harness for application. Understanding both helps you debug failures and write better evalsets.
 
@@ -960,7 +1022,7 @@ To make the CI/CD model concrete, here's exactly what happens when you merge a P
         │
         ├─ Deploy to Non-Prod
         │   ├─ gcloud agents deploy fnol-coordinator --version abc123 ...
-        │   └─ Agent Engine routes 100% non-prod traffic to new version
+        │   └─ Cloud Run routes 100% non-prod traffic to new revision
         │
         ├─ Arize evaluation against Non-Prod
         │   ├─ Run all evalsets in tests/evalsets/
@@ -1378,7 +1440,7 @@ for AI-assisted architecture recommendations.
 3. Validate both files are non-empty and contain the required sections
 4. Submit to the Blueprint Advisor API:
    ```
-   POST $CATALYST_BLUEPRINT_API/api/blueprint
+   MCP call: submit_spec_and_plan(spec, plan, archetype) via mcp://blueprint-advisor.[company-domain].run.app
    Content-Type: application/json
    
    {
@@ -1508,7 +1570,7 @@ from google.adk.tools import LongRunningFunctionTool
 - `InMemorySessionService` — development/testing only
 - `FirestoreSessionService` — production session persistence
 - `SpannerSessionService` — high-scale session persistence
-- Memory and artifacts configured via Agent Runtime settings
+- Memory and artifacts configured via Cloud Run environment variables
 ```
 
 ---
@@ -1627,7 +1689,7 @@ Do NOT write raw Terraform resources — use module references.
 
 | Module | Source | Current Version | Purpose |
 |---|---|---|---|
-| agent-runtime | github.com/company/tf-modules//agent-runtime | v3.1.0 | Agent Engine provisioning |
+| cloud-run-agent | github.com/company/tf-modules//cloud-run-agent | v3.1.0 | Cloud Run agent service provisioning |
 | cloud-sql | github.com/company/tf-modules//cloud-sql | v2.4.0 | Cloud SQL instances |
 | vpc-sc | github.com/company/tf-modules//vpc-sc | v1.8.0 | VPC Service Controls perimeter |
 | cmek | github.com/company/tf-modules//cmek | v1.2.0 | KMS key ring + crypto keys |
@@ -1660,10 +1722,23 @@ Do NOT write raw Terraform resources — use module references.
 
 ## Related Documents
 
-| Document | Audience | What it covers |
-|---|---|---|
-| **AgentCatalyst Architecture** (GA or agents-cli variant) | Architects, tech leads | Architectural decisions, layer deep dives, cost model, ROI |
-| **This Developer Guide** | Developers | Step-by-step walkthroughs, code examples, spec writing, troubleshooting |
-| **AgentCatalyst Operations Runbook** | Platform engineering | Wire-level APIs, search quality regression, acceptance telemetry, catalog quality, tool lifecycle, failure modes, escalation |
+| Document | Audience | What it covers | When to consult |
+|---|---|---|---|
+| **AgentCatalyst agents-cli Architecture Document** | Architects, tech leads | WHY — architectural decisions, Blueprint Advisor MCP Server (3 tools: recommend/validate/assemble), FORBIDDEN 3-layer enforcement, MCP Server security (OAuth 2.0, TLS 1.3), rate limiting (10 calls/hr), versioning, offline fallback, golden dataset quality gate, cost model (48× ROI) | When you need to understand why something is designed the way it is |
+| **This Developer Guide** | Developers | HOW — greenfield FNOL walkthrough, spec writing, business logic capture, EvalOps (no `agents-cli eval`), FORBIDDEN commands, troubleshooting | When you need to build something |
+| **AgentCatalyst Operations Runbook** | Platform engineering | PROCEDURES — wire-level Vertex AI Search APIs, transport security, search quality regression, acceptance telemetry, catalog backup/DR (RTO < 4 hrs), failure modes, MCP Server ops | When you need to debug platform issues or escalate |
 
-*The architecture document provides the WHY. This guide provides the HOW. The operations runbook provides the procedures for maintaining the platform.*
+### Key cross-references
+
+| This guide section | Architecture doc section | Why you might need it |
+|---|---|---|
+| Section 2 (Greenfield FNOL) | End-to-end thread | Narrative context for walkthrough steps |
+| Section 4 (Writing Specs) | Layer 2 — 11 agentic patterns | Full pattern list and selection signals |
+| Section 4a (Business Logic) | Layer 1 — spec template table | How each spec section impacts code generation |
+| Section 4b (EvalOps) | Layer 4 — EvalOps + golden dataset quality gate | Full 3-layer architecture. `agents-cli eval` FORBIDDEN. |
+| Section 5 (YAML Blueprint) | Layer 2 — MCP Server (3 tools, security, rate limiting) | How the YAML is created. Offline fallback if server down. |
+| Section 7 (Troubleshooting) | → Operations Runbook, Section 6 + 9 | Platform failure modes, escalation matrix, MCP Server ops |
+| Section 11 (Deployment Rules) | Layer 3 — FORBIDDEN 3-layer enforcement | Why eval/simulate/deploy are blocked at 3 layers |
+| Section 12 (Deployment Scenario) | Layer 4 — Jenkins + Harness architecture | Full CI/CD architecture with 3-phase EvalOps |
+
+*The architecture document provides the WHY. This guide provides the HOW. The operations runbook provides the PROCEDURES.*
