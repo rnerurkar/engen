@@ -1,16 +1,52 @@
-# AgentCatalyst Operations Runbook
+# AgentCatalyst — Operations Runbook
 
-*Operational procedures, monitoring, and maintenance for the AgentCatalyst platform. This is a living document maintained by the Platform Engineering team.*
+**Operational procedures, monitoring, and maintenance for the AgentCatalyst platform**
+*This is a living document maintained by the Platform Engineering team.*
 
-*Applies to: Both GA and agents-cli architecture variants. All procedures in this runbook are platform-level — the Blueprint Advisor, Vertex AI Search catalogs, telemetry pipelines, and quality engineering processes are identical across variants. Runtime-specific operations (Cloud Run scaling for GA, agents-cli command restrictions for agents-cli) are covered in the respective architecture documents.*
+*Applies to: Both GA and agents-cli architecture variants. All procedures in this runbook are platform-level — the Blueprint Advisor MCP Server, Vertex AI Search catalogs, telemetry pipelines, and quality engineering processes are identical across variants. Runtime-specific operations (Cloud Run scaling for GA, agents-cli FORBIDDEN command enforcement for agents-cli) are covered in the respective architecture documents.*
 
-*Companion to: agentcatalyst-architecture.md (GA) and agentcatalyst-agentscli-architecture.md*
+### Related Documents
+
+| Document | Audience | Relationship to this runbook |
+|---|---|---|
+| **AgentCatalyst Architecture Document** (GA or agents-cli) | Architects | Provides the WHY behind each system this runbook maintains. When you need to understand why the Blueprint Advisor MCP Server is designed a certain way, consult the Architecture Document (Layer 2). |
+| **AgentCatalyst Developer Guide** (GA or agents-cli) | Developers | Provides the HOW for developers. When a developer reports an issue, this runbook tells you how to diagnose it. The Developer Guide (Section 9 and Section 11) tells developers what information to include in tickets. |
+
+### Cross-reference map
+
+| This runbook section | Architecture doc section | Developer guide section |
+|---|---|---|
+| 1. Wire-Level API Calls | Layer 2 — Blueprint Advisor MCP Server | Section 5 — Understanding the YAML Blueprint |
+| 2. Search Quality Regression | Layer 2 — Blueprint Advisor | Section 8 — Reading Confidence Scores |
+| 3. Acceptance Telemetry | Layer 2 — Blueprint Advisor | Section 9 — When the Blueprint Advisor Gets It Wrong |
+| 4. Catalog Quality | Layer 2 — Vertex AI Search data stores | Section 4 — Writing Effective Specs |
+| 5. Tool Lifecycle | Layer 2 — Tool Registry | Section 11 — Reporting Issues |
+| 6. Failure Modes | Layer 2 — Blueprint Advisor MCP Server | Section 14 — Troubleshooting |
+| 7. Composition Validator | Layer 2 — Pattern composition | Section 6 — Iterating on the Design |
+| 8. EvalOps Operations | Layer 4 — EvalOps 3-layer lifecycle | Section 4b — EvalOps Workflow |
+| 9. MCP Server Operations | Layer 2 — Blueprint Advisor MCP Server | Section 5 — Understanding the YAML Blueprint |
 
 ---
 
 ## 1. Wire-Level Vertex AI Search API Calls
 
-The Blueprint Advisor's three FunctionTools (`search_patterns`, `search_skills`, `search_tools`) each invoke the Vertex AI Search REST API. Understanding the wire-level interaction matters for performance tuning, cost analysis, and troubleshooting.
+> **Architecture context:** The Blueprint Advisor MCP Server (see Architecture Document, Layer 2) exposes three MCP tools to the coding agent: `recommend_architecture` (advisory), `validate_composition` (deterministic), and `assemble_blueprint` (deterministic). Internally, `recommend_architecture` invokes the Blueprint Advisor LlmAgent, which uses three RAG tools to query Vertex AI Search. These RAG tools are NOT exposed to the coding agent.
+
+### Transport security
+
+All communication between the coding agent and the Blueprint Advisor MCP Server is encrypted:
+
+| Hop | Protocol | Encryption |
+|---|---|---|
+| Coding agent → Cloud Run | MCP over HTTPS | TLS 1.3 (Cloud Run default) |
+| Cloud Run → Vertex AI Search | gRPC | TLS 1.3 (Google internal) |
+| Cloud Run → Gemini API | HTTPS | TLS 1.3 (Google internal) |
+
+**Spec content in transit:** The developer's `spec.md` and `plan.md` are transmitted as MCP tool call parameters over TLS-encrypted connections. Content is processed in-memory on the Blueprint Advisor server and is NOT persisted to disk or logged. Only the spec hash (SHA-256) is captured in telemetry for traceability.
+
+**Data residency:** The Blueprint Advisor MCP Server runs in a specific GCP region (configured at deployment). Spec content does not leave this region. Vertex AI Search data stores are co-located in the same region.
+
+**Audit trail:** Every `recommend_architecture` call logs: timestamp, authenticated user identity, spec hash, plan hash, MCP request ID, response size, latency. Content is NOT logged. See Section 3 (Acceptance Telemetry) for the full telemetry schema.
 
 ### API endpoint format
 
@@ -47,213 +83,142 @@ POST https://discoveryengine.googleapis.com/v1/projects/{PROJECT}/locations/{LOC
 }
 ```
 
-### Response processing
+### Response processing order
 
-The Blueprint Advisor processes the response in this order:
-1. Read `results[].document.structData` for structured metadata (name, applicability, composition rules)
-2. Read `results[].document.derivedStructData.snippets` for contextual descriptions
-3. Read `summary.summaryText` for the search engine's natural language synthesis
-4. Apply confidence scoring: exact metadata match = high, snippet match = medium, summary-only = low
+1. `results[].document.structData` — structured metadata (name, applicability, composition rules)
+2. `results[].document.derivedStructData.snippets` — contextual descriptions
+3. `summary.summaryText` — search engine natural language synthesis
+4. Confidence scoring: exact metadata match = high, snippet match = medium, summary-only = low
+
+> **Developer Guide context:** Developers see confidence scores in the YAML blueprint (Developer Guide, Section 8). When they report low-confidence results, check the response processing chain above.
 
 ### Data store identifiers
 
-| FunctionTool | Data Store ID | Contents |
+| RAG Tool (internal) | Data Store ID | Contents |
 |---|---|---|
-| `search_patterns` | `agentcatalyst-patterns` | 11 agentic patterns with 8 sections each |
-| `search_skills` | `agentcatalyst-skills` | Reusable skills with use_when/do_not_use_when frontmatter |
-| `search_tools` | `agentcatalyst-tools` | MCP servers, A2A Agent Cards, FunctionTool definitions |
+| `search_patterns()` | `agentcatalyst-patterns` | 11 agentic patterns (8 sections each) |
+| `search_skills()` | `agentcatalyst-skills` | Reusable skills with use_when/do_not_use_when |
+| `search_tools()` | `agentcatalyst-tools` | MCP servers, A2A Agent Cards, FunctionTool defs |
 
-### Performance characteristics
+### Performance
 
-| Metric | Typical value | Alert threshold |
+| Metric | Typical | Alert threshold |
 |---|---|---|
-| Latency (p50) | 200-400ms | > 800ms |
-| Latency (p99) | 600-1200ms | > 2000ms |
-| Results per query | 3-5 | < 1 (empty results) |
+| Latency (p50) | 200–400ms | > 800ms |
+| Latency (p99) | 600–1,200ms | > 2,000ms |
+| Results per query | 3–5 | < 1 |
 | Cost per query | ~$0.003 | N/A |
-| Blueprint Advisor total (3 queries) | ~$0.01 | N/A |
+| Full `recommend_architecture` (3 RAG + LLM) | 15–30 seconds | > 60 seconds |
 
 ### Troubleshooting
 
-| Symptom | Likely cause | Resolution |
+| Symptom | Cause | Resolution |
 |---|---|---|
-| Empty results for valid queries | Data store not indexed / embedding stale | Re-run ingestion pipeline, verify document count |
-| Irrelevant results | Missing or incorrect metadata frontmatter | Check `metadata.archetype` and `metadata.tags` on source documents |
-| High latency | Large document corpus + complex query | Add `filter` to narrow scope, reduce `pageSize` |
-| "Permission denied" | Service account missing `discoveryengine.viewer` role | Grant IAM role on the data store |
+| Empty results | Data store not indexed / embedding stale | Re-run ingestion pipeline, verify document count |
+| Irrelevant results | Missing/incorrect metadata | Check `metadata.archetype` and `metadata.tags` |
+| High latency | Large corpus + complex query | Add `filter`, reduce `pageSize` |
+| Permission denied | Missing `discoveryengine.viewer` role | Grant IAM role |
+| MCP Server error to coding agent | LlmAgent failure | Check Cloud Run logs — common: OOM, quota exceeded |
 
 ---
 
 ## 2. Search Quality Regression Suite
 
-The Blueprint Advisor's behavior depends on three artifacts that change over time: the system prompt, the pattern catalog, and the tool registry. Any change to any artifact can degrade search quality without anyone noticing.
+> **Architecture context:** See Architecture Document, Layer 2. **Developer Guide context:** Developers experience quality as confidence scores (Developer Guide, Section 8) and incorrect recommendations (Developer Guide, Section 9).
 
-### Golden test suite structure
-
-Maintain 30–50 reference specs with known-good YAML outputs (golden YAMLs). Each test case comprises:
+### Golden test suite (30–50 cases)
 
 ```
-tests/
-├── golden/
-│   ├── fnol-basic/
-│   │   ├── spec.md          ← Input spec
-│   │   ├── plan.md          ← Input plan
-│   │   ├── expected.yaml    ← Golden YAML output
-│   │   └── assertions.json  ← Specific fields to validate
-│   ├── fnol-brownfield/
-│   │   ├── spec.md
-│   │   ├── plan.md
-│   │   ├── expected.yaml
-│   │   └── assertions.json
-│   └── microservice-order-mgmt/
-│       ├── ...
+tests/golden/
+├── fnol-basic/
+│   ├── spec.md, plan.md, expected.yaml, assertions.json
+├── fnol-brownfield/
+│   ├── ...
+└── microservice-order-mgmt/    ← GA variant only
 ```
 
 ### Assertions format
 
 ```json
 {
-  "pattern_selection": {
-    "root_pattern": "coordinator",
-    "must_contain": ["sequential", "parallel"],
-    "must_not_contain": ["loop_inside_parallel"]
-  },
-  "tool_assignment": {
-    "bigquery_assigned_to": "enrichment_agent",
-    "cloud_sql_assigned_to": "fnol_coordinator"
-  },
-  "skill_discovery": {
-    "must_discover": ["adk-agents"],
-    "min_confidence": "medium"
-  }
+  "pattern_selection": { "root_pattern": "coordinator", "must_contain": ["sequential", "parallel"] },
+  "tool_assignment": { "bigquery_assigned_to": "enrichment_agent" },
+  "skill_discovery": { "must_discover": ["adk-agents"], "min_confidence": "medium" },
+  "business_rules": { "severity_classifier_has_rules": true, "rule_count_minimum": 3 }
 }
 ```
 
-### Regression test execution
+The `business_rules` assertions verify that business rules pass through from spec to YAML. When the Blueprint Advisor drops rules, the coding agent generates stubs instead of first-draft implementations — a significant quality regression.
 
-Run the suite on every change to:
-- Blueprint Advisor system prompt
-- Pattern catalog (new pattern, updated metadata)
-- Tool registry (new tool, changed endpoint)
-- Vertex AI Search configuration (re-indexing, schema change)
+### Execution
 
 ```bash
-# Run regression suite
 python3 scripts/run_regression.py \
   --golden-dir tests/golden/ \
-  --blueprint-advisor-url https://blueprint-advisor.run.app \
+  --mcp-endpoint mcp://blueprint-advisor.[company-domain].run.app \
   --output results/$(date +%Y%m%d).json
-
-# Check results
-python3 scripts/check_assertions.py results/$(date +%Y%m%d).json
 ```
+
+The suite calls the MCP Server via the same protocol the coding agent uses — testing the exact code path developers experience.
 
 ### Quality metrics
 
-| Metric | Target | Alert threshold |
+| Metric | Target | Alert |
 |---|---|---|
-| Pattern selection accuracy | ≥ 90% of golden cases | < 85% |
-| Tool assignment accuracy | ≥ 85% of golden cases | < 80% |
+| Pattern selection accuracy | ≥ 90% | < 85% |
+| Tool assignment accuracy | ≥ 85% | < 80% |
 | Skill discovery recall | ≥ 90% | < 85% |
-| Zero-result queries | 0% of golden cases | > 0% |
-| Regression from previous run | 0 new failures | > 0 |
+| Business rules passthrough | 100% | < 100% |
+| Zero-result queries | 0% | > 0% |
 
 ### Cadence
 
 | Trigger | Action |
 |---|---|
-| System prompt change | Full suite (30-50 cases) |
-| Pattern catalog change | Pattern-related cases only |
-| Tool registry change | Tool-related cases only |
-| Weekly (automated) | Full suite |
-| Pre-release | Full suite + manual review of any failures |
+| System prompt change | Full suite |
+| Catalog change | Affected cases only |
+| MCP Server deployment | Full suite |
+| Weekly | Full suite (automated) |
 
 ---
 
 ## 3. Acceptance Telemetry and Feedback Loop
 
-Generated YAMLs are observed in two ways: what the Blueprint Advisor produced and what the developer kept after review. The diff between the two is the highest-value signal in the entire platform.
+> **Architecture context:** See Architecture Document, Layer 2. **Developer Guide context:** Developers report issues via Developer Guide, Section 11.
 
-### Telemetry capture points
+### Capture points
 
-| Event | What's captured | Where it's stored |
+| Event | Captured | Storage |
 |---|---|---|
-| Blueprint generated | Full YAML + spec.md hash + plan.md hash + query-response pairs from Vertex AI Search | BigQuery `telemetry.blueprint_generated` |
-| Blueprint edited | Git diff of developer's edits to the YAML | BigQuery `telemetry.blueprint_edited` |
-| Blueprint accepted | Final YAML committed to repo (post-edit) | BigQuery `telemetry.blueprint_accepted` |
-| Code generated | List of generated files + skill versions used | BigQuery `telemetry.code_generated` |
-| CI/CD result | Pass/fail + which stage failed + error details | BigQuery `telemetry.cicd_results` |
+| `recommend_architecture` called | Full YAML + spec hash + MCP request ID | `telemetry.blueprint_generated` |
+| Developer edits YAML | Git diff | `telemetry.blueprint_edited` |
+| `assemble_blueprint` called | Final YAML + validated selections | `telemetry.blueprint_accepted` |
+| `/catalyst.generate` runs | Generated files + skill versions | `telemetry.code_generated` |
+| CI/CD result | Pass/fail + stage + error | `telemetry.cicd_results` |
 
-### Dashboard views
+### Weekly feedback loop
 
-**Blueprint Advisor accuracy dashboard** (Looker):
-- Acceptance rate: % of generated YAMLs accepted without edits
-- Most-edited fields: which YAML fields developers change most often (signals Blueprint Advisor weakness)
-- Pattern selection accuracy: % of cases where generated pattern matches final pattern
-- Tool assignment accuracy: % of tool-to-agent assignments kept unchanged
-
-**Trend dashboard**:
-- Acceptance rate over time (should increase as system prompt improves)
-- Edit heatmap by YAML section (highlights systematic weaknesses)
-- Query-to-result relevance scores over time
-
-### Feedback loop process
-
-1. **Weekly review**: Platform team reviews the 10 lowest-acceptance-rate blueprints
-2. **Root cause**: Classify each as system prompt gap, catalog gap, or tool metadata gap
-3. **Fix**: Update the relevant artifact (prompt, catalog entry, or tool frontmatter)
-4. **Validate**: Add the case to the regression suite as a new golden test
-5. **Deploy**: Push the fix and verify regression suite passes
-
-### Meta-evaluation (quarterly)
-
-Sample 50 AutoSxS decisions from the EvalOps pipeline. Route to 3 human reviewers. Measure agreement between AutoSxS and human judgment. If agreement drops below 85%, recalibrate AutoSxS thresholds.
+1. Review 10 lowest-acceptance-rate blueprints
+2. Root cause: system prompt gap / catalog gap / tool metadata gap
+3. Fix the relevant artifact
+4. Add case to regression suite
+5. Deploy fix to MCP Server, verify regression suite passes
 
 ---
 
 ## 4. Catalog Quality Engineering
 
-The Blueprint Advisor's correctness depends entirely on the quality of the metadata in Vertex AI Search. Search returns noisy results when enrichment is incomplete.
+> **Architecture context:** See Architecture Document, Layer 2 (Vertex AI Search data stores). **Developer Guide context:** Developer Guide, Section 4 (signal words that help the Blueprint Advisor).
 
-### Required metadata per catalog entry
+### Required metadata
 
-**Pattern Catalog entries:**
+**Patterns:** name, description, applicability, composition_rules, tags, archetype, status
 
-| Field | Required? | Example |
-|---|---|---|
-| `name` | Yes | `coordinator-pattern` |
-| `description` | Yes | "Root orchestration pattern for multi-agent systems" |
-| `applicability` | Yes | "Use when the workflow requires multiple specialized agents coordinated by a central agent" |
-| `composition_rules` | Yes | "Can contain: Sequential, Parallel, Loop, HITL. Cannot contain: another Coordinator." |
-| `tags` | Yes | `["multi-agent", "orchestration", "root-pattern"]` |
-| `archetype` | Yes | `agentic` |
-| `status` | Yes | `production` |
+**Skills:** name, use_when, do_not_use_when, required_tools (if applicable), version
 
-**Skill Catalog entries:**
+**Tools:** name, connection_type (mcp_server/a2a_agent_card/function_tool), endpoint (if applicable), capabilities, workload_type
 
-| Field | Required? | Example |
-|---|---|---|
-| `name` | Yes | `adk-agents` |
-| `use_when` | Yes | "Building ADK agent classes with correct imports and constructors" |
-| `do_not_use_when` | Yes | "Building non-agentic applications (microservices, pipelines)" |
-| `required_tools` | If applicable | `["vertex-ai-search", "cloud-run"]` |
-| `version` | Yes | `1.2.0` |
-
-**Tool Registry entries:**
-
-| Field | Required? | Example |
-|---|---|---|
-| `name` | Yes | `claims-database` |
-| `connection_type` | Yes | `mcp_server` or `a2a_agent_card` or `function_tool` |
-| `endpoint` | If MCP/A2A | `https://claims-mcp.internal:8443` |
-| `capabilities` | Yes | "Query active insurance claims by policy number, date range, or claimant" |
-| `workload_type` | Yes | `transactional` |
-| `data_domain` | Yes | `claims` |
-| `sla` | Recommended | `p99 < 500ms` |
-
-### Enrichment validation pipeline
-
-Run nightly against all catalog entries:
+### Validation
 
 ```bash
 python3 scripts/validate_catalog.py \
@@ -262,158 +227,208 @@ python3 scripts/validate_catalog.py \
   --output reports/catalog_health_$(date +%Y%m%d).json
 ```
 
-Alert if any entry is missing required fields. Block ingestion of new entries that fail validation.
+Run nightly. Alert on missing required fields. Block ingestion of invalid entries.
 
 ### Embedding freshness
 
-Vertex AI Search embeddings are generated at ingestion time. If the underlying document changes, re-ingest to update the embedding. Stale embeddings cause semantic drift — the search query matches the old version of the document, not the current one.
+Re-ingest on: document content change (automatic via CI), Vertex AI Search model upgrade (quarterly), or embedding regression detected.
 
-**Re-ingestion triggers:**
-- Document content updated (automatic via CI pipeline)
-- Vertex AI Search model upgrade (manual, scheduled quarterly)
-- Embedding quality regression detected in search quality suite
+---
+
+## 4a. Catalog Backup and Disaster Recovery
+
+> **Architecture context:** The Blueprint Advisor's intelligence depends entirely on three Vertex AI Search data stores. If these are corrupted or deleted, the platform is non-functional. This section covers backup, restore, and failover.
+
+### Source of truth
+
+All catalog content is version-controlled in GitHub:
+
+| Catalog | GitHub repo | Format |
+|---|---|---|
+| Pattern Catalog | `github.com/[company]/agentcatalyst-patterns` | Markdown + YAML frontmatter per pattern |
+| Skill Catalog | `github.com/[company]/agentcatalyst-skills` | SKILL.md files with frontmatter |
+| Tool Registry | `github.com/[company]/agentcatalyst-tools` | YAML manifests per tool |
+
+The GitHub repos are the source of truth. Vertex AI Search data stores are derived indexes — they can always be rebuilt from the repos.
+
+### Backup strategy
+
+| Component | Backup method | Frequency | Retention |
+|---|---|---|---|
+| Catalog source documents | GitHub repo (version-controlled) | Every commit | Indefinite (git history) |
+| Vertex AI Search index metadata | Automated export to GCS bucket | Nightly | 30 days |
+| Blueprint Advisor system prompt | GitHub repo (version-controlled) | Every change | Indefinite |
+| Regression test golden suite | GitHub repo | Every change | Indefinite |
+
+### Restore procedure
+
+**Scenario: Vertex AI Search data store corrupted or deleted**
+
+1. Verify the GitHub source repos are intact (they are the source of truth)
+2. Create new Vertex AI Search data stores with the same schema
+3. Run the ingestion pipeline: `python3 scripts/ingest_catalog.py --source github --target [new-data-store-id]`
+4. Run the enrichment validation pipeline to verify all required metadata fields
+5. Run the search quality regression suite to verify recommendation quality
+6. Update the Blueprint Advisor MCP Server configuration to point to the new data stores
+7. Deploy the updated MCP Server via the standard deployment procedure (Section 9)
+
+**Estimated RTO:** 2–4 hours (ingestion ~1 hour, validation ~30 minutes, regression suite ~30 minutes, deployment ~1 hour)
+
+**Scenario: Blueprint Advisor system prompt corrupted**
+
+1. Roll back to previous version in GitHub
+2. Redeploy the MCP Server with the restored prompt (Section 9 deployment procedure)
+3. Estimated RTO: 30 minutes
+
+### Failover during recovery
+
+While data stores are being rebuilt, the Blueprint Advisor MCP Server can operate in **degraded mode**:
+- `recommend_architecture` returns a cached response for specs matching a known golden test case (hash match)
+- For unknown specs, returns an error with guidance: "Blueprint Advisor temporarily unavailable. You can author the YAML manually using the template in the Developer Guide (Section 5)."
+- `validate_composition` and `assemble_blueprint` continue to work normally (they don't depend on Vertex AI Search)
 
 ---
 
 ## 5. Tool Lifecycle Management
 
-Tools and tasks in the registry are not permanent. APIs change. Servers are decommissioned. Partners sunset endpoints.
+> **Architecture context:** Architecture Document, Layer 2 (Tool Registry). **Developer Guide context:** Developer Guide, Section 11 (reporting missing tools).
 
 ### Tool states
 
-| State | Meaning | Effect on Blueprint Advisor |
-|---|---|---|
-| `active` | Available for use | Included in search results normally |
-| `deprecated` | Still works but being replaced | Included in results with warning; alternative suggested |
-| `retired` | No longer available | Excluded from search results |
-| `maintenance` | Temporarily unavailable | Excluded from results; auto-restored after maintenance window |
+| State | Effect on Blueprint Advisor |
+|---|---|
+| `active` | Included normally |
+| `deprecated` | Included with warning + alternative |
+| `retired` | Excluded |
+| `maintenance` | Excluded; auto-restored |
 
-### Deprecation process
-
-1. Set tool status to `deprecated` with `deprecated_date` and `replacement` fields
-2. Blueprint Advisor includes deprecated tools in results but appends: "⚠️ This tool is deprecated. Use {replacement} instead."
-3. After 90 days, set status to `retired`
-4. Retired tools are excluded from search results but retained in the registry for audit trail
-
-### Partner endpoint changes
-
-When a partner changes their API endpoint:
-1. Update the tool's `endpoint` field in the registry
-2. Update the tool's `capabilities` if the API contract changed
-3. Re-run tool-related regression tests
-4. Notify teams with active blueprints that reference the tool
-
-### Decommissioning checklist
-
-- [ ] Identify all active blueprints referencing the tool
-- [ ] Notify affected teams (30-day notice)
-- [ ] Set status to `deprecated` with replacement recommendation
-- [ ] Update regression suite to use replacement tool
-- [ ] After 90 days, set status to `retired`
-- [ ] Archive tool documentation (do not delete)
+### Deprecation: set `deprecated` → warning for 90 days → set `retired`. Notify affected teams 30 days before retirement.
 
 ---
 
 ## 6. Production Failure Modes
 
-| Failure | Impact | Detection | Resolution |
-|---|---|---|---|
-| Vertex AI Search unavailable | Blueprint Advisor returns errors | Health check on `/search` endpoint (every 60s) | Retry with exponential backoff. If sustained > 5 min, alert platform team. Blueprint Advisor returns cached results for known specs. |
-| Blueprint Advisor OOM | Generation fails for large specs | Cloud Run memory metrics in Dynatrace | Increase Cloud Run memory limit. Review spec size — may need chunking for very large specs. |
-| Stale embeddings | Incorrect pattern/skill/tool recommendations | Search quality regression suite (weekly) | Re-ingest affected documents. Run regression suite to verify. |
-| Skill version mismatch | Generated code uses wrong API patterns | Skill version check in preset.yml | Update skill version in preset. Notify developers to re-install preset. |
-| Tool endpoint down | Generated code references unreachable endpoint | Health check on tool endpoints (every 5 min) | Set tool status to `maintenance`. Blueprint Advisor excludes from results. Restore when endpoint recovers. |
-| System prompt regression | Blueprint Advisor makes poor recommendations | Acceptance telemetry (acceptance rate drop) | Roll back system prompt to previous version. Investigate root cause. Add regression test. |
-| Catalog poisoning | Malicious or incorrect metadata ingested | Ingestion validation pipeline + human review | Remove affected entries. Re-run regression suite. Tighten ingestion validation rules. |
+> **Architecture context:** Architecture Document, Layer 2 (MCP Server). **Developer Guide context:** Developer Guide, Section 14 (Troubleshooting).
 
-### Escalation matrix
-
-| Severity | Response time | Who |
+| Failure | Detection | Resolution |
 |---|---|---|
-| P1 — Blueprint Advisor down | 15 minutes | Platform Engineering on-call |
-| P2 — Degraded results (acceptance rate < 70%) | 4 hours | Platform Engineering |
+| MCP Server unreachable | MCP health check (60s) | Cloud Run health, container status, OAuth token, VPC-SC |
+| Vertex AI Search down | Search endpoint health (60s) | Retry w/ backoff. If > 5 min: alert, serve cached results |
+| Blueprint Advisor OOM | Cloud Run metrics | Increase memory. Review spec size. |
+| Stale embeddings | Regression suite (weekly) | Re-ingest. Run regression. |
+| Skill version mismatch | Skill version check | Update preset.yml. Notify developers (Dev Guide, Section 1). |
+| Tool endpoint down | Health check (5 min) | Set `maintenance`. Exclude from results. |
+| System prompt regression | Telemetry (acceptance rate drop) | Roll back prompt. Add regression test. |
+| Model quota exceeded | Gemini API monitoring | Request quota increase. Implement queuing. |
+
+### Escalation
+
+| Severity | Response | Who |
+|---|---|---|
+| P1 — MCP Server down | 15 min | Platform Engineering on-call |
+| P2 — Degraded results | 4 hours | Platform Engineering |
 | P3 — Single tool/skill issue | 1 business day | Platform Engineering |
-| P4 — Enhancement request | Sprint planning | EA + Platform Engineering |
+| P4 — Enhancement | Sprint planning | EA + Platform Engineering |
 
 ---
 
 ## 7. Pattern Composition Validator
 
-The Blueprint Advisor validates pattern compositions before including them in the YAML. Invalid compositions are caught before the developer sees them.
+> **Architecture context:** `validate_composition` MCP tool (Architecture Document, Layer 2). **Developer Guide context:** Developer Guide, Section 6 (iterating on design).
 
 ### Adjacency matrix
 
-The validator uses a static adjacency matrix defining which patterns can nest inside which:
-
-| Parent Pattern | Allowed Children | Forbidden Children |
+| Parent | Allowed Children | Forbidden |
 |---|---|---|
 | Coordinator | Sequential, Parallel, Loop, HITL, Custom | Another Coordinator |
 | Sequential | Any except Coordinator | — |
-| Parallel | Sequential, Loop, Custom, FunctionTool | LoopAgent (infinite loop risk) |
-| Loop | Sequential, Parallel, Custom, FunctionTool | Another Loop (nested loops) |
-| HITL | FunctionTool, Custom | Parallel (can't parallelize human review) |
+| Parallel | Sequential, Loop, Custom, FunctionTool | LoopAgent |
+| Loop | Sequential, Parallel, Custom, FunctionTool | Another Loop |
+| HITL | FunctionTool, Custom | Parallel |
 
-### Validation rules
-
-```python
-def validate_composition(blueprint_yaml):
-    errors = []
-    for agent in blueprint_yaml['agents']:
-        parent = agent['pattern']
-        for child in agent.get('sub_agents', []):
-            child_pattern = child['pattern']
-            if child_pattern in FORBIDDEN_CHILDREN[parent]:
-                errors.append({
-                    'agent': agent['name'],
-                    'parent_pattern': parent,
-                    'child_pattern': child_pattern,
-                    'reason': f"{child_pattern} cannot nest inside {parent}",
-                    'suggestion': ALTERNATIVES.get((parent, child_pattern), "Restructure the agent hierarchy")
-                })
-    return errors
-```
-
-### What happens when validation fails
-
-1. Blueprint Advisor flags the composition in the YAML with a `⚠️ COMPOSITION WARNING` comment
-2. Suggests an alternative composition
-3. Developer can override the warning (the YAML is human-editable)
-4. If developer keeps the invalid composition, acceptance telemetry captures it for review
+On failure: MCP Server returns `{"valid": false, "errors": [...]}` with reason + suggestion. Developer edits YAML and retries.
 
 ---
 
 ## 8. EvalOps Operations
 
-### Pre-commit hook maintenance
+> **Architecture context:** Architecture Document, Layer 4 (3-layer EvalOps). **Developer Guide context:** Developer Guide, Section 4b (EvalOps workflow) and Section 7 (writing tests).
 
-The pre-commit inner loop evaluator (`tests/eval_inner_loop.py`) runs 5-10 evalsets in under 60 seconds. If it starts taking longer:
-- Check evalset count (may have grown beyond 10)
-- Check Vertex AI Evaluation SDK version (upgrade may improve performance)
-- Check baseline_scores.json (may need recalibration after model upgrade)
+### Pre-commit hook
 
-### Arize Phoenix operations
+Runs 5–10 evalsets in <60s. If slow: check evalset count, SDK version, baseline_scores.json.
 
-Phoenix runs at `localhost:6006` during local development. In deployed environments, traces export to OTel Collector → Dynatrace.
-- **Trace retention**: 30 days in Dynatrace, 7 days in Phoenix local
-- **Storage**: ~50MB per 1000 agent invocations
-- **Cleanup**: automated nightly purge of traces older than retention period
+### Phoenix
 
-### Harness 3-phase pipeline maintenance
+Local: `localhost:6006`, 7-day retention. Deployed: OTel → Dynatrace, 30-day retention.
 
-- **Phase A (Arize quality gates)**: Update thresholds quarterly based on production baseline
-- **Phase B (AutoSxS)**: Refresh golden dataset baseline when golden dataset is updated
-- **Phase C (HITL triage)**: Monitor queue depth — if > 20 items, expand reviewer pool
+### Harness 3-phase maintenance
 
-### Golden dataset lifecycle operations
+Phase A (Arize gates): update thresholds quarterly. Phase B (AutoSxS): refresh baseline on golden dataset update. Phase C (HITL): expand reviewer pool if queue > 20.
 
-| Stage | Frequency | Who | Action |
-|---|---|---|---|
-| Starter dataset generation | Per use case | Automated (from spec acceptance criteria) | Verify generated entries match spec intent |
-| Developer curation | During development | Developer | Add edge cases, correct expected outputs |
-| Production feedback | Weekly (automated) | Arize drift detection | Sample 10 failures, route to annotation queue |
-| Human annotation | Weekly | Domain experts | Label sampled failures, update golden dataset |
-| Meta-evaluation | Quarterly | Platform team | Audit AutoSxS decisions against human judgment (≥85% agreement) |
+### Golden dataset lifecycle
+
+Starts as first-draft entries from acceptance criteria (see Developer Guide, Section 4a). Developer curates (Section 7). Production feedback weekly via Arize drift detection. Meta-evaluation quarterly: 50 AutoSxS samples → 3 reviewers → ≥85% agreement.
 
 ---
 
-*This runbook is maintained by the Platform Engineering team. Last updated: [Date]. Review cadence: Monthly.*
+## 9. Blueprint Advisor MCP Server Operations
+
+> **Architecture context:** Architecture Document, Layer 2 (MCP Server with 3 tools). **Developer Guide context:** Developer Guide, Section 5 (how the YAML is created).
+
+### Health checks
+
+| Check | Method | Frequency |
+|---|---|---|
+| MCP reachable | Protocol handshake | 60s |
+| `recommend_architecture` | Golden FNOL spec | 5 min |
+| `validate_composition` | Known-valid tree | 5 min |
+| `assemble_blueprint` | Known selections | 5 min |
+
+### Versioning
+
+The Blueprint Advisor uses semantic versioning (`major.minor.patch`):
+- **Major:** Breaking change to YAML schema or MCP tool interface
+- **Minor:** System prompt update, new pattern added, catalog change
+- **Patch:** Bug fix, performance improvement
+
+Maintain **2 versions in production** at all times (current + previous) for rollback. Version metadata is embedded in every generated YAML:
+
+```yaml
+# Generated by: blueprint-advisor/v2.3.1
+# System prompt: v1.8 (SHA: abc123)
+```
+
+When a developer reports an issue, the version metadata tells you exactly which prompt, catalog, and code produced the recommendation.
+
+### Deployment
+
+1. Build container with updated LlmAgent / system prompt
+2. Run full regression suite against staging
+3. Deploy with `--no-traffic`
+4. Smoke test: golden FNOL → `recommend_architecture` → verify
+5. Traffic shift: 10% (15 min) → 50% (15 min) → 100%
+6. Monitor telemetry 24 hours — roll back if acceptance drops > 5%
+
+### System prompt updates
+
+1. Draft new prompt
+2. Full regression suite against new prompt
+3. Compare: pattern accuracy, tool accuracy, confidence distribution
+4. Deploy via standard procedure
+5. Monitor telemetry 1 week
+
+### Scaling
+
+| Concern | Cloud Run setting |
+|---|---|
+| Concurrent calls | `--max-instances` (adjust when > 10 simultaneous) |
+| Large specs (OOM) | `--memory` |
+| Slow reasoning | `--cpu` |
+| Cold start avoidance | `--min-instances 1` |
+
+---
+
+*This runbook is maintained by the Platform Engineering team. Review cadence: Monthly.*
+
+*For architectural decisions, see the AgentCatalyst Architecture Document. For developer workflows, see the AgentCatalyst Developer Guide.*
