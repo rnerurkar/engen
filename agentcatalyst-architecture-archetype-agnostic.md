@@ -1,6 +1,9 @@
-# AgentCatalyst — Standardize. Scaffold. Ship.
+# AgentCatalyst — GA Architecture
 
-*A spec-driven development accelerator for enterprise applications on Google Cloud Platform*
+**A spec-driven enterprise application development accelerator on Google Cloud Platform**
+*GA-Only — all services SLA-backed, zero preview dependencies*
+
+> **Note:** This document contains Mermaid.js diagrams in fenced code blocks. To render them as images, use a Mermaid-compatible viewer (VS Code with Mermaid Preview extension, GitHub, or mermaid.live). Standard markdown viewers will display the diagram source code instead.
 
 ---
 
@@ -8,43 +11,23 @@
 
 ### The problem
 
-Enterprise development teams face a recurring pattern across every application type — agents, microservices, data pipelines, APIs. Requirements start as vague conversations. Every team hand-rolls its own infrastructure, CI/CD, and observability. The gap from idea to first committed code takes 4–6 weeks, with most of that time spent on boilerplate, not business logic. Across 50 teams, 50 different approaches, none following a consistent standard.
+Every enterprise team building AI agents (or microservices, or data pipelines) today follows its own approach. Copilot helps write code faster, but it has no knowledge of company patterns, no understanding of compliance standards, and no ability to recommend architectures from organizational catalogs. The result: 50 teams produce 50 different implementations, 82 hours of compliance rework per use case, and 30+ POCs that never reach production.
 
 ### The solution: AgentCatalyst
 
-AgentCatalyst is a **spec-driven development accelerator** that transforms structured business requirements into production-ready, fully generated application code — grounded in company enterprise patterns and best practices.
+AgentCatalyst is a spec-driven development accelerator with three core capabilities:
 
-It works in five phases:
+1. **Blueprint Advisor** — an LlmAgent exposed as an MCP Server that recommends architectures by searching company-curated catalogs via RAG. The developer's coding agent connects via MCP protocol, calls `recommend_architecture(spec, plan)`, and receives a YAML blueprint describing WHAT to build. The developer reviews and edits the YAML — the human is always in control.
 
-```mermaid
-graph LR
-    SPEC["/specify\n\nStructured\nrequirements"]
-    PLAN["/plan\n\nTechnical\ndecisions"]
-    BA["Blueprint\nAdvisor\n\nArchitecture\nrecommendation"]
-    REV["Developer\nReview\n\nEdit YAML\nif needed"]
-    GEN["Coding Agent\n+ Skills\n\nSkill-guided\ncode generation"]
-    CICD["Company CI/CD\n\nNon-Prod →\nPre-Prod → Prod"]
+2. **Preset-based archetype adaptation** — each application type (agentic AI, microservice, data pipeline, API-first) is served by a self-contained preset with archetype-specific templates, catalogs, and skills. All presets share company overlay skills (Terraform, observability, CI/CD, security) maintained once by the platform team. New archetype = new preset. Zero platform changes.
 
-    SPEC --> PLAN --> BA --> REV --> GEN --> CICD
-```
+3. **Skill-constrained code generation** — the coding agent (Copilot, Claude Code, Cursor) is constrained by three layers: the blueprint (WHAT), the archetype skill (HOW), and the overlay skills (MUST). Constitution.md encodes non-negotiable code generation rules. The coding agent generates a first draft of the complete application — including working business logic from structured rules in the spec — for the developer to review and make their own.
 
-### AgentCatalyst at a glance
+AgentCatalyst does NOT deploy agents. It generates code, infrastructure definitions, and CI/CD pipeline files — then commits everything to the developer's GitHub repo. The company's existing Jenkins + Harness pipelines take it to production.
 
 ![AgentCatalyst — How It Works](AgentCatalyst-SLT-Interaction-Diagram.png)
 
-*The diagram above shows the complete flow: a developer captures requirements via a structured template (Phase 1), the Blueprint Advisor recommends an architecture as a YAML file (Phase 2), the coding agent uses installed skills to generate the entire project (Phase 3), the company's existing CI/CD deploys it (Phase 4), and the application runs on GCP with full security and monitoring (Phase 5).*
-
-### Key principles
-
-1. **Spec-driven, not prompt-driven.** Requirements are captured in a structured template — not free-form chat. Every developer produces the same quality of input regardless of experience level.
-2. **AI-advised, human-decided.** The Blueprint Advisor recommends an architecture; the developer reviews and edits the YAML before code generation. The human is always in control.
-3. **Skill-guided code generation.** The coding agent uses installed skills — Markdown instruction documents — that teach it how to write correct code for each technology. The skills ensure consistency with both GCP best practices and company standards across all teams.
-4. **Company-grounded.** Company-authored skills embed company best practices — naming conventions, folder structure, security defaults, observability standards. The 50th application generated looks like the 1st.
-5. **Open tools, no vendor lock-in.** Spec Kit is GitHub open source. ADK is Google open source. The SKILL.md format is an open standard. The YAML is a standard configuration file. No proprietary platform required.
-6. **Archetype-agnostic.** The same pattern — structured spec → AI-advised blueprint → skill-guided generation — works across application types. Agentic AI, microservices, data pipelines, and APIs all follow the same flow with different presets and skills.
-7. **GA-only.** Every GCP component is GA (General Availability) with SLA backing. Zero pre-GA or preview dependencies.
-
-### The ROI
+### AgentCatalyst at a glance
 
 | Activity | Without AgentCatalyst | With AgentCatalyst | Improvement |
 |---|---|---|---|
@@ -52,98 +35,69 @@ graph LR
 | Architecture design | 1–2 weeks (manual research) | 30 minutes (Blueprint Advisor) | 95% faster |
 | Code generation | 1–2 weeks (manual project setup) | 5–10 minutes (skill-guided) | 99% faster |
 | Infrastructure as code | 3–5 days (manual Terraform) | Automatic (from YAML) | 90% faster |
-| CI/CD pipeline config | 1–2 days | Automatic (from YAML) | 95% faster |
-| Consistency across teams | Zero — every team is different | 100% — all apps follow company patterns | Structural |
-| **Total: idea to generated code** | **4–6 weeks** | **< 1 day** | **90%+ faster** |
+
+### Key principles
+
+1. **Spec-driven, not prompt-driven.** Structured 10-section templates with business rules — not free-form chat prompts.
+2. **AI-advised, human-decided.** The Blueprint Advisor recommends; the developer reviews and edits the YAML. The human is always in control.
+3. **Compliant by construction.** Company overlay skills teach the coding agent non-negotiable standards. Compliance is structural, not retrofitted.
+4. **Archetype-agnostic.** Same platform, same flow, same overlay skills — regardless of whether you're building an AI agent, a microservice, a data pipeline, or an API.
+5. **Generates, never deploys.** Code and pipeline definitions committed to GitHub. The company's CI/CD deploys.
+
+**Supported coding agents:** Officially tested: **Copilot, Claude Code, Cursor**. Compatible (community-tested): Gemini CLI, Windsurf. Any Spec Kit-compatible coding agent should work — the preset and skills follow the agentskills.io standard.
+
+### The ROI
+
+| Metric | Value | Derivation |
+|---|---|---|
+| Per use case savings | **$39K (74%)** | $52.8K without → $13.8K with AgentCatalyst |
+| Platform investment (Year 1) | **$51K** | Build $25K (250 hrs × $100) + GCP infra $12K ($1K/mo) + maintenance $14K (35 hrs/quarter) |
+| Break-even | **2nd use case** | 2 × $39K savings = $78K > $51K platform cost |
+| Enterprise investment (7 LOBs) | **$170K** | Platform $51K + LOB onboarding 7 × $17K ($119K) |
+| Enterprise savings (210 use cases) | **$8.19M** | 210 × $39K per use case |
+| Enterprise ROI | **48×** | $8.19M savings / $170K total investment |
+| Each additional LOB | **$17K** to onboard |
+| Time to first agent | **~3.5 weeks** (down from ~7.5 weeks) |
 
 ### Cost to build and operate
 
-| Cost category | One-time investment | Ongoing (per quarter) |
+| Component | One-time build | Recurring |
 |---|---|---|
-| **Pattern catalog** (11 agentic patterns) | Generated by Pattern Factory + EA review (in-place) | ~20 hours (updates for new ADK features) |
-| **Tool registry enrichment** (workload_types, data_domains, use_case_signals, sla, sensitivity per tool/task) | ~260 hours (platform eng) — ~2 hrs per tool × ~130 tools and tasks | ~40 hours (new tool onboarding) |
-| **Domain skills authoring** (4 agentic skills: adk-agents, adk-tools, adk-mcp, model-armor) | ~40 hours (platform eng) | ~10 hours (SDK updates) |
-| **Company overlay skills + EvalOps** (4 shared: Terraform, observability, CI/CD, security — includes 3-phase eval pipeline with Arize + AutoSxS + HITL triage, ADK tracing + Phoenix config, pre-commit inner loop evaluator) | ~85 hours (platform eng) | ~15 hours (template + eval updates) |
-| **Blueprint Advisor** (LlmAgent + system prompt + deployment + golden dataset generation from spec) | ~50 hours (platform eng) | ~5 hours (prompt tuning) |
-| **Search quality regression suite** (30–50 reference specs with golden YAML outputs) | ~80 hours (EA + platform eng) | ~20 hours (suite expansion) |
-| **Acceptance telemetry + meta-evaluation** (capture YAML edits, build dashboards, quarterly metric drift detection for automated eval judges) | ~50 hours (platform eng) | ~10 hours (dashboard + meta-eval) |
-| **Pattern composition validator** (static analyzer for YAML compatibility) | ~40 hours (platform eng) | ~5 hours (rule updates) |
-| **Vertex AI Search + Spec Kit** (2 data stores: skills, tools — pattern store already operational. Spec Kit preset includes golden dataset section, business rules template, transformation rules template, error handling template, acceptance criteria template) | ~45 hours (platform eng + EA) | ~5 hours (catalog + template updates) |
-| **Production feedback pipeline** (failure sampling → human annotation queue → golden dataset update) | ~10 hours (platform eng) | ~5 hours (queue tuning) |
-| **FNOL Pilot** (end-to-end validation including all 3 EvalOps layers) | ~40 hours (pilot team) | — |
-| **Per-LOB onboarding** (LOB-specific patterns, tool enrichment, training, office hours) | ~170 hours per LOB | ~20 hours per LOB per quarter |
-| **Phase 1 total (1st LOB)** | **~870 hours / ~$87K** | **~140 hours/quarter / ~$14K** |
-| **Each additional LOB** | **~170 hours / ~$17K** | **~20 hours/quarter / ~$2K** |
-| | | |
-| **GCP infrastructure** (Blueprint Advisor on Agent Runtime, Vertex AI Search, Arize Phoenix) | — | ~$500–1,500/month |
-| **Break-even (1st LOB)** | Platform cost recovered after 3rd use case ($87K ÷ $39K savings per use case = 2.2). Each additional LOB pays back its onboarding cost in the 1st use case. | |
+| Pattern Knowledge Base (11 agentic patterns + Vertex AI Search) | ~120 hours (platform eng) | ~10 hours/quarter (catalog maintenance) |
+| Blueprint Advisor MCP Server (LlmAgent + system prompt + RAG + golden dataset) | ~50 hours (platform eng) | ~5 hours/quarter (prompt tuning) |
+| Company overlay skills (Terraform, observability, CI/CD, security, EvalOps) | ~80 hours (platform eng) | ~10 hours/quarter (version updates) |
+| Each additional archetype preset | ~40 hours | ~5 hours/quarter |
+| GCP infrastructure (Blueprint Advisor on Cloud Run, Vertex AI Search, Arize Phoenix) | — | ~$500–1,500/month |
 
-**Per use case cost comparison (both sides use Copilot):**
+### Per use case cost comparison (both sides use Copilot)
 
 | | Without AgentCatalyst (Copilot + published standards) | With AgentCatalyst (Copilot + skills + Blueprint Advisor) |
 |---|---|---|
-| **Build phase** | 446 hrs (requirements 60 + standards learning 24 + architecture 60 + code 100 + prompts 35 + infra/CI/CD/obs/security 82 + testing 60 + deploy 25) | 138 hrs (requirements 60 + spec/plan/biz rules 8 + Blueprint Advisor 1 + generate 0.5 + complex domain logic 20 + prompts 25 + testing 15 + PR 8) |
-| **Compliance remediation** | 82 hrs (EA review 16 + security review 16 + rework 50) | 0 hrs (compliant by construction) |
+| **Build phase** | 446 hrs (requirements 60 + standards learning 24 + architecture 60 + code 100 + prompts 35 + infra/CI/CD/obs/security 82 + testing 60 + deploy 25) | 138 hrs (requirements 60 + spec/plan/biz rules 8 + Blueprint Advisor 1 + generate 1 + complex domain logic 20 + prompts 25 + testing 15 + PR 8) |
+| **Compliance remediation** | 82 hrs (EA review 16 + security review 16 + rework 50) | 0 hrs (compliant by construction — overlay skills enforce company standards; constitution.md constrains code generation) |
 | **Total** | **528 hrs / $52.8K / ~7.5 weeks** | **138 hrs / $13.8K / ~3.5 weeks** |
 | **Savings** | | **$39K per use case (74%)** |
 
 † If business rules are NOT captured in the spec, add $5.5K per use case (55 hrs) for manual business logic implementation → $19.3K / 193 hrs per use case. Enterprise savings drop from $8.0M to $6.85M but ROI remains 36×.
 
+Note: Requirements gathering (60 hrs) is identical on both sides. AgentCatalyst does not reduce the time to gather requirements — it reduces the time to go from requirements to production-ready code.
+
 ### Application archetypes — one platform, many application types
 
-AgentCatalyst uses **presets** to adapt the same five-phase flow to different application types. Each preset provides a domain-specific spec template, a domain-specific Blueprint Advisor catalog, and domain-specific skills. Company overlay skills (Terraform, observability, CI/CD, security) are shared across all presets.
+AgentCatalyst achieves archetype-agnosticism through preset-swapping, not meta-skills or signed contracts:
 
-| Archetype | Preset | Spec template sections | Blueprint catalog | Domain skills | Status |
+| Archetype | Preset Name | Spec Template | Catalog | Domain Skill | Status |
 |---|---|---|---|---|---|
-| **Agentic AI** | `agentcatalyst-agentic` | Business Problem, Workflow, Data Sources, External Partners, Internal Capabilities, Infrastructure | 11 agentic patterns (Sequential, Parallel, Loop, HITL, Coordinator, RAG, etc.) | ADK agents, MCP connections, A2A clients, Model Armor | **Phase 1 — now** |
-| **Microservice** | `agentcatalyst-microservice` | Service Purpose, API Contracts, Dependencies, Data Model, Event Model, Infrastructure | Microservice patterns (API Gateway, CQRS, Event Sourcing, Saga, Strangler Fig) | Spring Boot, FastAPI, Node.js Express, Cloud Run, Pub/Sub | **Phase 2 — future** |
-| **Data Pipeline** | `agentcatalyst-pipeline` | Pipeline Purpose, Sources, Transformations, Quality Rules, Sinks, Schedule | Pipeline patterns (Batch ETL, Streaming, Lambda, CDC, Medallion) | Dataflow, Apache Beam, BigQuery, Cloud Storage, Pub/Sub | **Phase 3 — future** |
-| **API** | `agentcatalyst-api` | API Purpose, Endpoints, Schemas, Auth Model, Rate Limits, Versioning | API patterns (REST, GraphQL, gRPC, Event-Driven, BFF) | OpenAPI, gRPC, Apigee proxy, Cloud Endpoints | **Phase 4 — future** |
+| **Agentic AI** | `agentcatalyst` | agent-spec-template.md | 11 ADK patterns | `adk-agents` | **Phase 1 — active** |
+| **Microservice** | `agentcatalyst-microservice` | service-spec-template.md | Microservice patterns | `springboot-service` / `fastapi` | **Phase 2 — planned** |
+| **Data Pipeline** | `agentcatalyst-pipeline` | pipeline-spec-template.md | ETL/ELT patterns | `beam` / `dataflow` | **Phase 3 — planned** |
+| **API-First** | `agentcatalyst-api` | api-spec-template.md | API patterns | `openapi` / `graphql` | **Phase 4 — planned** |
 
-**What's shared across ALL archetypes:**
-
-```
-Company overlay skills (reusable):
-├── company-terraform-patterns   ← Same TF modules for any app type
-├── company-observability        ← Same Dynatrace + Splunk + OTel for any app type
-├── company-cicd                 ← Same Jenkins + Harness for any app type
-└── company-security             ← Same VPC-SC + CMEK + Secret Manager for any app type
-```
-
-One investment in overlay skills, reusable across every application type the company builds. A microservice gets the same Terraform modules, the same Dynatrace config, the same Jenkins/Harness pipelines, and the same security standards as an agent.
-
-### Why now
-
-Google Cloud Next '26 (April 2026) shipped the managed primitives AgentCatalyst depends on — all GA: Agent Runtime (Agent Engine), Model Armor, ADK with production-ready agent classes, and Vertex AI Search with hybrid retrieval. GitHub shipped Spec Kit (open source, 30+ coding agent integrations) and the SKILL.md open standard for portable coding agent skills. The primitives exist. AgentCatalyst is the opinionated company layer that makes them work together as a paved road.
+All presets share the same company overlay skills: Terraform, Dynatrace, Jenkins/Harness, security, EvalOps. New archetype = new preset + new catalog + new domain skill. Zero overlay changes. Zero platform changes.
 
 ### GA-only commitment
 
-Every GCP component in AgentCatalyst is GA with SLA backing:
-
-| Component | GA Status | What it provides |
-|---|---|---|
-| Agent Runtime (Agent Engine) | ✅ GA | Managed runtime for ADK agents |
-| ADK Python SDK | ✅ GA | Agent framework (SequentialAgent, ParallelAgent, LoopAgent, LlmAgent, tools) |
-| Vertex AI Search | ✅ GA | Semantic search for pattern, skill, and tool discovery |
-| Model Armor | ✅ GA | Prompt and response content screening |
-| Cloud SQL / BigQuery / GCS | ✅ GA | Data services |
-| Apigee | ✅ GA | API gateway |
-| Cloud Trace + Cloud Logging | ✅ GA | Native observability |
-| Secret Manager + Cloud KMS | ✅ GA | Secrets and encryption |
-| VPC Service Controls | ✅ GA | Network perimeter security |
-
-**Not used (pre-GA):** `agents-cli` (pre-GA), `agents-cli` bundled skills (pre-GA), Agent Simulation (pre-GA), Agent Evaluation (pre-GA), Agent Optimizer (pre-GA). The architecture achieves the same outcomes using GA alternatives and company-authored skills.
-
----
-
-## Document scope and audience
-
-This document describes the end-to-end architecture of AgentCatalyst — from structured requirements capture through fully generated application code ready for company CI/CD. It is written for two audiences:
-
-- **Enterprise Architecture / SLT** — Sections "Executive Summary" through "End-to-end thread" provide the strategic view: what AgentCatalyst is, why it matters, how it extends to multiple application types, and what GCP services it uses. Start here.
-- **Engineering teams** — Sections "Layer deep-dives" through "Worked Example" provide the technical detail: how each layer works, how skills guide code generation, and how to build an agent step by step with the FNOL example. Start at "End-to-end thread" then jump to the layer you're working on.
-
-> **Companion document:** For hands-on developer instructions — prerequisites, installation, step-by-step greenfield and brownfield walkthroughs, test writing guidance, troubleshooting, and FAQ — see the *AgentCatalyst Developer Guide* (`agentcatalyst-ga-developer-guide.md`).
+Every GCP service used by AgentCatalyst is Generally Available with SLA backing. No preview APIs. No preview services. Deployable in any GCP project, including locked-down enterprise environments.
 
 ---
 
@@ -151,33 +105,39 @@ This document describes the end-to-end architecture of AgentCatalyst — from st
 
 Before diving into the five layers, here is the complete flow as a narrative. No jargon, no architecture diagrams — just what happens step by step from the developer's perspective.
 
-A developer is asked to build an AI agent that processes auto insurance claims (FNOL). She opens VSCode with GitHub Copilot and types `/specify`. The AgentCatalyst preset (the `agentcatalyst-agentic` variant) presents a structured template with six sections — Business Problem, Workflow, Data Sources, External Integrations, Internal Capabilities, and Infrastructure Requirements. She fills it in using plain English, describing the step-by-step workflow, the data systems involved, the external partner APIs, and her proprietary models. This takes about 15 minutes. The result is `spec.md` — a structured requirements document saved in her workspace.
+A developer is asked to build an AI agent that processes auto insurance claims (FNOL). She opens VSCode with her preferred coding agent — Claude Code, in her case — and installs the AgentCatalyst preset: `specify preset add agentcatalyst-enterprise`. This installs a structured spec template, a plan template, custom commands (`/catalyst.blueprint`, `/catalyst.generate`), memory files with company reference material, company overlay skills, and an `adk-agents` domain skill.
+
+She types `/specify`. The preset presents a structured template with ten sections — Business Context, Workflow Step by Step, Regulatory Requirements, Data Systems, External Partners, What We Own, Business Rules, Transformation Rules, Error Handling, and Acceptance Criteria. She fills it in using plain English, describing the step-by-step workflow ("first the customer calls, then the system classifies severity, then in parallel it enriches from three sources..."), the data systems involved, the external partner APIs, and her proprietary business logic as structured IF/THEN conditions. This takes about 20 minutes. The result is `spec.md` — a structured requirements document saved in her workspace.
 
 She types `/plan` and answers a handful of technical questions — GCP region, LLM model, CI/CD tools, Terraform module source. This takes 5 minutes. The result is `plan.md`.
 
-She types `/catalyst.blueprint`. This custom command packages her `spec.md` and `plan.md` and sends them to the Blueprint Advisor — an AI advisor running on GCP that has access to the company's catalog of 11 agent patterns, reusable skills, and approved tools. The Blueprint Advisor reads her spec, searches the catalogs, and recommends an architecture: a Coordinator root agent with four sub-agents (Sequential intake, Parallel enrichment, Loop summary, HITL adjuster review), connected to BigQuery, Cloud SQL, and Vertex AI Search via MCP servers, with three external A2A agents for body shop, rental car, and police report services. It returns `agent-blueprint.yaml` — a YAML file describing WHAT to build. Not code — just a specification.
+She types `/catalyst.blueprint`. This custom command connects to the **Blueprint Advisor MCP Server** — an LlmAgent running on Cloud Run, exposed as an MCP Server. Her coding agent calls the `recommend_architecture` tool via MCP protocol with her `spec.md` and `plan.md` as input. She doesn't need to know what happens inside the server — but here's what does:
 
-She reviews the YAML in her editor. It's a readable file — agent names, types, tool endpoints, infrastructure settings. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the YAML directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves.
+The Blueprint Advisor reads her spec's natural language signals. "First the customer calls, then the system classifies severity" tells it Sequential. "In parallel it enriches from three sources" tells it Parallel. "Loop until quality score exceeds 0.85" tells it Loop. "Route high-severity to a human adjuster" tells it HITL. It searches the company's pattern catalog, skill catalog, and tool registry via Vertex AI Search (single-pass semantic retrieval), applies LLM reasoning guided by a company-curated system prompt, and assembles a recommendation.
 
-She types `/catalyst.generate`. Now the coding agent (Copilot, in her case) reads the YAML and starts generating the actual code. But it doesn't guess how to write the code — it has **skills** installed that teach it the right way:
+The MCP tool returns recommendations with confidence scores. Her coding agent saves them as `app-blueprint.yaml` — a human-readable YAML file describing WHAT to build. Not code — just a specification: 5 agents (Coordinator + Sequential + Parallel + Loop + HITL), 3 MCP servers (BigQuery, Cloud SQL, Vertex AI Search), 3 A2A agents (body shop, rental car, police report), 3 FunctionTool implementations (severity classifier, coverage calculator, notification sender — with her IF/THEN business rules included), infrastructure settings, EvalOps configuration, and a golden dataset derived from her acceptance criteria. Each recommendation is tagged with a confidence level (high/medium/low).
 
-- **`adk-agents` skill** teaches it how to write correct ADK Python code — the right import paths, the right class constructors, the right way to wire tools to agents. Think of it as a "how to write ADK code" instruction manual that the coding agent reads before writing anything. This skill was authored by the company's platform engineering team based on the GA ADK SDK documentation.
-- **`company-terraform-patterns` skill** teaches it which Terraform modules to use and how to pin versions — so the generated Terraform references `github.com/company/tf-modules//agent-runtime@v3.1.0`, not some generic Terraform.
-- **`company-cicd` skill** teaches it to generate a Jenkinsfile and a Harness pipeline definition — NOT to deploy directly from her laptop. This is important: some coding agents have CLI tools that push code straight to GCP, but the company doesn't allow that. The `company-cicd` skill explicitly tells the coding agent: "Generate pipeline files. Do not deploy directly." The coding agent obeys.
-- **`company-observability` skill** teaches it to generate Dynatrace and Splunk configuration, not just the default Cloud Trace.
-- **`company-security` skill** teaches it to generate Model Armor callbacks, VPC-SC references, and CMEK configuration.
+She reviews the YAML in her editor. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the YAML directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the YAML.
 
-The result: a complete project in her workspace — 6 agent class files, 3 MCP connections, 3 A2A clients, 3 FunctionTool files with first-draft business logic (generated from business rules authored in the spec, ready for developer review), Model Armor callbacks, complete Terraform, Dynatrace observability config, and Jenkins + Harness pipeline definitions. Every file follows company coding standards because the company skills taught the coding agent those standards.
+She types `/catalyst.generate`. The coding agent reads the YAML and generates all the code — but it doesn't guess HOW to write the code. It has **skills** installed that teach it the right way:
 
-She opens `app/tools/severity_classifier.py` and reviews the first draft of generated business logic — the IF/THEN conditions she authored in the spec are already implemented as working Python code. This is her starting point, not a black box. She refines the logic, adds edge cases, and writes system prompts for each agent — the "personality" and instructions that make each agent behave correctly for insurance claims. The 80-95% was handled by the coding agent guided by skills. When business rules are authored in the spec, even FunctionTool bodies are generated as a first draft — the developer reviews and makes the code their own.
+- **`adk-agents` skill** teaches it how to write correct ADK Python code — the right import paths, the right class constructors, the right way to wire tools to agents.
+- **Company overlay skills** teach it which Terraform modules to use (with pinned versions), how to configure Dynatrace observability, how to generate Jenkins + Harness pipeline definitions (NOT deploy directly), and how to generate Model Armor callbacks.
+- **`constitution.md`** encodes non-negotiable rules: never deploy directly, always use company Terraform modules, always generate pre-commit evaluation hooks. These are coding agent constraints, not meta-skills or decision frameworks.
 
-She commits and opens a PR. Her team reviews it — the generated code looks familiar because every AgentCatalyst project follows the same company patterns. After the PR is merged, Jenkins automatically runs Terraform to provision the infrastructure (Agent Runtime, Cloud SQL, Model Armor, VPC-SC). Then Harness automatically deploys the agent through Non-Prod (testing), Pre-Prod (canary at 10% traffic), and Production (progressive rollout). If anything breaks, Harness rolls back automatically.
+The result: a complete project in her workspace — 6 agent class files, 3 MCP connections, 3 A2A clients, 3 FunctionTool files with first-draft business logic (the IF/THEN conditions from her spec are already implemented as working Python code), Model Armor callbacks, complete Terraform, Dynatrace config, Jenkins + Harness pipeline definitions, a pre-commit evaluation hook, Phoenix tracing config, a golden dataset derived from her acceptance criteria, and a 3-phase Harness evaluation pipeline. Every file follows company standards because the company overlay skills taught the coding agent those standards.
 
-She never deployed from her laptop. She never provisioned a GCP resource manually. She never wrote a Dockerfile. All of that was either generated by the coding agent (Terraform, pipeline definitions) or handled by the company's CI/CD after she committed.
+She opens `app/tools/severity_classifier.py` and reviews the first draft of generated business logic — the IF/THEN conditions she authored in the spec are already implemented as working Python code. This is her starting point, not a black box. She refines the logic, adds one edge case the spec didn't cover, and writes system prompts for each agent. Because she captured business rules in the spec, the manual work is only ~5–10% — primarily system prompts, eval dataset curation, and truly proprietary algorithms not expressible as structured IF/THEN rules.
+
+She commits. The pre-commit hook runs — 5 evaluation sets execute in under 60 seconds via the Vertex AI Evaluation SDK. All metrics pass. She pushes and opens a PR. Her team reviews it — the generated code looks familiar because every AgentCatalyst project follows the same company patterns.
+
+After the PR is merged, Jenkins runs Terraform to provision the infrastructure. Then Harness deploys the agent through the 3-phase evaluation pipeline: Phase A (Arize quality gates), Phase B (AutoSxS baseline comparison against the golden dataset), Phase C (2 edge cases routed to HITL triage where a reviewer approves them). After evaluation passes, Harness promotes through Non-Prod → Pre-Prod (canary at 10%) → Production (progressive rollout). If anything breaks, Harness rolls back automatically.
+
+She never deployed from her laptop. She never provisioned a GCP resource manually. She never wrote a Dockerfile. All of that was either generated by the coding agent (Terraform, pipeline definitions, evaluation infrastructure) or handled by the company's CI/CD. The 80-95% was handled by the coding agent guided by skills. When business rules are authored in the spec, even FunctionTool bodies are generated as a first draft — the developer reviews and makes the code their own.
+
+**Total time from "I need an FNOL agent" to generated code committed to GitHub: under 2 hours.** The remaining 2–4 hours are spent reviewing generated business logic, writing system prompts, curating eval datasets, and adding edge cases. Without AgentCatalyst, this entire process takes 7–8 weeks.
 
 **Now imagine** a different developer on another team who needs to build a FastAPI microservice for order management. He installs the `agentcatalyst-microservice` preset instead. His `/specify` template has different sections — Service Purpose, API Contracts, Dependencies, Data Model. His Blueprint Advisor searches a different pattern catalog — microservice patterns instead of agent patterns. His coding agent loads a `fastapi` skill instead of an `adk-agents` skill. But the **company overlay skills are the same** — same Terraform modules, same Dynatrace config, same Jenkins/Harness pipelines, same security standards. The microservice follows the same company patterns as the agent. The platform team maintains one set of overlay skills, and every application type benefits.
-
-**Total time from "I need an FNOL agent" to generated code committed to GitHub: under 1 hour.** The remaining 2–4 hours are spent writing the 20% — system prompts, FunctionTool business logic, and test data. Without AgentCatalyst, this entire process takes 4–6 weeks.
 
 ### Brownfield: Adding an agent to an existing system
 
@@ -185,1073 +145,291 @@ Not every agent starts from scratch. When adding an AI agent to an existing syst
 
 The Blueprint Advisor reads phrases like "EXISTING REST API" and "MUST use these existing endpoints" and recommends FunctionTool wrappers around the existing REST endpoints — not new MCP connections or new services. The generated code wraps the existing API with thin Python functions. **The agent adapts to the existing system — never the other way around.** No existing database schemas, API contracts, or source code are modified.
 
----
-
-## Technology Stack — Layered Component Reference
-
-AgentCatalyst uses a five-layer architecture. Each layer has a clear responsibility and a defined handoff to the next.
-
-```mermaid
-graph TB
-    subgraph L1["LAYER 1 — SPEC CAPTURE"]
-        SK["Spec Kit + Archetype Preset"]
-        CA["Coding Agent (Copilot/Claude/Cursor)"]
-    end
-    subgraph L2["LAYER 2 — ARCHITECTURE ADVISORY"]
-        BA2["Blueprint Advisor (LlmAgent)"]
-        VAS["Vertex AI Search (Patterns + Skills + Tools)"]
-    end
-    subgraph L3["LAYER 3 — SKILL-GUIDED GENERATION"]
-        SKILLS["Domain Skills + Company Overlay Skills"]
-        CODEGEN["Coding Agent generates code"]
-    end
-    subgraph L4["LAYER 4 — COMPANY CI/CD"]
-        JEN["Jenkins (infra)"]
-        HAR["Harness (deployment)"]
-    end
-    subgraph L5["LAYER 5 — RUNTIME & OPERATE"]
-        AR["Application Runtime"]
-        MA["Security + Observability"]
-    end
-
-    L1 -->|"spec.md + plan.md"| L2
-    L2 -->|"app-blueprint.yaml"| L3
-    L3 -->|"generated code + Terraform + CI/CD"| L4
-    L4 -->|"deployed application"| L5
-```
-
-### Component architecture — detailed view
+**Architecture infographic:**
 
 ![AgentCatalyst Component Architecture](AgentCatalyst-Component-Architecture.png)
 
-The diagram above shows every component in AgentCatalyst organized by layer. Here is what each component does and how they interact:
-
-**Layer 1 — Spec Capture (blue):**
-The developer works in VSCode with their preferred coding agent (Copilot, Claude Code, or Cursor). The coding agent loads the AgentCatalyst preset from the `.specify/` folder — the preset is archetype-specific (agentic, microservice, pipeline, or API) and contains a domain-specific spec template, plan template, custom commands (`/catalyst.blueprint`, `/catalyst.generate`), and memory files with company reference material and coding standards. The developer runs `/specify` to fill in the structured template and `/plan` to answer technical questions. The outputs — `spec.md` and `plan.md` — flow to Layer 2.
-
-**Layer 2 — Architecture Advisory (amber):**
-The Blueprint Advisor is an LlmAgent running on GCP Agent Runtime. It receives `spec.md` + `plan.md` and uses RAG tools to query Vertex AI Search. The search catalogs are archetype-specific: 11 agentic patterns for the agentic preset, microservice patterns for the microservice preset, pipeline patterns for the pipeline preset. The Blueprint Advisor performs single-pass semantic search, uses its LLM reasoning (guided by a company-curated system prompt) to select patterns, skills, and tools, and assembles `app-blueprint.yaml` — a deployment specification describing WHAT to build. The developer reviews and edits the YAML before proceeding.
-
-**Layer 3 — Skill-Guided Generation (green):**
-The coding agent reads `app-blueprint.yaml` and generates the complete project guided by installed skills. Skills are Markdown documents (SKILL.md format — an open standard) that teach the coding agent how to write correct code for each technology. Domain skills are archetype-specific (ADK for agents, FastAPI for microservices, Beam for pipelines). Company overlay skills are shared across all archetypes (Terraform, Dynatrace, CI/CD, security). The coding agent activates the relevant skills based on the task, reads the instructions, and generates code that follows both technology best practices and company standards. No proprietary CLI tool is required — skills work with any coding agent that supports the SKILL.md format.
-
-**Layer 4 — Company CI/CD (gray):**
-Outside AgentCatalyst's scope. The company's existing Jenkins and Harness pipelines take the generated code through the standard promotion process: PR review → Non-Prod (build, test, eval) → Pre-Prod (canary deploy, SLO checks) → Production (progressive rollout, monitoring). AgentCatalyst generated the pipeline definitions; the company's CI/CD executes them. Code is NEVER deployed directly from the developer's machine.
-
-**Layer 5 — Runtime & Operate (purple):**
-The deployed application runs on GCP infrastructure. For agents: Agent Runtime (Agent Engine) with Model Armor screening. For microservices: Cloud Run or GKE. For pipelines: Dataflow or Cloud Composer. All application types share: Apigee Runtime Gateway for API management, Dynatrace for APM, OpenTelemetry Collector for trace forwarding, Cloud Logging for structured logs, Splunk for SIEM, VPC-SC for network perimeter, CMEK for encryption at rest.
-
-**Cross-cutting concerns (right panel):**
-Six services span all layers and all archetypes: Agent Identity / Workload Identity (per-workload IAM), VPC-SC Perimeter (production + pre-prod), CMEK Encryption (all data at rest via Cloud KMS), Secret Manager (zero hardcoded credentials), Cloud Audit Logs (forwarded to Splunk), and IAM Governance (least privilege, quarterly review).
-
-### Layer 1 — SPEC CAPTURE
-
-| Component | Owner | Description |
-|---|---|---|
-| GitHub Spec Kit *(open source)* | GitHub | Structured specification workflow. Developer runs `/specify` and `/plan` in their coding agent. Templates guide the developer to describe their use case in a consistent format. |
-| Archetype Preset | Company | Company-built preset for Spec Kit — archetype-specific. Each preset contains the domain-specific spec template, plan template, custom commands, and memory files. Installed via `specify preset add agentcatalyst-{archetype}`. |
-| Coding Agent | Developer's choice | Any Spec Kit-compatible coding agent — GitHub Copilot, Claude Code, Gemini CLI, Cursor, Windsurf, etc. |
-
-**Layer 1 delivers:** `spec.md` + `plan.md`
-
-### Layer 2 — ARCHITECTURE ADVISORY
-
-| Component | Owner | Description |
-|---|---|---|
-| Blueprint Advisor | Company | LlmAgent on Agent Runtime (GCP Agent Engine). Reads spec + plan, queries archetype-specific pattern/skill/tool catalogs via Vertex AI Search (single-pass semantic retrieval), generates `app-blueprint.yaml`. Uses system prompt with company best practices + RAG. |
-| Pattern Catalog | Company | Archetype-specific patterns documented as architectural knowledge artifacts, ingested into Vertex AI Search. 11 agentic patterns for Phase 1. Microservice, pipeline, and API patterns for future phases. |
-| Skill Catalog | Company | Reusable skills with metadata, ingested into Vertex AI Search. Blueprint Advisor searches by capability match. |
-| Tool Registry | Company/GCP | MCP servers, A2A agents, and APIs registered in Apigee API Hub. |
-| Vertex AI Search *(GA)* | GCP | Semantic search engine for pattern, skill, and tool discovery. Single-pass hybrid search. |
-
-**Layer 2 delivers:** `app-blueprint.yaml`
-
-### Layer 3 — SKILL-GUIDED GENERATION
-
-| Component | Owner | Description |
-|---|---|---|
-| Domain Skills | Company | Company-authored skills (SKILL.md format) that teach the coding agent how to write correct code for the archetype. Agentic: `adk-agents`, `adk-tools`, `model-armor`. Microservice: `fastapi`, `spring-boot`. Pipeline: `dataflow`, `beam`. |
-| Company Overlay Skills | Company | 4 company-authored skills shared across ALL archetypes: `company-terraform-patterns`, `company-observability` (Dynatrace + Splunk), `company-cicd` (Jenkins + Harness), `company-security` (VPC-SC + CMEK + Secret Manager). |
-| `adk create` *(GA)* | GCP | ADK CLI project creation command — part of the GA ADK package (`pip install google-adk`). Creates bare project structures from Garden templates. This is distinct from the pre-GA `agents-cli scaffold create` which bundles additional skills and deployment features. `adk create` provides the project skeleton only; skills handle the rest. |
-| `gh skill install` *(GA)* | GitHub CLI | Installs agent skills at pinned versions with provenance verification. |
-| Coding Agent | Developer's choice | Any coding agent that supports the SKILL.md open standard. Reads skills from `.agents/skills/` directory. |
-
-**Layer 3 delivers:** Complete generated codebase — application code + infrastructure + observability + CI/CD pipelines
-
-### Layer 4 — COMPANY CI/CD (outside AgentCatalyst scope)
-
-| Component | Owner | Description |
-|---|---|---|
-| Jenkins | Company | Infrastructure pipeline — Terraform plan/apply with OPA policy checks. |
-| Harness | Company | Deployment pipeline — canary deployment, progressive rollout, rollback. |
-| GitHub | Company | Source control — PR review, branch protection, merge policies. |
-
-**Layer 4 delivers:** Deployed application in Non-Prod → Pre-Prod → Prod
-
-### Layer 5 — RUNTIME & OPERATE
-
-| Component | Owner | Description |
-|---|---|---|
-| Agent Runtime (Agent Engine) *(GA)* | GCP | For agentic archetype: managed runtime for ADK agents — scaling, sessions, memory, artifacts. |
-| Cloud Run *(GA)* | GCP | For microservice and API archetypes: serverless container runtime. |
-| Dataflow *(GA)* | GCP | For pipeline archetype: managed Apache Beam runner. |
-| Apigee Runtime Gateway *(GA)* | GCP | API gateway for all archetypes — OAuth2, rate limiting, request/response logging. |
-| Model Armor *(GA)* | GCP | For agentic archetype: prompt and response screening. |
-| Dynatrace | Third-party | APM — OneAgent auto-instrumentation, custom metrics, dashboards. All archetypes. |
-| OpenTelemetry Collector | Open source | Trace and metric collection, forwarding to Dynatrace + Cloud Trace + Cloud Logging. All archetypes. |
-| Splunk | Third-party | SIEM — security event aggregation, threat detection, audit log correlation. All archetypes. |
-| Cloud Trace + Cloud Logging *(GA)* | GCP | Native GCP observability. All archetypes. |
-
-### Cross-cutting concerns
-
-| Concern | Service | How it applies |
-|---|---|---|
-| **Identity** | Workload Identity + IAM | Per-workload least-privilege service accounts. For agents: Agent Identity (SPIFFE) for A2A auth. |
-| **Encryption at rest** | CMEK (Cloud KMS) | All data stores use Customer-Managed Encryption Keys. All archetypes. |
-| **Network perimeter** | VPC-SC | Production and pre-prod enclosed in VPC-SC perimeter. All archetypes. |
-| **Secret management** | Secret Manager | Zero hardcoded credentials in any generated code. All archetypes. |
-| **Audit logging** | Cloud Audit Logs | All admin activity and data access logged. Forwarded to Splunk. All archetypes. |
-
 ---
 
-## Layer 1 — SPEC CAPTURE (deep dive)
+## Technology Stack
 
-### The AgentCatalyst preset — archetype-specific
-
-When a developer installs an archetype preset (e.g., `specify preset add agentcatalyst-agentic`), the following files are added to their project:
-
-```
-.specify/
-├── preset.yml                          ← Preset manifest
-├── templates/
-│   ├── spec-template.md                ← Archetype-specific requirements template
-│   ├── plan-template.md                ← Technical decisions template
-│   ├── tasks-template.md              ← Task breakdown template
-│   └── gemini-md-template.md          ← Project instruction file for coding agent
-├── commands/
-│   ├── catalyst.blueprint.md           ← Sends spec+plan to Blueprint Advisor
-│   └── catalyst.generate.md            ← Instructs coding agent to generate code using skills
-└── memory/
-    ├── adk-reference.md                ← Domain reference (varies by archetype)
-    ├── company-patterns.md             ← Company coding standards
-    ├── approved-tools.md               ← Approved MCP servers, APIs, A2A agents
-    └── infra-standards.md              ← Terraform module registry and pinning rules
-```
-
-The `memory/` folder provides reference material that the coding agent loads during `/specify` and `/plan` to coach the developer. These are reference documents — the same information a developer would find in the company wiki.
-
-### Spec templates by archetype
-
-| Archetype | Sections | What each section elicits |
-|---|---|---|
-| **Agentic** | Business Problem, Workflow, Data Sources, External Partners, Internal Capabilities, Infrastructure | Workflow ordering → agent topology. Data sources → tool selection. Partners → A2A connections. |
-| **Microservice** | Service Purpose, API Contracts, Dependencies, Data Model, Event Model, Infrastructure | API contracts → endpoint generation. Events → Pub/Sub config. Data model → schema + migrations. |
-| **Data Pipeline** | Pipeline Purpose, Sources, Transformations, Quality Rules, Sinks, Schedule | Sources + sinks → I/O connectors. Transformations → pipeline stages. Schedule → Cloud Scheduler config. |
-| **API** | API Purpose, Endpoints, Request/Response Schemas, Auth Model, Rate Limits, Versioning | Endpoints → route generation. Schemas → validation. Auth → Apigee policy config. |
-
-### Layer 1 sequence diagram
-
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant CA as Coding Agent<br/>(Copilot/Claude/Cursor)
-    participant Preset as .specify/ preset files
-
-    Dev->>CA: /specify
-    CA->>Preset: load spec-template.md<br/>+ memory files
-    CA-->>Dev: present archetype-specific<br/>template with coaching prompts
-    Dev->>CA: fills in all sections
-    CA->>CA: save as spec.md
-
-    Dev->>CA: /plan
-    CA->>Preset: load plan-template.md<br/>+ memory/infra-standards.md
-    CA-->>Dev: present technical questions
-    Dev->>CA: answers (region, model, CI/CD, etc.)
-    CA->>CA: save as plan.md
-
-    Note over Dev,CA: spec.md + plan.md ready<br/>for Blueprint Advisor
-```
-
----
-
-## Layer 2 — ARCHITECTURE ADVISORY (deep dive)
-
-### Blueprint Advisor — how it works
-
-The Blueprint Advisor is an LlmAgent deployed on Agent Runtime (GCP Agent Engine). It receives `spec.md` + `plan.md` as input and produces `app-blueprint.yaml` as output.
-
-#### System prompt structure
-
-The Blueprint Advisor's intelligence comes from a well-crafted system prompt containing company best practices and pattern selection heuristics. The system prompt is archetype-specific:
-
-```
-SYSTEM PROMPT STRUCTURE (agentic archetype):
-
-1. ROLE: "You are the Blueprint Advisor — an AI architecture advisor
-   for applications on Google Cloud Platform."
-
-2. DOMAIN PATTERNS: Pattern selection heuristics for the archetype
-   (agentic: SequentialAgent for ordered chains, ParallelAgent for
-   concurrent tasks, etc.)
-
-3. TOOL SELECTION: Workload-to-tool mapping
-   (analytical → BigQuery, transactional → Cloud SQL, etc.)
-
-4. OUTPUT FORMAT: Valid YAML conforming to the blueprint schema
-
-5. RAG USAGE: "Search before recommending — do not hallucinate endpoints"
-```
-
-**What makes this better than a developer asking Gemini directly?** Three things: (1) the system prompt embeds company-specific patterns and tool selection heuristics; (2) the RAG tools give access to curated catalogs rather than general knowledge; (3) the output is a structured YAML that skills can consume directly.
-
-#### RAG tools
-
-| Tool | Data store | Returns |
-|---|---|---|
-| `search_patterns(query)` | Archetype-specific pattern catalog | Ranked pattern matches with applicability criteria |
-| `search_skills(query)` | Skill catalog | Matching skills with name, source, version |
-| `search_tools(query)` | Tool registry (Apigee API Hub) | MCP servers, A2A agents, APIs with endpoints and auth |
-
-All three use single-pass semantic search via Vertex AI Search (GA).
-
-#### How the three data stores are structured
-
-The Blueprint Advisor queries three Vertex AI Search data stores, each optimized for a different discovery purpose:
-
-| Data Store | Contents | Search Strategy |
-|---|---|---|
-| Pattern Catalog | 11 agentic patterns (8 sections each, 176 HA/DR scenarios) | Semantic search on pattern applicability |
-| Skill Catalog | Reusable skills with frontmatter metadata | Semantic search on `use_when` / `do_not_use_when` |
-| Tool Registry | MCP servers + A2A Agent Cards + FunctionTool definitions | Semantic search on capability + endpoint |
-
-Each entry has YAML frontmatter (name, description, tags, applicability signals) that Vertex AI Search indexes for hybrid semantic + structured retrieval.
-
-
-#### How the Blueprint Advisor extracts search queries from the spec
-
-The Blueprint Advisor reads the spec's natural language and extracts search signals:
-
-| Spec Signal | Extracted Query | Target Data Store |
-|---|---|---|
-| Workflow ordering words ("first...then...in parallel") | Pattern applicability phrases | Pattern Catalog |
-| Data system references ("claims database", "policy store") | Data service capability descriptions | Tool Registry |
-| External partner mentions ("body shop scheduling") | Partner capability + protocol | Tool Registry (A2A) |
-| Business capability needs ("classify severity") | Skill `use_when` matching | Skill Catalog |
-
-The Blueprint Advisor performs a **single-pass** semantic search — one query per data store, not iterative refinement. Results are ranked by Vertex AI Search's built-in relevance scoring.
-
-
-#### How tools and skills are assigned to agents
-
-The Blueprint Advisor assigns discovered tools and skills to specific agents in the blueprint based on:
-
-- **Capability match**: which agent's purpose aligns with the tool's function
-- **Data ownership**: which agent owns the data the tool accesses
-- **Skill `use_when` rules**: skill frontmatter specifies which agent types should use it
-- **FunctionTool scope**: proprietary logic is flagged as FunctionTool (first-draft generated from spec business rules)
-
-
-#### How search results distinguish MCP from A2A
-
-Tool Registry entries include a `connection_type` field: `mcp_server`, `a2a_agent_card`, or `function_tool`. The Blueprint Advisor reads this field to determine whether to generate an MCP connection, an A2A client, or a FunctionTool implementation in the blueprint.
-
-
-#### Tool Registry ingestion pipeline
-
-New tools are registered by submitting a YAML manifest to the ingestion pipeline. The pipeline validates frontmatter, generates embeddings, and indexes in Vertex AI Search. Tools without complete frontmatter are rejected. The platform team reviews new tool registrations weekly.
-
-
-### The 11 agentic patterns (Phase 1 catalog)
-
-Each pattern is documented with 8 mandatory sections:
-
-| Section | Content |
+| Component | Details |
 |---|---|
-| **Applicability** | When to use, trigger phrases, anti-patterns |
-| **Component Diagram** | Mermaid component diagram |
-| **Sequence Diagram** | Mermaid sequence diagram |
-| **Security Considerations** | Identity model, data boundaries, screening points |
-| **Performance & Idempotency** | Latency, token consumption, retry behavior |
-| **HA/DR Views** | 4 DR strategies × 4 lifecycle behaviors = 16 scenarios per pattern |
-| **Composition Guidance** | Which patterns compose as parent/child |
-| **Search Metadata** | YAML frontmatter for Vertex AI Search ingestion |
+| Agent Framework | Google ADK — Python |
+| Runtime | Cloud Run (GA) |
+| Spec Workflow | GitHub Spec Kit with AgentCatalyst preset (archetype-specific) |
+| Blueprint Advisor | LlmAgent exposed as **MCP Server** on Cloud Run. Coding agent connects via MCP protocol. |
+| Discovery | Vertex AI Search (archetype-specific catalogs: patterns, skills, tools) |
+| IaC | Terraform + company TF modules via GitHub MCP Server |
+| Security | Model Armor (standard), DLP, Secret Manager, SPIFFE, VPC-SC, CMEK |
+| Gateway | Apigee Runtime Gateway (GA) |
+| Observability | OTel → Dynatrace (APM) + Splunk (SIEM) + Arize Phoenix (traces) + Cloud Logging |
+| Evaluation | Arize SaaS + Vertex AI Eval SDK + AutoSxS + HITL triage |
+| CI/CD | Jenkins (infrastructure plane) + Harness (application plane + 3-phase EvalOps) |
+| Source Control | GitHub + GitHub MCP Server for code commit |
 
-| # | Pattern | ADK Class(es) | When to use |
-|---|---|---|---|
-| 1 | Sequential Pipeline | SequentialAgent | Ordered steps with dependencies |
-| 2 | Parallel Fan-out | ParallelAgent | Independent concurrent tasks |
-| 3 | Generator/Critic (Loop) | LoopAgent | Generate, validate, refine until threshold |
-| 4 | ReAct (Tool Use) | LlmAgent + FunctionTool | Reasoning with external tool calls |
-| 5 | Coordinator/Dispatcher | LlmAgent (root) + sub_agents | Multi-domain specialist routing |
-| 6 | Review & Critique | LoopAgent (generator + evaluator) | Output review against rubrics |
-| 7 | Iterative Refinement | LoopAgent (programmatic exit) | Self-correction until threshold |
-| 8 | Hierarchical Decomposition | Nested Sequential + Parallel | Complex sub-task trees |
-| 9 | Swarm | ParallelAgent (dynamic) | Large dataset sharding |
-| 10 | Human-in-the-Loop | LlmAgent + LongRunningFunctionTool | Async human approval |
-| 11 | Agentic RAG | LlmAgent + Vertex AI Search | Document retrieval + reasoning |
+---
 
-#### HA/DR strategy matrix
+## Five-Layer Architecture
 
-| DR Strategy | RTO | RPO |
-|---|---|---|
-| Backup & Restore | Hours | Last backup |
-| Pilot Light / On-Demand | 10–30 min | Near-zero |
-| Pilot Light / Cold Standby | 5–15 min | Near-zero |
-| Warm Standby | 1–5 min | Near-zero |
-
-4 strategies × 4 lifecycles (Initial Provisioning, Component Failure/HA, DR Failover, DR Failback) = **16 scenarios per pattern, 176 scenarios across all 11 patterns.**
-
-### Blueprint Advisor sequence diagram
-
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant CA as Coding Agent
-    participant BA as Blueprint Advisor<br/>(LlmAgent on Agent Runtime)
-    participant VAS as Vertex AI Search
-
-    Dev->>CA: /catalyst.blueprint
-    CA->>CA: read spec.md + plan.md
-    CA->>BA: POST /api/blueprint<br/>(spec + plan)
-
-    BA->>BA: parse spec sections
-
-    Note over BA,VAS: PATTERN SEARCH
-    BA->>VAS: search_patterns(workflow signals)
-    VAS-->>BA: ranked pattern matches
-
-    Note over BA,VAS: SKILL SEARCH
-    BA->>VAS: search_skills(capability needs)
-    VAS-->>BA: matching skills
-
-    Note over BA,VAS: TOOL SEARCH
-    BA->>VAS: search_tools(system names)
-    VAS-->>BA: matching tools + endpoints
-
-    BA->>BA: assemble app-blueprint.yaml
-
-    BA-->>CA: app-blueprint.yaml
-    CA-->>Dev: saved to workspace
+```
+Layer 1 — SPEC CAPTURE         /specify → spec.md, /plan → plan.md
+Layer 2 — ARCHITECTURE ADVISORY Blueprint Advisor MCP Server → app-blueprint.yaml
+Layer 3 — SKILL-GUIDED GEN     /catalyst.generate → complete project
+Layer 4 — COMPANY CI/CD        Jenkins (infra) + Harness (deploy + EvalOps)
+Layer 5 — RUNTIME & OPERATE    Cloud Run + Apigee + Dynatrace + Splunk
 ```
 
-### app-blueprint.yaml schema
+### Layer 1 — Spec Capture
 
-The YAML follows a fixed schema. The coding agent validates against this before generating code.
+> For step-by-step walkthroughs of spec writing (greenfield FNOL + brownfield microservice), see the Developer Guide, Sections 2-3. For spec writing tips, see Developer Guide, Section 4.
+
+The developer installs the AgentCatalyst preset and runs `/specify` + `/plan`. The preset is archetype-specific — an agentic preset captures workflow ordering words and agent boundaries, a microservice preset captures API contracts and data models.
+
+The spec template has 10 sections (6 original + 4 business logic sections added in v2):
+
+| Section | Purpose | Impact on code generation |
+|---|---|---|
+| Business Problem | Context and value proposition | Informs Blueprint Advisor recommendations |
+| Workflow | Step-by-step with ordering words | Blueprint Advisor maps to patterns |
+| Data Sources | Data systems with workload types | Blueprint Advisor assigns MCP connections |
+| External Integrations | Partner services | Blueprint Advisor assigns A2A or FunctionTool wrappers |
+| Internal Capabilities | Proprietary logic | Blueprint Advisor flags as FunctionTool implementations |
+| Infrastructure | GCP region, compliance, networking | Maps to Terraform and security config |
+| **Business Rules** | Structured IF/THEN per decision point | Coding agent generates first-draft business logic |
+| **Transformation Rules** | Field mappings and formulas | Coding agent generates data transformation functions |
+| **Error Handling** | Timeout/retry per dependency | Coding agent generates try/catch with circuit breakers |
+| **Acceptance Criteria** | GIVEN/WHEN/THEN assertions | Coding agent generates golden dataset + evalsets |
+
+When business rules are in the spec, code generation reaches 90-95%. When omitted, 80% scaffolding with stubs.
+
+### Layer 2 — Architecture Advisory (Blueprint Advisor MCP Server)
+
+The Blueprint Advisor is an LlmAgent running on Cloud Run, **exposed as an MCP Server**. The coding agent connects via MCP protocol — this is the only universally compatible method (GitHub Copilot cannot make HTTP calls or run shell commands, but all major coding agents support MCP).
+
+**MCP Tools exposed to the coding agent:**
+
+| MCP Tool | Type | Purpose |
+|---|---|---|
+| `recommend_architecture(spec, plan)` | **ADVISORY** (non-deterministic) | Blueprint Advisor LlmAgent runs internally: searches catalogs via RAG, reasons about architecture guided by company system prompt, returns recommendations with confidence scores |
+| `validate_composition(pattern_tree)` | **DETERMINISTIC** | Checks developer's edited pattern selections against adjacency matrix. Returns valid/invalid + reason. |
+| `assemble_blueprint(selections, spec, plan)` | **DETERMINISTIC** | Builds final YAML from validated selections. Template-filling, no LLM involved. |
+
+**Blueprint Advisor versioning:**
+
+Every YAML blueprint includes version metadata in its header:
 
 ```yaml
-metadata:
-  name: string              # Project name (kebab-case)
-  version: string           # Semantic version
-  archetype: string         # agentic | microservice | pipeline | api
-  template: string          # adk_a2a | fastapi | beam | openapi (archetype-specific)
-  description: string
-
-platform:
-  gcp_project: string
-  gcp_region: string
-  model: string             # For agentic: gemini-2.0-flash
-  runtime: string           # agent_engine | cloud_run | dataflow
-
-# Archetype-specific sections follow:
-# For agentic: agents, tools, skills
-# For microservice: services, endpoints, databases, events
-# For pipeline: stages, sources, transformations, sinks
-# For API: routes, schemas, auth, rate_limits
-
-infrastructure:             # Shared across all archetypes
-  terraform:
-    modules: [{name, source, version}]
-  security:
-    model_armor: bool       # Agentic only
-    dlp: bool
-    cmek_key_ring: string
-    vpc_sc_perimeter: bool
-  observability:
-    dynatrace: bool
-    otel_collector: bool
-    cloud_trace: bool
-    cloud_logging: bool
-  cicd:
-    jenkins: {template, parameters}
-    harness: {template, parameters}
+# Generated by: blueprint-advisor/v2.3.1
+# System prompt: v1.8 (SHA: abc123)
+# Pattern catalog: 2026-05-10 (11 patterns)
+# Timestamp: 2026-05-10T14:30:00Z
 ```
 
-### Blueprint-generated diagrams
+This enables reproducibility: if a developer needs to understand why a recommendation was made, the platform team can re-invoke the same Blueprint Advisor version with the same spec. The Operations Runbook (Section 9) covers the deployment procedure for new versions, including maintaining 2 versions in production for rollback.
 
-The `app-blueprint.yaml` includes a `diagrams:` section containing three Mermaid diagrams generated by the Blueprint Advisor. These diagrams are derived from the same reasoning that produced the agents, tools, and skills sections — they are a visual serialization of the architecture, not a separate artifact.
+**Internal to the MCP Server (NOT exposed to the coding agent):**
 
-| Diagram | What it shows | Audience |
-|---|---|---|
-| **Component** | Agent tree with tool assignments — which agent connects to which MCP server, A2A agent, or FunctionTool. Agents as rectangles grouped by parent, MCP servers as cylinders, A2A agents as hexagons, FunctionTools as parallelograms. | Developers during YAML review, EA during architecture review |
-| **Sequence** | Runtime message flow — what happens when a user sends a request. Each pattern phase (Sequential, Parallel, Loop, HITL) is annotated with a colored rect block. Tool calls shown as self-messages. Parallel enrichment shown with `par/end` blocks. | Developers understanding runtime behavior, QA writing test cases |
-| **Infrastructure** | GCP components inside VPC-SC perimeter, external A2A partners outside the boundary, CI/CD pipeline connections (Jenkins, Harness, Arize). | Platform engineering, security review, ARB |
-
-**Why Mermaid, not PNG/SVG:** The Blueprint Advisor is an LLM — it generates text natively. Mermaid is text-based, version-controllable in git, editable by developers, and rendered natively by VSCode (Mermaid preview extension), GitHub, and GitLab. PNG/SVG are rendered outputs, not source of truth. A CI step can convert Mermaid to PNG/SVG using `mmdc` (Mermaid CLI) for documentation or ARB presentations.
-
-**Generation rules in the system prompt:**
-
-The Blueprint Advisor's system prompt includes diagram generation instructions that ensure consistency:
-- Component diagram uses the agent tree from the `agents:` section and tool assignments from the `tools:` section
-- Sequence diagram follows the pattern ordering: Sequential steps in order, Parallel branches in `par/end`, Loop with `loop/end`, HITL with `alt/else`
-- Infrastructure diagram maps `infrastructure:` section fields to GCP service boxes
-- All diagrams reference agent names and tool names exactly as they appear in the YAML — no renaming, no abbreviations
-
-**Developer workflow:** After `/catalyst.blueprint`, the developer opens `app-blueprint.yaml` in VSCode. The Mermaid preview extension renders diagrams inline. The developer reviews the YAML fields (agents, tools, skills) with the diagrams visible side-by-side — visual verification catches assignment mistakes that reading YAML alone would miss. When the developer opens a PR, GitHub/GitLab renders the Mermaid blocks natively, so the team reviews architecture visually during code review.
-
-### Enhanced spec template — business logic capture
-
-The spec template (`spec_template.md`) includes four sections beyond workflow and data sources that enable the coding agent to generate business logic — not just scaffolding. When these sections are filled out, the coding agent generates 90-95% of the code (including business rules). When omitted, the coding agent generates 80% (scaffolding only) and the developer implements business logic manually (+$5.5K per use case).
-
-**Business Rules section:** For each decision point in the workflow, the developer documents the rules as structured conditions. The Blueprint Advisor converts these into `business_rules:` blocks in the YAML with inputs, outputs, conditions, edge cases, and validation constraints. The coding agent generates working implementations — not just stubs.
-
-**Transformation Rules section:** For each data transformation, the developer documents field mappings and formulas. The Blueprint Advisor converts these into `transformations:` blocks. The coding agent generates data transformation functions with correct field references.
-
-**Error Handling section:** For each external dependency (MCP server, A2A agent, API), the developer documents timeout behavior, failure fallbacks, partial-data handling, and retry policies. The Blueprint Advisor converts these into `error_handling:` blocks. The coding agent generates try/catch blocks with correct fallback behavior and circuit breakers.
-
-**Acceptance Criteria section:** For each workflow step, the developer documents GIVEN/WHEN/THEN assertions. The Blueprint Advisor converts these into starter golden dataset entries. The coding agent generates pre-populated evalsets in `tests/evalsets/` derived directly from the spec. This closes the loop between requirements and testing — acceptance criteria become automated evaluation.
-
-| Business logic type | Spec section that captures it | Coding agent accuracy | Still needs human? |
-|---|---|---|---|
-| Rule-based decisions (if/then with thresholds) | Business Rules | 90%+ | No — unless rules are ambiguous |
-| Field mappings and transformations | Transformation Rules | 95%+ | No |
-| Validation logic (input constraints) | Business Rules → validation | 95%+ | No |
-| Routing conditions | Already in Workflow section | Already generated | No |
-| Calculation formulas | Transformation Rules | 95%+ | No |
-| Error handling and fallbacks | Error Handling | 90%+ | No |
-| Complex domain algorithms (actuarial, ML, regulatory) | Cannot be expressed as rules | Not generated | Yes — `implementation: engineer_implements` |
-| Nuanced business judgment | Cannot be expressed as rules | Not generated | Yes |
-
-**Impact on what the coding agent generates:**
-
-```
-WITHOUT business logic in spec (current default):
-  ├── agents/          ← full topology with routing
-  ├── tools/           ← FunctionTool STUBS (empty bodies)
-  ├── deployment/      ← Terraform, Jenkins, Harness, security
-  ├── observability/   ← Dynatrace, OTel, Phoenix tracing
-  ├── tests/           ← evalsets with basic cases
-  └── golden-dataset/  ← minimal starter
-
-WITH business logic in spec (enhanced):
-  ├── agents/          ← full topology with routing
-  ├── tools/           ← FunctionTool IMPLEMENTATIONS (working bodies)
-  ├── deployment/      ← Terraform, Jenkins, Harness, security
-  ├── observability/   ← Dynatrace, OTel, Phoenix tracing
-  ├── tests/           ← evalsets with acceptance-criteria-derived cases
-  └── golden-dataset/  ← comprehensive starter from acceptance criteria
-```
-
-### What the coding agent generates vs what engineers implement
-
-| Generated (80-95% depending on business rules in spec) | Developer reviews and refines (5-20%) |
+| Internal Component | Purpose |
 |---|---|
-| Application code structure (agent classes / service endpoints / pipeline stages) | Business logic inside stubs |
-| Tool connections (MCP / database / API clients) | System prompts / service behavior |
-| Infrastructure as code (Terraform modules) | Test data and evaluation datasets |
-| Observability config (Dynatrace + OTel) | Domain-specific validation rules |
-| CI/CD pipeline definitions (Jenkins + Harness) | |
-| Security config (Model Armor / VPC-SC / CMEK) | |
+| Blueprint Advisor LlmAgent | RAG + LLM reasoning guided by company system prompt |
+| `search_patterns()` | RAG tool — queries Pattern Catalog in Vertex AI Search |
+| `search_skills()` | RAG tool — queries Skill Catalog in Vertex AI Search |
+| `search_tools()` | RAG tool — queries Tool Registry in Vertex AI Search |
+| Company system prompt | Curated best practices, constraints, preferences |
+| Vertex AI Search connections | 3 archetype-specific data stores |
 
-### Confidence-tiered recommendations
+**MCP protocol version:** The Blueprint Advisor MCP Server implements **MCP protocol version 2025-03-26** (the current stable version as of May 2026). Coding agent compatibility:
 
-The Blueprint Advisor tags each recommendation with a confidence level: **high** (exact catalog match), **medium** (partial match, alternatives available), or **low** (best-effort, manual review recommended). The developer sees these confidence levels in the YAML and prioritizes review accordingly.
-
-
-### Catalog quality engineering
-
-The Blueprint Advisor's correctness depends on metadata quality in Vertex AI Search. The platform team maintains enrichment pipelines that validate frontmatter completeness, embedding freshness, and search relevance. Details are in the Operations Runbook.
-### Pattern composition validator
-
-The Blueprint Advisor validates pattern compositions before including them in the YAML. It checks an adjacency matrix that defines which patterns can compose with which (e.g., LoopAgent cannot nest inside ParallelAgent). Invalid compositions are flagged with a warning and an alternative suggestion.
-
-
-## Layer 3 — SKILL-GUIDED GENERATION (deep dive)
-
-### What is a skill?
-
-A skill is a Markdown document that teaches a coding agent how to do something. It follows the SKILL.md open standard (originally proposed by Anthropic, adopted by Gemini CLI, Claude Code, Cursor, Copilot, and 20+ other coding agents):
-
-```
-company-cicd/
-├── SKILL.md              ← Instructions for the coding agent
-├── templates/             ← Optional: bundled reference files
-└── examples/              ← Optional: example output
-```
-
-The SKILL.md has two parts — frontmatter (metadata) and body (instructions):
-
-```markdown
----
-name: company-cicd
-description: >
-  Company CI/CD standards for enterprise applications.
-  Generates Jenkinsfile and Harness pipeline definitions.
-  DO NOT deploy directly from the developer's machine.
----
-
-# Company CI/CD Standards
-
-## CRITICAL: No direct deployment
-...detailed instructions the coding agent follows...
-```
-
-### Skill architecture — domain skills + company overlay skills
-
-AgentCatalyst uses two categories of skills:
-
-**Domain skills** are archetype-specific — they teach the coding agent how to write code for a particular technology:
-
-| Archetype | Domain skills | What they teach |
+| Coding Agent | MCP Version Supported | Status |
 |---|---|---|
-| **Agentic** | `adk-agents`, `adk-tools`, `adk-mcp`, `model-armor` | ADK agent classes, tool wiring, MCP connections, content screening |
-| **Microservice** | `fastapi`, `spring-boot`, `cloud-run`, `pubsub` | Service frameworks, container deployment, event messaging |
-| **Pipeline** | `dataflow`, `beam`, `bigquery-io`, `gcs-io` | Pipeline runners, I/O connectors, transforms |
-| **API** | `openapi`, `grpc`, `apigee-proxy`, `cloud-endpoints` | API specs, proxy bundles, endpoint config |
+| GitHub Copilot | 2025-03-26 | ✅ Tested |
+| Claude Code | 2025-03-26 | ✅ Tested |
+| Cursor | 2025-03-26 | ✅ Tested |
+| Gemini CLI | 2025-03-26 | ⚠️ Community-tested |
+| Windsurf | 2025-03-26 | ⚠️ Community-tested |
 
-**Company overlay skills** are shared across ALL archetypes:
+The coding agent calls `recommend_architecture` ONCE (the advisory call), then uses deterministic tools for validation and assembly. The coding agent has no direct access to Vertex AI Search, no access to the company system prompt, and no ability to invoke the LlmAgent directly. All intelligence lives on the server side.
 
-| Skill | What it teaches | Applies to |
+**`/catalyst.blueprint` command flow:**
+
+1. Coding agent calls `recommend_architecture(spec, plan)` via MCP
+2. MCP Server runs Blueprint Advisor LlmAgent internally (RAG search → LLM reasoning → recommendations)
+3. Returns recommendations with confidence scores per selection
+4. Developer reviews in YAML editor, edits selections
+5. Coding agent calls `validate_composition(edited_pattern_tree)` — deterministic pass/fail
+6. Coding agent calls `assemble_blueprint(validated_selections, spec, plan)` — deterministic YAML
+7. Result: `app-blueprint.yaml` written to workspace
+
+**Offline / disconnected fallback:**
+
+If the Blueprint Advisor MCP Server is unreachable (VPN down, server maintenance, network issue), the developer is NOT blocked. Two fallback paths exist:
+
+1. **Manual YAML authoring:** The developer writes `app-blueprint.yaml` manually using the YAML schema reference (see Appendix A.10 for a complete example). The coding agent can still run `/catalyst.generate` against a hand-written YAML — it only needs the blueprint file, not the MCP Server.
+
+2. **Cached recommendation:** If the developer previously received a recommendation for a similar spec, they can copy and modify that YAML. The `validate_composition` and `assemble_blueprint` MCP tools are lightweight and may still be available even when `recommend_architecture` is down (they don't depend on Vertex AI Search or LLM reasoning).
+
+The Developer Guide (Section 5) includes the complete YAML schema and an annotated example that developers can use as a starting template for manual authoring
+
+**The 11 agentic patterns (Phase 1 catalog):**
+
+| Pattern | ADK Class | When Blueprint Advisor selects it |
 |---|---|---|
-| `company-terraform-patterns` | Company TF modules, version pinning, backend config | All archetypes |
-| `company-observability` | Dynatrace + Splunk + OTel Collector | All archetypes |
-| `company-cicd` | Jenkins + Harness pipelines. **DO NOT deploy directly.** | All archetypes |
-| `company-security` | Model Armor + VPC-SC + CMEK + Secret Manager | All archetypes |
+| Coordinator | LlmAgent | Root orchestrator — spec describes multiple specialized sub-agents |
+| Sequential Pipeline | SequentialAgent | "First... then... finally" ordering |
+| Parallel Fan-out | ParallelAgent | "Simultaneously" or "in parallel" |
+| Loop / Iterative Refinement | LoopAgent | "Repeat until" or "refine until threshold" |
+| Human-in-the-Loop | LlmAgent + callback | "Route to human" or "requires approval" |
+| RAG / Retrieval-Augmented | LlmAgent + Vertex AI Search | "Search documents" or "knowledge base" |
+| ReAct (Reason + Act) | LlmAgent + tools | Complex reasoning with tool use |
+| Event-Driven | LlmAgent + Pub/Sub | "When event occurs" or "triggered by" |
+| Supervisor | LlmAgent + delegation | "Oversee" or "quality check" |
+| Critic / Evaluator | LlmAgent | "Validate" or "score quality" |
+| Custom Tool Agent | LlmAgent + FunctionTool | Proprietary logic — domain-specific |
 
-**All domain skills are company-authored** based on GA documentation for each technology. No pre-GA dependencies. The company's platform engineering team writes them, versions them in Git, and distributes them via the skills repo.
+### Blueprint Advisor MCP Server — Security
 
-### Skill installation and discovery
+The Blueprint Advisor MCP Server receives spec.md content that may contain proprietary business rules, competitive intelligence, partner names, and regulatory details. The following security controls are required:
 
-Skills are delivered as part of the AgentCatalyst preset (installed via `specify preset add agentcatalyst-enterprise`). The preset's `preset.yml` declares skill dependencies. Skills follow the agentskills.io SKILL.md specification with three progressive disclosure levels: L1 (metadata, always loaded), L2 (instructions, loaded on-demand), L3 (reference files, loaded when referenced).
+**Authentication:**
+- Coding agent authenticates to the MCP Server via **OAuth 2.0** using the developer's company SSO credentials
+- The MCP Server validates the OAuth token against the company's identity provider (Workload Identity Federation)
+- Authentication is **per-user** — each developer's MCP calls are tied to their identity for audit trail
+- OAuth token lifetime: 1 hour with silent refresh. The preset's MCP endpoint configuration includes the OAuth client ID and token endpoint
 
-Company overlay skills (Terraform, observability, CI/CD, security) are shared across all archetype presets. Archetype-specific skills (e.g., `adk-agents`) are included only in the relevant preset variant.
+**Transport security:**
+- All MCP protocol connections use **TLS 1.3** minimum (enforced by Cloud Run's default TLS termination)
+- The MCP endpoint  resolves to an HTTPS endpoint with a valid certificate
+- Mutual TLS (mTLS) is optional — recommended for environments requiring client certificate authentication
 
+**Spec content handling:**
+- spec.md and plan.md content is processed **in-memory only** during the  call
+- Spec content is **NOT persisted** on the Blueprint Advisor server after the response is returned
+- Telemetry captures the spec hash (SHA-256) for traceability, NOT the spec content itself
+- Spec content does not leave the configured GCP region (Cloud Run regional deployment)
 
-### Skill activation — how the coding agent knows which skill to use
+**Credential provisioning:**
+- The MCP endpoint URL and OAuth client ID are configured in the preset's  under a  section
+- Developers do not manually configure credentials — the preset installs the connection configuration
+- First-time connection triggers an OAuth browser flow (company SSO login)
 
-**Phase 1 — Discovery:** On session start, the coding agent loads only the `name:` and `description:` from each SKILL.md frontmatter into its system prompt. The full body is NOT loaded yet — progressive disclosure keeps the context lean.
+> See the Operations Runbook, Section 9 for MCP Server operational security (health checks, deployment procedures, scaling).
 
-**Phase 2 — Activation:** When the coding agent receives a task, it matches the task against each skill's `description:` and activates the most relevant skill. The full SKILL.md body is loaded into context, and the skill's directory becomes accessible for reading bundled templates and examples.
+### Blueprint Advisor MCP Server — Capacity and Rate Limiting
 
-**Phase 3 — Precedence:** Workspace skills (`.agents/skills/`) override user skills (`~/.agents/skills/`). The `GEMINI.md` project instruction file adds a blanket rule: "When skills conflict, always follow company skills."
+Each `recommend_architecture` call takes 15–30 seconds (3 RAG queries + LLM reasoning) and costs ~$0.01 (Vertex AI Search + Gemini API tokens). Rate limiting prevents runaway costs and server overload.
 
-### Deployment override — why code is NEVER deployed directly
+**Rate limits (enforced at the MCP Server layer):**
 
-The `company-cicd` skill explicitly tells the coding agent:
+| Limit | Value | Rationale |
+|---|---|---|
+| Per-developer | 10 calls/hour | Developers rarely need more than 3-5 iterations per use case |
+| Per-team | 30 calls/hour | Prevents one team from monopolizing the server |
+| Concurrent | 5 simultaneous `recommend_architecture` calls | Each call holds a Cloud Run instance for 15-30s |
+| `validate_composition` / `assemble_blueprint` | No limit | Deterministic, sub-second, negligible cost |
 
-> **DO NOT deploy directly from the developer's machine.** Generate Jenkinsfile + harness-pipeline.yaml instead. All infrastructure provisioning goes through Jenkins (Terraform). All application deployment goes through Harness (canary pipelines).
+When a rate limit is hit, the MCP Server returns a clear error: "Rate limit exceeded. You have used N/10 calls this hour. Next call available in M minutes."
 
-This is reinforced by three layers: the `company-cicd` skill itself, the project's `GEMINI.md` instruction file, and the `/catalyst.generate` command. All three say the same thing — no ambiguity.
+**Capacity planning:**
 
-### Skill governance
+| Metric | Expected (Year 1) | Cloud Run configuration |
+|---|---|---|
+| Daily active developers | 10–20 | `--min-instances 1` (avoid cold starts) |
+| Peak concurrent calls | 3–5 | `--max-instances 10` (headroom for burst) |
+| Monthly `recommend_architecture` calls | 200–500 | ~$2–5/month Vertex AI Search + $5–10/month Gemini |
+| Monthly MCP Server compute | ~20 Cloud Run instance-hours | ~$5–10/month |
 
-| Aspect | How it works |
+**Total monthly Blueprint Advisor cost at expected usage: $12–25/month.** This is included in the $1K/month GCP infrastructure estimate in the cost model.
+
+> See Operations Runbook, Section 9 for Cloud Run scaling configuration and adjustment triggers.
+
+### Layer 3 — Skill-Guided Code Generation
+
+> For the complete code generation walkthrough with generated directory trees, see Developer Guide, Section 2 (greenfield) and Section 3 (brownfield). For writing tests for generated code, see Developer Guide, Section 7.
+
+The coding agent reads the YAML blueprint and generates the complete project. It is constrained by three layers:
+
+| Layer | Source | Role |
+|---|---|---|
+| **Blueprint** (WHAT) | `app-blueprint.yaml` from Blueprint Advisor | Defines topology, tool assignments, infrastructure config |
+| **Archetype skill** (HOW) | e.g., `adk-agents` SKILL.md | Teaches correct framework-specific patterns, imports, constructors |
+| **Overlay skills** (MUST) | Company overlay SKILL.md files | Teaches non-negotiable company standards (Terraform, Dynatrace, CI/CD, security) |
+| **Constitution.md** | In the preset | Non-negotiable rules the coding agent MUST follow (e.g., never deploy directly) |
+
+**Important: Constitution.md contains coding agent rules — NOT meta-skills or decision frameworks.** The 4 meta-skills (pattern-composition, data-platform-selection, agent-boundary, skill-tool-discovery) exist only in AgentForge and are loaded into the Design Agent via ADK SkillToolset. AgentCatalyst's constitution.md is a different file with a different purpose: it constrains the coding agent during code generation.
+
+**What code generation produces (80-95% depending on business rules in spec):**
+
+| Generated component | Source (YAML section) |
 |---|---|
-| **Ownership** | Platform engineering owns company overlay skills. Domain teams own domain skills with EA review. |
-| **Version control** | All skills in `github.com/company/agentcatalyst-skills`. Versioned with semver tags. |
-| **Change process** | Skill changes via standard PR review. Platform eng + EA review. |
-| **New archetype support** | Adding a new archetype: author domain skills, create a spec template, configure Blueprint Advisor catalog. Company overlay skills are reusable as-is. |
-| **Testing** | Skills include example prompts and expected outputs. CI validates that the coding agent generates correct code when guided by the skill. |
+| ADK agent class hierarchy | `agents:` |
+| MCP server connections | `tools.mcp_servers:` |
+| A2A client connections | `tools.a2a_agents:` |
+| FunctionTool implementations (first draft from business rules) | `tools.function_tools:` + `business_rules:` |
+| Terraform modules | `infrastructure:` |
+| Dynatrace observability config | `observability:` |
+| Jenkins + Harness pipeline definitions | `ci_cd:` |
+| Model Armor callbacks | `security:` |
+| Pre-commit evaluation hook | `evalops:` |
+| Arize Phoenix tracing config | `evalops:` |
+| Golden dataset (starter from acceptance criteria) | `golden_dataset:` |
+| 3-phase Harness evaluation pipeline | `evalops:` |
 
-### FNOL code generation — step by step
+**What the developer implements (5-20%):**
 
-When the developer types `/catalyst.generate` for the FNOL agentic use case:
-
-**Step 1 — Create project structure** (deterministic):
-```bash
-adk create fnol-agent --template adk_a2a
-```
-Creates the bare project with `pyproject.toml`, `app/__init__.py`, `app/agent.py` (placeholder).
-
-**Step 2 — Generate ADK agent classes** (guided by `adk-agents` + `adk-tools` skills):
-The coding agent reads `agents:` from the YAML and generates one Python file per agent with correct ADK imports, class constructors, and sub-agent wiring.
-
-**Step 3 — Generate MCP connections** (guided by `adk-mcp` skill):
-MCPToolset declarations with endpoints, transport, and auth from `tools.mcp_servers:`.
-
-**Step 4 — Generate A2A clients** (guided by `adk-tools` skill):
-AgentTool wrappers with endpoints, auth, and timeout from `tools.a2a_agents:`.
-
-**Step 5 — Generate FunctionTool implementations** (guided by `adk-tools` skill):
-Function signature + description. Body: `raise NotImplementedError("Engineer must implement")`.
-
-**Step 6 — Install skills** (deterministic via `gh skill install`):
-Agent skills installed at pinned versions with provenance SHA verification.
-
-**Step 7 — Generate Model Armor callbacks** (guided by `model-armor` + `company-security` skills):
-Standard prompt + response screening configuration.
-
-**Step 8 — Generate Terraform** (guided by `company-terraform-patterns` skill):
-Company TF module references with populated variables.
-
-**Step 9 — Generate Dynatrace + OTel config** (guided by `company-observability` skill):
-OneAgent config, custom metrics, dashboard-as-code, OTel Collector pipeline.
-
-**Step 10 — Generate CI/CD pipelines** (guided by `company-cicd` skill):
-Jenkinsfile + Harness pipeline config. **Does NOT deploy directly.**
-
-**Step 11 — Replace GEMINI.md** with company version containing workflow overrides.
-
-**Step 12 — Commit to GitHub** and open PR.
-
----
-
-## Layer 4 — COMPANY CI/CD (outside AgentCatalyst scope)
-
-AgentCatalyst generates CI/CD pipeline definitions. The company's pipelines execute them. This applies to ALL archetypes — agents, microservices, pipelines, and APIs all go through the same CI/CD.
-
-| Stage | Tool | What happens |
+| Task | Why it can't be generated | Priority |
 |---|---|---|
-| PR Review | GitHub | Team reviews generated code + engineer implementations. |
-| Non-Prod | Jenkins + Harness | Terraform apply (infra), build, unit tests, integration tests, **Arize evaluation against deployed agent (agentic archetype)**. |
-| Pre-Prod | Harness | Canary deployment (10% traffic), **Arize evaluation against pre-prod (agentic)**, SLO validation. |
-| Production | Harness | Progressive rollout, monitoring, automatic rollback. |
+| Review FunctionTool business logic | First draft generated from spec rules — developer refines and makes it their own | P0 |
+| System prompts per agent | Requires domain expertise, tone, persona | P0 |
+| Eval dataset curation | Requires real-world edge cases beyond acceptance criteria | P1 |
+| Proprietary algorithms | ML models, actuarial formulas not expressible as IF/THEN | P1 |
+| Pydantic output schemas | Domain-specific data contracts | P2 |
 
-### EvalOps — three-layer evaluation lifecycle (no preview services)
+### Layer 4 — Company CI/CD (outside AgentCatalyst scope)
 
-AgentCatalyst implements a multi-layered EvalOps strategy that fuses automated velocity with human judgment. This architecture follows the principle that automation is necessary for scale, but human judgment is necessary for ground truth. All evaluation runs on GA services — Arize for automated evaluation, AutoSxS for baseline comparison, and human review for edge-case triage. Agent Evaluation Service and Agent Simulation Service (both pre-GA preview services) are NOT used.
+AgentCatalyst generates code and pipeline definitions. The company's existing CI/CD executes them.
 
-For non-agentic archetypes (microservices, pipelines, APIs), evaluation uses standard Java/Python testing frameworks (JUnit, pytest, integration tests) — the three-layer EvalOps architecture is specifically for LLM-based agent evaluation.
-
-**Layer 1: Inner Loop (automated velocity — pre-commit)**
-
-Developers get instant feedback in their IDE. The `company-cicd` skill generates a pre-commit evaluation hook (`tests/eval_inner_loop.py`) alongside the Harness pipeline. This hook runs a lightweight subset of evalsets (5-10 cases) against the local agent using the Vertex AI Evaluation SDK, checking safety, fluency, groundedness, and tool trajectory. Scores are compared against `tests/baseline_scores.json` — if any metric drops more than 10%, the commit is blocked. Completes in under 60 seconds.
-
-What this catches: prompt regressions, broken tool connections, safety violations — before the code ever reaches CI/CD.
-
-**Layer 2: Deep Dive (agent debugging — ADK tracing + Arize Phoenix)**
-
-When a multi-step agent fails, a pass/fail score doesn't explain WHY. The `company-observability` skill generates ADK tracing instrumentation (`observability/adk-tracing-config.py`) and Arize Phoenix integration (`observability/phoenix-config.py`). Every agent in the topology gets OpenTelemetry spans capturing LLM calls (input/output/tokens), tool calls (name/params/response/latency), agent-to-agent delegation, and loop iterations with exit conditions. During local development, traces export to Phoenix at `localhost:6006`. In non-prod/pre-prod, traces export to a shared Phoenix instance for team debugging.
-
-What this catches: hallucinated tool parameters, stuck loops, incorrect intermediate reasoning, agent delegation failures.
-
-**Layer 3: Outer Loop (governance + HITL — 3-phase Harness pipeline)**
-
-Before an agent touches production data, it must pass a rigorous governance check. The `company-cicd` skill generates a 3-phase Harness pipeline:
-
-```
-Phase A: Arize Evaluation (automated velocity)
-  ├─ Run all evalsets against deployed agent
-  ├─ Quality gates: pass_rate ≥ 0.95, p95_latency ≤ 3s, hallucination ≤ 0.15
-  └─ If fail → block + notify
-
-Phase B: AutoSxS Comparison (governance scale)
-  ├─ Compare new version vs current baseline across Golden Dataset
-  ├─ Win rate, safety alignment, factual accuracy
-  ├─ Flag edge cases: ties, low confidence, safety concerns
-  └─ Generate triage report
-
-Phase C: Human Triage (HITL anchor)
-  ├─ Route flagged cases to human review queue
-  ├─ Reviewer sees: input, baseline output, candidate output,
-  │   automated scores, Phoenix trace link
-  ├─ Reviewer marks: approve / reject / needs-investigation
-  └─ Final gate: human approval required for production
-```
-
-### Golden Dataset lifecycle
-
-The Golden Dataset is the ground truth that powers Layer 3 evaluation. AgentCatalyst manages its full lifecycle:
-
-**Creation:** The spec template includes an Acceptance Criteria section. The Blueprint Advisor converts these acceptance criteria into starter golden dataset entries with expected tool calls, agent sequences, and output assertions. The developer refines these during testing.
-
-**Curation:** The coding agent generates `golden-dataset/golden-v1.json` with validation scripts (`scripts/validate_golden.py`) and a curation log. Human reviewers periodically audit the dataset for coverage gaps and bias.
-
-**Production feedback loop:** When Arize detects hallucination spikes or drift in production, a production feedback pipeline (generated by the `company-cicd` skill) samples failing cases, routes them to a human annotation queue, and adds annotated cases back to the golden dataset. Future agents are tested against real production failures.
-
-**Meta-evaluation (quarterly):** A scheduled Harness pipeline samples 50 AutoSxS decisions from the past quarter and routes them to human reviewers asking "do you agree with the automated verdict?" If agreement drops below 85%, metric drift is flagged and AutoSxS scoring rubrics are adjusted. This audits the auditors — ensuring automated evaluation still aligns with human intent.
-
-### Where EvalOps components live in the architecture
-
-| Component | Location | Generated by |
+| Pipeline | Tool | Purpose |
 |---|---|---|
-| Pre-commit inner loop evaluator | Developer workstation | `company-cicd` skill |
-| ADK tracing + Phoenix config | Developer workstation + non-prod | `company-observability` skill |
-| Arize evaluation stages | Harness pipeline | `company-cicd` skill |
-| AutoSxS comparison config | Harness pipeline | `company-cicd` skill |
-| HITL review queue | Harness pipeline + review tool | `company-cicd` skill |
-| Golden dataset template | Project repo | Blueprint Advisor + `company-cicd` skill |
-| Production feedback pipeline | Harness scheduled pipeline | `company-cicd` skill |
-| Meta-evaluation pipeline | Harness quarterly scheduled pipeline | `company-cicd` skill |
-| Arize SaaS account | External (arize.com) | Platform engineering (shared) |
-| Arize API credentials | Harness Secret Manager | `ARIZE_API_KEY_SECRET`, `ARIZE_SPACE_KEY_SECRET` |
+| Infrastructure plane | Jenkins | `terraform plan` → `terraform apply` → provisions Cloud Run, Apigee, Cloud SQL, Model Armor, VPC-SC |
+| Application plane | Harness | Deploys agent → runs 3-phase EvalOps → promotes Non-Prod → Pre-Prod (canary) → Production |
 
-**Generic evaluation platform:** If Arize isn't an option for your enterprise, the same 3-layer pattern works with LangSmith, Patronus AI, Maxim, or a custom solution. The pipeline stages are the integration points — what runs inside each stage can be swapped without changing the architecture. The `company-cicd` skill encapsulates this choice.
+**EvalOps — three-layer evaluation lifecycle:**
 
-### A concrete deployment scenario — FNOL agent merge to production
-
-To make the two-plane CI/CD model concrete, here's what actually happens when a developer merges a PR for an FNOL agent change:
-
-```
-1. Developer merges PR to main branch
-        │
-        ▼
-2. JENKINS pipeline triggers (agent-infra-plan-apply-v3)
-        │
-        ├─ Checkout code, including deployment/terraform/
-        │
-        ├─ Terraform init
-        │   └─ Loads state from GCS backend
-        │
-        ├─ Terraform plan
-        │   └─ Generates plan.json showing what will change
-        │
-        ├─ OPA policy check
-        │   ├─ "All Cloud SQL must use CMEK" ✓
-        │   ├─ "All buckets must be private" ✓
-        │   ├─ "Agent must run in VPC-SC perimeter" ✓
-        │   └─ All policies pass
-        │
-        ├─ Terraform apply
-        │   └─ Updates infrastructure (e.g., adds new MCP server config,
-        │      updates Vertex AI Search data store, rotates secrets)
-        │
-        ├─ Infrastructure health check
-        │   ├─ Cloud SQL responding ✓
-        │   ├─ Vertex AI Search index up to date ✓
-        │   ├─ Model Armor config valid ✓
-        │   └─ All healthy
-        │
-        └─ Trigger Harness pipeline
-            └─ POST to Harness API with build context
-                │
-                ▼
-3. HARNESS pipeline triggers (agent-deploy-canary-v4)
-        │
-        ├─ Build container image
-        │   ├─ Docker build with new agent code
-        │   └─ Push to Artifact Registry as agents/fnol-coordinator:abc123
-        │
-        ├─ Deploy to Non-Prod
-        │   ├─ gcloud agents deploy fnol-coordinator --version abc123 ...
-        │   └─ Agent Engine routes 100% non-prod traffic to new version
-        │
-        ├─ Arize evaluation against Non-Prod
-        │   ├─ Run all evalsets in tests/evalsets/
-        │   ├─ Pass rate: 97% ✓ (threshold 95%)
-        │   ├─ p95 latency: 2.1s ✓ (threshold 3s)
-        │   ├─ Hallucination score: 0.08 ✓ (threshold 0.15)
-        │   └─ All gates pass — proceed
-        │
-        ├─ Approval gate (manual)
-        │   └─ Tech lead approves promotion to Pre-Prod
-        │
-        ├─ Deploy to Pre-Prod (canary 10%)
-        │   ├─ 10% of pre-prod traffic to new version
-        │   ├─ Monitor for 30 minutes
-        │   │   ├─ Dynatrace: p95 latency 2.3s ✓
-        │   │   ├─ Dynatrace: error rate 0.02% ✓
-        │   │   └─ Arize: hallucination drift +0.01 ✓
-        │   └─ Promote to 100% pre-prod
-        │
-        ├─ Arize evaluation against Pre-Prod
-        │   └─ All gates pass
-        │
-        ├─ Deploy to Prod (progressive)
-        │   ├─ Canary 10% (30 min monitoring)
-        │   ├─ Canary 25% (30 min monitoring)
-        │   ├─ Canary 50% (30 min monitoring)
-        │   └─ Full rollout 100%
-        │
-        └─ Deployment complete
-            └─ Slack notification + Splunk audit log entry
-```
-
-**Failure handling.** If anything fails — Terraform plan rejected by OPA, Arize gates fail, SLOs violated during canary — Harness automatically rolls back to the previous agent version. Jenkins doesn't roll back infrastructure (Terraform state would need careful manual handling), but the failed Terraform apply is visible in Jenkins for platform engineering to address.
-
-### Why the two-plane model matters for AgentCatalyst's value proposition
-
-The reason AgentCatalyst forbids direct deployment from developer workstations and forces this two-plane model is governance. Each plane enforces a specific control:
-
-| Governance concern | How it's enforced |
-|---|---|
-| Infrastructure follows company standards | Jenkins runs OPA policy checks before Terraform apply |
-| All changes are traceable | Every deployment has Jenkins run ID + Harness execution ID logged in Splunk |
-| Production deployments require approval | Harness manual approval gate before pre-prod promotion |
-| Quality gates protect production | Arize evaluation must pass before each environment promotion |
-| Bad deployments don't take down production | Canary deployment + automatic SLO-based rollback in Harness |
-| No one can bypass the pipeline | Direct deployment is forbidden by three-layer skill override; CI/CD is the only path |
-
-If a developer bypassed the pipeline and deployed directly from their workstation, none of this happens. The agent goes straight to 100% traffic with no policy checks, no quality gates, no canary, no rollback, no audit trail. That is the failure mode AgentCatalyst is designed to prevent.
-
-### Jenkins vs Harness — purpose summary
-
-| Question | Jenkins | Harness |
+| Layer | What it does | When it runs |
 |---|---|---|
-| What does it deploy? | Infrastructure (cloud resources) | Application (agent code) |
-| What tool does it run? | Terraform | Container deployment + traffic shifting |
-| How often does it run? | Infrequently (weeks) | Frequently (multiple times per day) |
-| Rollback strategy | Re-run Terraform (manual, careful) | Automatic traffic shift to previous version |
-| Pipeline ownership | Platform engineering | Application team (with platform-provided template) |
-| Unit of change | Terraform plan | Container image |
-| Gate types | OPA policy checks | Arize quality gates + SLO validation |
+| **Layer 1: Inner Loop** | Pre-commit hook runs 5-10 evalsets in <60 seconds via Vertex AI Eval SDK. Blocks commit if metrics regress >10%. | Developer's laptop, before `git commit` |
+| **Layer 2: Deep Dive** | ADK tracing + Arize Phoenix captures LLM calls, tool calls, agent delegation. Explains WHY agents fail. | Local dev (`localhost:6006`) + deployed (OTel → Dynatrace) |
+| **Layer 3: Outer Loop** | 3-phase Harness pipeline: Phase A (Arize quality gates), Phase B (AutoSxS baseline comparison), Phase C (HITL triage for flagged cases) | CI/CD pipeline, after PR merge |
 
-Both are essential. Jenkins ensures the agent's environment is correct. Harness ensures the agent's deployment is safe. Together they form the deployment pipeline that lets AgentCatalyst safely take agents from `git push` to production at enterprise scale.
+**Golden dataset quality gate (enforced by pre-commit hook):**
 
----
+The pre-commit hook validates the golden dataset before allowing a commit:
 
-## Layer 5 — RUNTIME & OPERATE (deep dive)
-
-### Observability pipeline (all archetypes)
-
-```mermaid
-graph LR
-    APP["Application<br/>(agent / service / pipeline)"]
-    OTEL["OTel Collector"]
-    DYN2["Dynatrace<br/>(APM)"]
-    CT["Cloud Trace"]
-    CL["Cloud Logging"]
-    SPL["Splunk<br/>(SIEM)"]
-
-    APP -->|"OTel spans + metrics"| OTEL
-    OTEL -->|"traces"| DYN2
-    OTEL -->|"traces"| CT
-    APP -->|"structured logs"| CL
-    CL -->|"log forwarding"| SPL
-    DYN2 -->|"alerts"| SPL
-```
-
-### Runtime by archetype
-
-| Archetype | Runtime | Security | Scaling |
-|---|---|---|---|
-| **Agentic** | Agent Runtime (Agent Engine) | Model Armor + VPC-SC + CMEK | Managed by Agent Runtime |
-| **Microservice** | Cloud Run | VPC-SC + CMEK | Cloud Run autoscaling |
-| **Pipeline** | Dataflow | VPC-SC + CMEK | Dataflow autoscaling |
-| **API** | Cloud Run + Apigee | Apigee policies + VPC-SC + CMEK | Cloud Run autoscaling |
-
-### Agent Sessions and state management (agentic archetype)
-
-Agent Runtime (Agent Engine) provides built-in session management:
-
-| Capability | Service | Configuration |
+| Check | Minimum | What it catches |
 |---|---|---|
-| **Session persistence** | Cloud Firestore (production) or In-Memory (dev) | Conversation context survives pod restarts. Configurable via `platform.runtime` in the YAML. |
-| **Long-term memory** | Cloud Firestore | Cross-session memory for returning users. Agent Runtime manages automatically. |
-| **Artifact storage** | Cloud Storage | Binary artifacts (files, images) generated during sessions. |
-| **Session timeout** | Agent Runtime config | Configurable idle timeout (default: 30 min). Sessions cleaned up after expiry. |
+| Total entries | ≥ 10 per agent | Low-coverage datasets that make evaluation meaningless |
+| Edge cases | ≥ 3 | Datasets that only test the happy path |
+| Negative tests | ≥ 1 (expected failure) | Datasets that don't verify error handling |
+| All agents covered | 100% of agents in blueprint | Agents with zero evaluation coverage |
 
-### SLO definitions (all archetypes)
+If the golden dataset fails any check, the pre-commit hook blocks with: "Golden dataset quality gate failed: [reason]. Add more entries before committing. See Developer Guide, Section 4b for guidance."
 
-Every deployed application must meet these SLOs, monitored by Dynatrace:
+> For operational procedures for EvalOps maintenance (pre-commit hook tuning, Phoenix retention, Harness threshold updates, meta-evaluation procedure), see the Operations Runbook, Section 8.
 
-| SLO | Target | Measurement | Alerting threshold |
-|---|---|---|---|
-| **Availability** | 99.9% | Successful responses / total requests (5-min windows) | < 99.5% for 10 min → P2 alert |
-| **Latency (P50)** | < 500ms (API/microservice), < 2s (agent) | Dynatrace custom metric | > 2× target for 5 min → P3 alert |
-| **Latency (P99)** | < 2s (API/microservice), < 10s (agent) | Dynatrace custom metric | > 2× target for 5 min → P2 alert |
-| **Error rate** | < 1% | 5xx responses / total responses | > 2% for 5 min → P2 alert |
-| **Token consumption** (agentic) | < budget per session | Custom metric per agent | > 150% budget → P3 alert |
+**Golden Dataset lifecycle:** Acceptance criteria in spec → starter golden dataset → developer curation during testing → production feedback (Arize drift detection → failure sampling → human annotation → golden dataset update) → quarterly meta-evaluation (audit automated judges, ≥85% agreement threshold).
 
-### Alerting and incident response
+### Layer 5 — Runtime & Operate
 
-```mermaid
-graph LR
-    DYN3["Dynatrace\n(detects anomaly)"]
-    SPL2["Splunk\n(correlates events)"]
-    PD["PagerDuty / OpsGenie\n(pages on-call)"]
-    RB["Harness\n(auto-rollback)"]
-    
-    DYN3 -->|"P2/P1 alert"| PD
-    DYN3 -->|"SLO violation"| RB
-    DYN3 -->|"security event"| SPL2
-    SPL2 -->|"correlated threat"| PD
-    RB -->|"rollback complete"| DYN3
-```
+All runtime services are GA with SLA backing:
 
-| Severity | Trigger | Response | SLA |
-|---|---|---|---|
-| **P1 — Outage** | Availability < 95% for 5 min | Page on-call immediately. Harness auto-rollback triggers. Incident bridge opened. | Acknowledge: 5 min. Mitigate: 30 min. |
-| **P2 — Degradation** | SLO violation (latency, error rate) for 10 min | Page on-call. Investigate via Dynatrace traces. Manual rollback if auto-rollback didn't trigger. | Acknowledge: 15 min. Mitigate: 1 hour. |
-| **P3 — Warning** | Metric approaching threshold | Slack notification to team channel. Investigate during business hours. | Acknowledge: 4 hours. Resolve: next sprint. |
-| **Security** | Model Armor violation, suspicious A2A traffic, audit log anomaly | Splunk auto-correlates. Security team paged. Agent quarantined if threat confirmed. | Acknowledge: 15 min. Investigate: 1 hour. |
-
----
-
-## Reading the diagrams as one story
-
-Start at **Layer 1** where the developer runs `/specify` and fills in the archetype-specific template. The coding agent saves `spec.md`. The developer runs `/plan` and answers technical questions. The coding agent saves `plan.md`.
-
-Flow to **Layer 2** where the developer runs `/catalyst.blueprint`. The coding agent sends `spec.md` + `plan.md` to the Blueprint Advisor on Agent Runtime. The Blueprint Advisor queries the archetype-specific pattern catalog and tool registry in Vertex AI Search, and assembles `app-blueprint.yaml`. The developer reviews and edits.
-
-Flow to **Layer 3** where the developer runs `/catalyst.generate`. The coding agent reads the YAML and generates code guided by domain skills (archetype-specific) and company overlay skills (shared). For agents: `adk-agents` skill generates ADK classes. For microservices: `fastapi` skill generates service code. For all archetypes: `company-terraform-patterns` generates infrastructure, `company-cicd` generates pipeline definitions, `company-observability` generates monitoring config.
-
-Flow to **Layer 4** where the developer commits and opens a PR. Jenkins provisions infrastructure via Terraform. Harness deploys through Non-Prod → Pre-Prod → Prod with canary gates. Code is NEVER deployed from the developer's machine.
-
-Flow to **Layer 5** where the application runs on its archetype-appropriate runtime (Agent Runtime, Cloud Run, or Dataflow), secured by VPC-SC + CMEK, monitored by Dynatrace + OTel + Cloud Logging, with alerts forwarded to Splunk.
-
----
-
-## Worked Example — First Notice of Loss (FNOL) Agent
-
-### FNOL component architecture
-
-The FNOL agent uses a Coordinator root with 4 sub-agents: Sequential intake (classify + extract), Parallel enrichment (3 sources simultaneously), Loop summary (iterate until quality threshold met), and HITL adjuster review. Connected to BigQuery (analytics), Cloud SQL (active claims), Vertex AI Search (policy documents) via MCP, and 3 external A2A agents (body shop, rental car, police report). Full component diagram is in the Developer Guide.
-
-
-### Step-by-step walkthrough
-
-The FNOL deployment scenario follows the same flow described in the end-to-end thread (above), with these specifics:
-
-1. **PR opened** — generated code committed to `feature/fnol-agent` branch via GitHub MCP Server
-2. **Jenkins runs Terraform** — provisions Cloud Run, Apigee, Cloud SQL, Model Armor, VPC-SC (~4 minutes)
-3. **Harness Non-Prod** — deploys agent, runs integration tests against mock endpoints
-4. **Harness 3-phase EvalOps** — Phase A: Arize quality gates (pass_rate ≥ 0.95, latency ≤ 3s). Phase B: AutoSxS baseline comparison against golden dataset. Phase C: 2 edge cases routed to HITL triage (adjuster approves).
-5. **Harness Pre-Prod** — canary at 10% traffic for 30 minutes. Dynatrace monitors error rate.
-6. **Harness Production** — progressive rollout: 25% → 50% → 100% over 2 hours. Automatic rollback if error rate > 1%.
-7. **Total time: PR merge to production** — approximately 3 hours (mostly waiting for canary observation)
-
-
-## Data Model
-Order: id, customer_id, items[], total, status, created_at
-OrderItem: product_id, quantity, unit_price
-```
-
-**Step 2:** `/plan` → region: us-central1, framework: FastAPI, CI/CD: Jenkins + Harness
-
-**Step 3:** `/catalyst.blueprint` → Blueprint Advisor searches the **microservice pattern catalog** and returns `service-blueprint.yaml`:
-
-```yaml
-metadata:
-  name: order-service
-  archetype: microservice
-  template: fastapi
-
-platform:
-  gcp_project: ecommerce-prod
-  gcp_region: us-central1
-  runtime: cloud_run
-
-endpoints:
-  - method: POST
-    path: /orders
-    handler: create_order
-  - method: GET
-    path: /orders/{id}
-    handler: get_order
-  - method: PUT
-    path: /orders/{id}/cancel
-    handler: cancel_order
-
-databases:
-  - name: orders-db
-    type: postgresql
-    access: read_write
-  - name: orders-cache
-    type: redis
-    access: read_only
-
-events:
-  - name: order.created
-    transport: pubsub
-    publisher: order-service
-  - name: order.cancelled
-    transport: pubsub
-    publisher: order-service
-
-infrastructure:
-  terraform:
-    modules:
-      - name: cloud-run
-        source: github.com/company/tf-modules//cloud-run
-        version: v2.3.0
-      - name: cloud-sql
-        source: github.com/company/tf-modules//cloud-sql
-        version: v2.4.0
-  security:
-    dlp: true
-    cmek_key_ring: projects/ecommerce-prod/locations/us-central1/keyRings/svc-keys
-    vpc_sc_perimeter: true
-  observability:
-    dynatrace: true
-    otel_collector: true
-  cicd:
-    jenkins:
-      template: agent-infra-plan-apply-v3
-    harness:
-      template: svc-deploy-canary-v2
-```
-
-**Step 5:** `/catalyst.generate` → coding agent uses `fastapi` domain skill + same company overlay skills:
-
-```
-order-service/
-├── app/
-│   ├── main.py                           ← FastAPI app with routes
-│   ├── routes/
-│   │   ├── orders.py                     ← CRUD endpoints
-│   │   └── webhooks.py                   ← Payment webhook handler
-│   ├── models/
-│   │   ├── order.py                      ← Pydantic models
-│   │   └── order_item.py
-│   ├── services/
-│   │   ├── order_service.py              ← ENGINEER IMPLEMENTS
-│   │   └── payment_client.py             ← ENGINEER IMPLEMENTS
-│   ├── database/
-│   │   ├── connection.py                 ← SQLAlchemy setup
-│   │   └── migrations/                   ← Alembic migrations
-│   └── events/
-│       └── publisher.py                  ← Pub/Sub event publisher
-├── deployment/terraform/                 ← SAME company TF modules
-├── observability/                        ← SAME Dynatrace + OTel config
-├── ci-cd/                                ← SAME Jenkins + Harness pipelines
-│   ├── Jenkinsfile
-│   └── harness-pipeline.yaml
-├── Dockerfile
-├── requirements.txt
-└── service-blueprint.yaml
-```
-
-**The key insight:** The `deployment/`, `observability/`, and `ci-cd/` directories are generated by the **same company overlay skills** used for the agentic FNOL agent. The `app/` directory is different — generated by the `fastapi` domain skill instead of `adk-agents`. One investment in overlay skills, reusable across every application type.
-
----
-
-## Production Readiness Checklist
-
-| # | Criteria | Owner | Archetype |
-|---|---|---|---|
-| 1 | Pattern catalog generated by Pattern Factory + EA reviewed | EA | Per archetype |
-| 2 | Pattern catalog ingested into Vertex AI Search via continuous pipeline | Platform eng | Per archetype |
-| 3 | Domain skills authored and tested | EA + domain teams | Per archetype |
-| 4 | Company overlay skills authored and tested | Platform eng | Shared (all) |
-| 5 | Tool registry enrichment metadata authored for all tools/tasks (≥ 95% completeness) | Platform eng | Per LOB |
-| 6 | Tool registry quality scorecard deployed (search hit rate, acceptance rate tracked per tool) | Platform eng | Shared (all) |
-| 7 | Search quality regression suite built (30–50 reference specs with golden YAML outputs) | EA + Platform eng | Per archetype |
-| 8 | CI quality gates configured (regression suite blocks Blueprint Advisor changes failing thresholds) | Platform eng | Shared (all) |
-| 9 | Acceptance telemetry pipeline deployed (YAML edits captured, dashboards live) | Platform eng | Shared (all) |
-| 10 | Pattern composition validator implemented (static analyzer with composition rules) | EA + Platform eng | Per archetype |
-| 11 | Tool lifecycle management workflow documented (active/preview/deprecated/sunset states) | Platform eng | Shared (all) |
-| 12 | Tool deprecation playbook authored (notification, replacement, migration tooling) | Platform eng | Shared (all) |
-| 13 | Operational runbook authored (failure modes, fallback behaviors, rollback procedures) | Platform eng | Shared (all) |
-| 14 | Blueprint Advisor deployed on Agent Runtime (dev + staging + prod) | Platform eng | Shared (all) |
-| 15 | Blueprint Advisor system prompt reviewed by EA, passes regression suite | EA | Per archetype |
-| 16 | Auto-rollback configured on production regression | Platform eng | Shared (all) |
-| 17 | Skill repo published to GitHub | Platform eng | Shared (all) |
-| 18 | Archetype preset published to internal preset catalog | EA | Per archetype |
-| 19 | Pilot completed end-to-end (spec → generate → deploy) | Pilot team | Per archetype |
-| 20 | Developer guide published, including spec quality self-check | EA | Per archetype |
-| 21 | LOB onboarding playbook authored (training, office hours, ramp-up plan) | EA + Platform eng | Per LOB |
-| 22 | Skill and preset governance process documented | Platform eng + EA | Shared (all) |
-| 23 | Quarterly quality review process established (catalog enrichment, system prompt, telemetry) | Platform eng + EA | Shared (all) |
-
----
-
-## Risks and Mitigations
-
-| # | Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|---|
-| 1 | **Blueprint Advisor recommends wrong patterns** — spec is ambiguous or catalog metadata is poor | Medium | Medium | Spec template coaching prompts guide developers to write unambiguous language. Search quality regression suite validates catalog metadata. Developer reviews and edits the YAML before generation — the Blueprint Advisor recommends, humans decide. |
-| 2 | **Catalog enrichment metadata is incomplete or low-quality** — search returns noisy results | High | High | Quality scorecard tracks enrichment completeness per tool. Tools cannot be promoted from preview to active until completeness ≥ 95% and search hit rate ≥ 80%. Acceptance telemetry surfaces tools needing enrichment improvement. |
-| 3 | **Skills become outdated** — Google ships a new ADK version with breaking changes | Medium | High | Skills are version-controlled in Git with semver tags. Platform engineering monitors ADK releases and updates skills within 2 weeks. CI validates skills against latest ADK. Skills include `adk_version_compatibility` in frontmatter. |
-| 4 | **Coding agent ignores skill instructions** — generates code that doesn't follow the skill patterns | Low | Medium | Three-layer override (skill + GEMINI.md + command) makes instructions unambiguous. Company overlay skills use strong directive language ("DO NOT," "MUST," "ALWAYS"). Coding agent output is reviewed in PR — team catches deviations. |
-| 5 | **Developer edits YAML incorrectly** — invalid agent topology, wrong tool assignment, unpinned module version | Medium | Low | YAML schema validation runs before code generation. Pattern composition validator catches architecturally-invalid combinations. Common errors (missing `assigned_to`, unpinned version, invalid agent type) caught automatically. |
-| 6 | **No telemetry on developer acceptance — quality regressions invisible** | High | High | Acceptance telemetry pipeline captures all YAML edits anonymously. Dashboards track acceptance rate per tool, override patterns per LOB, confidence calibration. Quarterly reviews drive enrichment and system prompt improvements. |
-| 7 | **System prompt change breaks recommendation quality** — silent regression after deployment | Medium | High | Search quality regression suite (30–50 reference specs with golden outputs) runs on every PR. Quality gates: ≥ 90% pattern accuracy, ≥ 85% tool/skill accuracy. Auto-rollback on production regression. |
-| 8 | **Pattern composition produces architecturally-invalid YAML** — LoopAgent + HITL, parallel writes to shared resource, etc. | Medium | Medium | Pattern composition validator runs as static analyzer before code generation. Composition rules versioned with pattern catalog. Errors block generation; warnings inform developer. |
-| 9 | **Tool deprecation breaks existing projects** — generated YAMLs reference tools that no longer exist | Medium | Medium | Tools have lifecycle states (active/preview/deprecated/sunset). YAML pins registry version at blueprint time. Deprecation workflow includes notification, replacement identification, migration timeline. Migration tooling (`catalyst migrate`) automates compatible replacements. |
-| 10 | **Spec quality varies across LOBs** — Blueprint Advisor accuracy degrades for poorly-written specs | High | Medium | Spec quality self-check (10-question developer checklist). Telemetry detects LOB-specific override patterns. EA-led spec quality reviews triggered when LOB acceptance < 60%. Spec coaching during LOB onboarding. |
-| 11 | **Vendor lock-in via Vertex AI Search** — company becomes dependent on GCP for pattern/skill discovery | Low | Medium | Pattern and skill catalogs are Markdown files in Git — portable to any search engine. Vertex AI Search is the discovery layer, not the storage layer. Switching to Elasticsearch or Typesense requires only re-ingestion, not content rewrite. |
-| 12 | **Company overlay skills diverge from company standards** — skills encode outdated Terraform module versions or deprecated CI/CD templates | Medium | Medium | Quarterly review of overlay skills by platform engineering + EA. CI runs generated code against company linting/security rules. Version pinning prevents drift — skills reference exact versions, not "latest." |
-| 13 | **Adoption resistance** — teams prefer their existing manual workflow | Medium | High | Start with high-pain use case (agentic — 4-6 week gap). Demonstrate ROI with FNOL pilot. Don't mandate — let early adopters create pull. Executive sponsorship helps but shouldn't be the primary driver. |
+| Component | Service | Purpose |
+|---|---|---|
+| Agent runtime | Cloud Run | Container-based agent hosting, scale-to-zero |
+| API Gateway | Apigee Runtime Gateway | OAuth 2.1/OIDC, mTLS, rate limiting, API Products |
+| Observability | Dynatrace + Splunk + OTel Collector | APM, SIEM, distributed tracing |
+| Content screening | Model Armor (standard) | Google's default single-pass screening. Segmented Model Armor (per-source attribution with source-specific remediation) is a future roadmap item — it requires custom implementation beyond the Model Armor API. Standard Model Armor provides adequate content screening for GA. |
+| Security | VPC-SC + CMEK + Secret Manager + Workload Identity | Data protection, key management, identity |
 
 ---
 
@@ -1259,263 +437,58 @@ order-service/
 
 ### Who owns what
 
-| Component | Owner | Update process |
+| Component | Owner | Responsibilities |
 |---|---|---|
-| Pattern catalogs | EA + Pattern Factory | Pattern Factory generates draft pattern docs and reference implementations. EA reviews and approves. Continuous ingestion pipeline embeds approved patterns into Vertex AI Search. |
-| Domain skills | EA + domain teams | Domain teams author. EA reviews. Published to skills repo. |
-| Company overlay skills | Platform engineering | Platform eng maintains. Changes via PR with EA consultation. |
-| Tool registry enrichment metadata | Platform engineering | Per-tool enrichment authored at registration. Quality scorecard reviewed monthly. Updates triggered by acceptance telemetry. |
-| Blueprint Advisor system prompt | EA + Platform eng | Joint ownership. System prompt versioned in Git. Changes via PR — EA reviews for pattern accuracy, platform eng reviews for behavior. Must pass regression suite (≥ 90% pattern accuracy, ≥ 85% tool/skill accuracy) before deployment. Auto-rollback on production regression. |
-| Search quality regression suite | EA + Platform eng | Joint ownership. 30–50 reference specs with golden YAML outputs. Expanded as new patterns/archetypes added. Runs on every Blueprint Advisor change. |
-| Acceptance telemetry pipeline | Platform engineering | Captures YAML edits, surfaces dashboards. Quarterly review with EA produces enrichment improvement priorities. |
-| Pattern composition validator | EA + Platform eng | Composition rules versioned alongside pattern catalog. Updated when patterns added/deprecated. |
-| Tool lifecycle (active/preview/deprecated/sunset) | Platform engineering | Lifecycle states managed in registry. Deprecation workflow includes notification, replacement identification, migration timeline. |
-| Blueprint Advisor deployment | Platform engineering | Deployed on Agent Runtime (dev → staging → prod). Config changes via Terraform. |
-| Archetype presets | EA | EA maintains preset files. Published to internal catalog. |
-| Skill repo | Platform engineering | All skills version-controlled. Semver tags. |
+| AgentCatalyst platform | Platform Engineering | Blueprint Advisor MCP Server, overlay skills, preset catalog, Vertex AI Search data stores |
+| Pattern catalog | Enterprise Architecture | Pattern documentation, composition rules, HA/DR views |
+| Individual use cases | LOB development teams | Spec writing, blueprint review, FunctionTool refinement, system prompts |
+| CI/CD pipelines | DevOps / Platform Engineering | Jenkins + Harness configuration, deployment policies |
+| Company overlay skills | Platform Engineering | Terraform modules, observability templates, security policies |
 
 ### How to request changes
 
-To request new patterns, skills, or tools: submit a PR to the AgentCatalyst catalog repo. The platform team reviews weekly. To report Blueprint Advisor quality issues: file a ticket with the spec.md and the generated YAML. The platform team uses acceptance telemetry diffs to prioritize fixes.
+To request new patterns, skills, or tools: submit a PR to the AgentCatalyst catalog repo. The platform team reviews weekly. To report Blueprint Advisor quality issues: file a ticket with the spec.md and the generated YAML. See the Operations Runbook for telemetry-driven quality improvement procedures.
 
+---
 
 ## What AgentCatalyst is NOT
 
-| What it IS | What it is NOT |
-|---|---|
-| A development accelerator — speeds up idea to generated code | A runtime platform — it generates code; the runtime runs it |
-| AI-advised architecture — Blueprint Advisor recommends; developer decides | AI-decided architecture — the developer always has final say |
-| Skill-guided code generation — skills teach the coding agent company patterns | A proprietary code generator — uses the open SKILL.md standard |
-| Archetype-agnostic — same pattern for agents, microservices, pipelines, APIs | Agent-only — the agentic archetype is Phase 1, not the only archetype |
-| Company-grounded — company overlay skills ensure consistency | Generic — every company's skills are different |
-| GA-only — every GCP component is GA with SLA backing | Dependent on pre-GA tools — no agents-cli, no preview services |
-| Open tools — Spec Kit + ADK + SKILL.md + YAML | Proprietary platform — no vendor lock-in |
-| An internal development tool | A marketplace product — this is for internal use only |
+- **Not a deployment tool.** It generates code and pipeline definitions. Your CI/CD deploys.
+- **Not a hosting platform.** It doesn't run your agents. Cloud Run + Apigee hosts them.
+- **Not a replacement for developers.** It generates a first draft (80-95%). Developers review, refine, and own the code.
+- **Not AgentForge.** AgentForge (AnchorOps.ai) uses meta-skills + signed Design Contracts + attestation chains — completely different mechanisms. AgentCatalyst uses Blueprint Advisor RAG + skill-constrained generation. Zero IP overlap.
+- **Not a one-size-fits-all template.** Each archetype has its own preset, catalog, and domain skill. The platform adapts.
 
 ---
 
-## Conclusion — The Road Ahead
+## Production Readiness Checklist
 
-AgentCatalyst gives every development team a standardized, AI-assisted path from business requirements to production-ready code — regardless of application type. The developer describes their problem in a structured template. The Blueprint Advisor recommends an architecture. The coding agent, guided by domain skills and company overlay skills, generates the complete project.
-
-The same company overlay skills work across agents, microservices, data pipelines, and APIs. One investment in Terraform patterns, observability standards, CI/CD templates, and security configuration — reusable across every application type the company builds.
-
-**Phase 1 (now):** Agentic AI archetype — 11 patterns, ADK domain skills, FNOL pilot.
-**Phase 2 (next):** Microservice archetype — microservice patterns, FastAPI/Spring Boot skills.
-**Phase 3:** Data Pipeline archetype — pipeline patterns, Dataflow/Beam skills.
-**Phase 4:** API archetype — API patterns, OpenAPI/gRPC skills.
-
-Each phase adds a new preset and new domain skills. The platform infrastructure — Blueprint Advisor, skill mechanism, Spec Kit integration, company overlay skills, CI/CD pipelines — is built once and reused.
-
-**Next steps for Phase 1:**
-1. Author 11 agentic pattern documents (8 sections + 176 HA/DR scenarios)
-2. Ingest pattern catalog into Vertex AI Search
-3. Author agentic domain skills (adk-agents, adk-tools, adk-mcp, model-armor)
-4. Deploy Blueprint Advisor on Agent Runtime with agentic system prompt
-5. Create `agentcatalyst-agentic` preset and publish internally
-6. Pilot with FNOL use case end-to-end
-7. Establish governance: pattern ownership, skill change process, preset versioning
-8. Roll out to all agent development teams
-
----
-
-## Appendix A — AgentCatalyst Agentic Preset (Complete Code)
-
-This appendix contains the full source of every file in the `agentcatalyst-agentic` preset. When a developer runs `specify preset add agentcatalyst-agentic`, these files are installed into their project's `.specify/` folder.
-
-### preset.yml
-
-The preset manifest declares: preset name, version, description, required skills (with versions), template paths, command paths, memory file paths, and catalog endpoint. Full preset.yml is maintained in the AgentCatalyst preset repository.
-
-
-### templates/spec-template.md
-
-See the AgentCatalyst Developer Guide for the full template content. Summary: 10-section structured format with business logic sections.
-
-
-### templates/plan-template.md
-
-See the AgentCatalyst Developer Guide for the full template content. Summary: technical decisions template.
-
-
-### templates/tasks-template.md
-
-See the AgentCatalyst Developer Guide for the full template content. Summary: post-generation checklist.
-
-
-### commands/catalyst.blueprint.md
-
-```markdown
----
-name: catalyst.blueprint
-description: Submit spec + plan to Blueprint Advisor for architecture recommendation
----
-
-# Generate Architecture Blueprint
-
-## Steps
-1. Read `spec.md` and `plan.md` from workspace root
-2. Validate both files contain required sections
-3. Submit to Blueprint Advisor API:
-   POST $CATALYST_BLUEPRINT_API/api/blueprint
-   Body: { "spec": "<spec.md>", "plan": "<plan.md>" }
-4. Save response as `app-blueprint.yaml`
-5. Display summary: agents, tools, skills, infrastructure
-6. Remind: "Review the YAML and edit before running /catalyst.generate"
-
-## Error Handling
-- Missing spec/plan: prompt to run /specify and /plan first
-- API unreachable: check CATALYST_BLUEPRINT_API env var
-- Invalid response: display raw response, contact platform eng
-```
-
----
-
-### commands/catalyst.generate.md
-
-```markdown
----
-name: catalyst.generate
-description: Generate agent project from app-blueprint.yaml using skills
----
-
-# Generate Agent from Blueprint
-
-## CRITICAL: No direct deployment
-- DO NOT deploy directly to GCP from the developer's machine
-- DO NOT generate Cloud Build config — company uses Jenkins
-- GENERATE Jenkinsfile + harness-pipeline.yaml using company-cicd skill
-- GENERATE Terraform using company-terraform-patterns skill
-
-## Skill Activation Sequence
-| Step | Action | Skill |
+| # | Check | Status |
 |---|---|---|
-| 1 | Validate app-blueprint.yaml | (schema check) |
-| 2 | Create project structure | adk create (GA ADK CLI) |
-| 3 | Generate ADK agent classes | adk-agents |
-| 4 | Generate MCP connections | adk-mcp |
-| 5 | Generate A2A clients | adk-tools |
-| 6 | Generate FunctionTool implementations | adk-tools |
-| 7 | Install skills | gh skill install |
-| 8 | Generate Model Armor callbacks | company-security |
-| 9 | Generate Terraform | company-terraform-patterns |
-| 10 | Generate Dynatrace + OTel config | company-observability |
-| 11 | Generate CI/CD pipelines | company-cicd |
-| 12 | Replace GEMINI.md with company version | (template) |
-
-## Error Handling
-- Missing YAML: prompt to run /catalyst.blueprint first
-- Skills not installed: display installation command
-- YAML validation fails: show specific errors
-```
+| 1 | All overlay skills pinned to specific versions | ⬜ |
+| 2 | Blueprint Advisor MCP Server deployed with OAuth 2.0 | ⬜ |
+| 3 | Vertex AI Search data stores populated and search quality validated (≥80% precision) | ⬜ |
+| 4 | Company system prompt reviewed by EA + Security | ⬜ |
+| 5 | Constitution.md reviewed and approved | ⬜ |
+| 6 | Pre-commit evaluation hook tested end-to-end | ⬜ |
+| 7 | 3-phase Harness evaluation pipeline tested | ⬜ |
+| 8 | Golden dataset baseline established | ⬜ |
+| 9 | FNOL reference implementation passing all evaluation gates | ⬜ |
+| 10 | 3 additional use cases validated beyond FNOL | ⬜ |
+| 11 | Developer documentation (dev guide) published | ⬜ |
+| 12 | Operations runbook (ops procedures) published | ⬜ |
 
 ---
 
-### memory/adk-reference.md
+## Risks and Mitigations
 
-```markdown
----
-role: reference
-description: ADK class reference (GA)
----
-
-# ADK Classes
-
-| Class | Use for | Key params |
-|---|---|---|
-| LlmAgent | Reasoning agent + root coordinator | name, model, tools, sub_agents, system_instruction |
-| SequentialAgent | Ordered pipeline | name, sub_agents (in order) |
-| ParallelAgent | Concurrent tasks | name, sub_agents (parallel) |
-| LoopAgent | Iterative refinement | name, sub_agents, max_iterations |
-
-| Tool | Use for | Key params |
-|---|---|---|
-| FunctionTool | Wrap Python function | func |
-| MCPToolset | MCP server connection | connection_params (endpoint, transport, auth) |
-| AgentTool | A2A agent connection | agent (endpoint, auth, timeout) |
-| SkillToolset | Load installed skills | skill_path |
-| LongRunningFunctionTool | Async human approval | func |
-```
-
----
-
-### memory/company-patterns.md
-
-```markdown
----
-role: reference
-description: Company coding standards
----
-
-# Company Standards
-
-## Naming
-- Agents: snake_case (e.g., intake_pipeline)
-- Tools: kebab-case (e.g., bigquery-policy)
-- Projects: kebab-case (e.g., fnol-coordinator)
-
-## Project Structure
-app/ → agent code. deployment/terraform/ → IaC. observability/ → monitoring.
-ci-cd/ → pipeline definitions. Never hardcode credentials. Use Secret Manager.
-```
-
----
-
-### memory/approved-tools.md
-
-```markdown
----
-role: reference
-description: Approved MCP servers and A2A agents
-updated: 2026-05-01
----
-
-# Approved Tools
-
-## MCP Servers
-| Name | Endpoint | Auth |
-|---|---|---|
-| bigquery-mcp | bigquery.googleapis.com | workload_identity |
-| cloud-sql-mcp | cloudsql-mcp.internal:8080 | workload_identity |
-| vertex-search-mcp | vertexai-search.googleapis.com | workload_identity |
-
-## A2A Agents
-| Name | Endpoint | Auth |
-|---|---|---|
-| body-shop-network | https://bodyshop.partner.com/a2a | spiffe |
-| rental-car-service | https://rental.partner.com/a2a | spiffe |
-
-## Requesting new tools
-Open a request in Platform Engineering JIRA with: name, endpoint, auth, justification.
-```
-
----
-
-### memory/infra-standards.md
-
-```markdown
----
-role: reference
-description: Terraform and infrastructure standards
-updated: 2026-05-01
----
-
-# Infrastructure Standards
-
-## Terraform Modules
-| Module | Source | Version |
-|---|---|---|
-| agent-runtime | github.com/company/tf-modules//agent-runtime | v3.1.0 |
-| cloud-sql | github.com/company/tf-modules//cloud-sql | v2.4.0 |
-| vpc-sc | github.com/company/tf-modules//vpc-sc | v1.8.0 |
-| cmek | github.com/company/tf-modules//cmek | v1.2.0 |
-
-## Rules
-- Always pin exact version tags (never "latest")
-- Major version bumps require EA review
-- CI/CD: Jenkins template agent-infra-plan-apply-v3, Harness template agent-deploy-canary-v4
-- CMEK required for production. VPC-SC required for production.
-```
+| # | Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|---|
+| 1 | Blueprint Advisor recommends wrong pattern | Medium | Medium | Confidence scores visible in YAML. Developer reviews. `validate_composition` catches invalid nesting. Acceptance telemetry tracks accuracy. |
+| 2 | Coding agent ignores constitution.md | Low | High | Test with each supported coding agent. Constitution rules are absolute — skills cannot override. |
+| 3 | Stale catalogs produce outdated recommendations | Medium | Medium | Weekly catalog health checks. Embedding freshness pipeline. Search quality regression suite. See Operations Runbook. |
+| 4 | Business rules too complex for IF/THEN format | Medium | Low | Spec template coaching prompts help developers decompose complex rules. Proprietary algorithms handled as manual P1 tasks (5-20%). |
+| 5 | Adoption resistance | Medium | High | Start with high-pain use case (agentic — 4-6 week gap). Demonstrate ROI with FNOL pilot. Let early adopters create pull. |
 
 ---
 
@@ -1524,11 +497,10 @@ updated: 2026-05-01
 | Document | Audience | What it covers |
 |---|---|---|
 | **This Architecture Document** | Architects, tech leads | Architectural decisions, layer deep dives, cost model, ROI |
-| **AgentCatalyst Developer Guide** (GA or agents-cli variant) | Developers | Step-by-step walkthroughs, full preset file contents, code examples, spec writing, troubleshooting |
+| **AgentCatalyst Developer Guide** (GA) | Developers | Step-by-step walkthroughs, full preset file contents, code examples, spec writing, troubleshooting |
 | **AgentCatalyst Operations Runbook** | Platform engineering | Wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix, EvalOps operations |
 
-*Operational procedures (wire-level APIs, regression testing, telemetry, tool lifecycle, failure modes) have been moved to the Operations Runbook to keep this architecture document focused on architectural decisions.*
-
+*Operational procedures (wire-level APIs, regression testing, telemetry, tool lifecycle, failure modes) are maintained in the Operations Runbook to keep this architecture document focused on architectural decisions.*
 
 ---
 
@@ -1857,7 +829,7 @@ usage: Run /tasks after receiving blueprint to see the breakdown
 ```markdown
 ---
 name: catalyst.blueprint
-description: Send spec + plan to the Blueprint Advisor for architecture recommendation
+description: Connect to Blueprint Advisor MCP Server for architecture recommendation
 usage: /catalyst.blueprint
 ---
 
@@ -1865,17 +837,30 @@ usage: /catalyst.blueprint
 
 Read `spec.md` and `plan.md` from the current workspace.
 
-Package them as a JSON payload:
-```json
-{
-  "spec": "<contents of spec.md>",
-  "plan": "<contents of plan.md>",
-  "archetype": "agentic"
-}
-```
+Connect to the Blueprint Advisor MCP Server:
+  endpoint: mcp://blueprint-advisor.[company-domain].run.app
+  auth: OAuth 2.0 (company SSO)
 
-Send POST to the Blueprint Advisor endpoint:
-`https://blueprint-advisor.[company-domain].run.app/recommend`
+Call the `submit_spec_and_plan` MCP tool with:
+  - spec: contents of spec.md
+  - plan: contents of plan.md
+  - archetype: from preset.yml (e.g., "agentic")
+
+The MCP server internally runs the Blueprint Advisor LlmAgent:
+  1. Queries Vertex AI Search catalogs (patterns, skills, tools)
+  2. Applies LLM reasoning guided by company system prompt
+  3. Assembles the blueprint YAML
+  4. Returns the result via MCP protocol
+
+The coding agent CANNOT access Vertex AI Search directly.
+The coding agent CANNOT invoke the LlmAgent directly.
+All intelligence lives on the server side, accessed only via MCP tools.```
+
+Connect to the Blueprint Advisor MCP Server:
+`mcp://blueprint-advisor.[company-domain].run.app`
+
+Call the `submit_spec_and_plan` MCP tool with the spec and plan contents.
+The MCP server handles all internal processing (RAG search, LLM reasoning, blueprint assembly) and returns the result.
 
 Save the response as `app-blueprint.yaml` in the workspace root.
 
@@ -2246,3 +1231,554 @@ patterns_used:
 ```
 
 *End of Appendix A*
+
+
+---
+
+## Appendix B — Microservice Brownfield Application: Complete Preset & Example Files
+
+*This appendix contains all files for the microservice archetype preset, demonstrated with a Spring Boot + Angular brownfield "Hello World" reference implementation. This preset shares the same company overlay skills as the agentic preset (Appendix A) but uses different templates, catalogs, and domain skills.*
+
+### Directory structure
+
+```
+.specify/
+├── preset.yml                              ← Microservice preset manifest
+├── templates/
+│   ├── service-spec-template.md            ← /specify loads this — microservice-specific sections
+│   ├── service-plan-template.md            ← /plan loads this — framework + infra questions
+│   └── service-tasks-template.md           ← /tasks loads this — generated vs manual work
+├── commands/
+│   ├── catalyst.blueprint.md               ← Same as agentic (sends spec+plan to Blueprint Advisor)
+│   └── catalyst.generate.md                ← Same as agentic (reads YAML, triggers skill-guided gen)
+├── memory/
+│   ├── springboot-reference.md             ← Spring Boot patterns, annotations, JPA conventions
+│   ├── angular-reference.md                ← Angular component patterns, service injection, routing
+│   ├── company-patterns.md                 ← SHARED — same company standards as agentic preset
+│   ├── approved-tools.md                   ← SHARED — same approved endpoints
+│   └── infra-standards.md                  ← SHARED — same Terraform, CI/CD, observability
+└── constitution.md                         ← SHARED — same non-negotiable rules
+```
+
+---
+
+### B.1 preset.yml (microservice variant)
+
+```yaml
+# AgentCatalyst Microservice Preset for GitHub Spec Kit
+# Install: specify preset add agentcatalyst-microservice
+# Source: github.com/[company]/agentcatalyst-preset-microservice
+
+name: agentcatalyst-microservice
+version: "1.0.0"
+description: >
+  AgentCatalyst accelerator for microservice applications.
+  Supports Spring Boot, FastAPI, and Node.js backends with
+  Angular, React, or Vue frontends. Brownfield-aware.
+
+archetype: microservice
+
+templates:
+  spec: templates/service-spec-template.md
+  plan: templates/service-plan-template.md
+  tasks: templates/service-tasks-template.md
+
+commands:
+  - commands/catalyst.blueprint.md        # SHARED with agentic preset
+  - commands/catalyst.generate.md         # SHARED with agentic preset
+
+memory:
+  - memory/springboot-reference.md        # Framework-specific
+  - memory/angular-reference.md           # Framework-specific
+  - memory/company-patterns.md            # SHARED overlay
+  - memory/approved-tools.md              # SHARED overlay
+  - memory/infra-standards.md             # SHARED overlay
+
+skills:
+  domain:
+    - name: springboot-service
+      version: "2.1.0"
+      source: github.com/[company]/skills/springboot-service
+    - name: angular-spa
+      version: "1.4.0"
+      source: github.com/[company]/skills/angular-spa
+    - name: jpa-oracle
+      version: "1.2.0"
+      source: github.com/[company]/skills/jpa-oracle
+  overlay:                                # SHARED — identical to agentic preset
+    - name: company-terraform
+      version: "2.0.0"
+    - name: company-observability
+      version: "1.3.0"
+    - name: company-cicd
+      version: "1.5.0"
+    - name: company-security
+      version: "1.2.0"
+
+settings:
+  coding_agents: [copilot, claude-code, gemini-cli, cursor, windsurf]
+  output_format: markdown
+  save_location: workspace_root
+```
+
+---
+
+### B.2 templates/service-spec-template.md
+
+```markdown
+---
+template: agentcatalyst-service-spec
+version: "1.0.0"
+description: Structured requirements for microservice applications
+usage: Run /specify to fill in this template
+---
+
+# Service Specification
+
+## Service Purpose
+
+<!--
+Describe what this service does and why it exists.
+For BROWNFIELD: state what ALREADY EXISTS and what's NEW.
+Use "EXISTING" to mark infrastructure/code that must not be regenerated.
+Use "NEW" to mark what needs to be built.
+
+EXAMPLE: "Hello World reference implementation for the Angular + Spring Boot
+SPA pattern on ECS Fargate with Oracle RDS. NOT a production application —
+a minimal working example that proves every layer of the stack works."
+-->
+
+[Describe your service purpose here]
+
+## API Contracts
+
+<!--
+List all endpoints with HTTP method, path, request/response bodies.
+For BROWNFIELD: mark which endpoints already exist vs are new.
+
+EXAMPLE:
+GET  /api/greetings         — list all greetings (NEW)
+POST /api/greetings         — create a greeting (NEW)
+GET  /api/health            — health check (NEW)
+-->
+
+[Define your API contracts here]
+
+## Dependencies
+
+<!--
+List all external dependencies: databases, message queues, other services.
+For BROWNFIELD: use "EXISTING" + point to the config file.
+
+EXAMPLE: "Oracle RDS — EXISTING database at endpoint configured in
+boilerplate/backend/src/main/resources/application.yml.
+DO NOT create a new database or modify connection settings."
+-->
+
+[List your dependencies here]
+
+## Data Model
+
+<!--
+Define entities with fields, types, and constraints.
+
+EXAMPLE:
+Greeting: id (NUMBER, auto-generated), name (VARCHAR2 100),
+    message (VARCHAR2 500), created_at (TIMESTAMP, auto-generated)
+-->
+
+[Define your data model here]
+
+## Frontend Requirements
+
+<!--
+For services with a UI component. Describe pages, components, interactions.
+For BROWNFIELD: mark which UI elements exist vs are new.
+
+EXAMPLE: "Angular SPA with one page: form with Name + Message fields,
+list of submitted greetings below, minimal Angular Material styling."
+-->
+
+[Define frontend requirements here — or write N/A if backend-only]
+
+## Infrastructure Requirements
+
+<!--
+For GREENFIELD: specify what needs to be provisioned.
+For BROWNFIELD: specify "EXISTING infrastructure — DO NOT generate new Terraform."
+
+EXAMPLE: "EXISTING infrastructure — use ECS Fargate + Oracle RDS + ALB
+from terraform/. Use existing Dockerfiles from boilerplate/.
+Only generate application code."
+-->
+
+[Define infrastructure requirements here]
+
+## Business Rules
+
+<!--
+Same format as agentic preset — IF/THEN conditions per decision point.
+For microservices, these typically cover validation rules, business logic
+in service layer, and authorization decisions.
+
+EXAMPLE:
+Decision Point: Greeting Validation
+  IF name is blank THEN return 400 Bad Request
+  IF message length > 500 THEN truncate to 500 characters
+-->
+
+[Define your business rules here]
+
+## Error Handling
+
+<!--
+Per-dependency timeout, failure, and retry behavior.
+
+EXAMPLE:
+Dependency: Oracle RDS
+  Timeout: 5 seconds
+  On failure: Return 503 Service Unavailable with retry-after header
+  Connection pool: HikariCP with max 10 connections
+-->
+
+[Define your error handling here]
+
+## Acceptance Criteria
+
+<!--
+GIVEN/WHEN/THEN assertions. Generate starter test cases for EvalOps.
+
+EXAMPLE:
+GIVEN the service is running
+WHEN POST /api/greetings with {"name": "Alice", "message": "Hello"}
+THEN return 201 Created with the greeting including generated id
+AND the greeting appears in GET /api/greetings response
+-->
+
+[Define your acceptance criteria here]
+```
+
+---
+
+### B.3 templates/service-plan-template.md
+
+```markdown
+---
+template: agentcatalyst-service-plan
+version: "1.0.0"
+description: Technical decisions for microservice applications
+usage: Run /plan to answer these questions
+---
+
+# Technical Plan
+
+## Backend Framework
+- **Framework:** [spring-boot | fastapi | express]
+- **Language version:** [e.g., Java 21, Python 3.12, Node 20]
+- **Build tool:** [gradle | maven | pip | npm]
+
+## Frontend Framework (if applicable)
+- **Framework:** [angular | react | vue | none]
+- **Version:** [e.g., Angular 17+]
+- **Styling:** [angular-material | tailwind | bootstrap | custom]
+
+## Database
+- **Type:** [oracle | postgresql | mysql | mongodb]
+- **ORM:** [jpa-hibernate | sqlalchemy | prisma | none]
+- **Migration tool:** [flyway | liquibase | alembic | none]
+- **Config source:** [new | EXISTING — path to config file]
+
+## Target Platform
+- **Runtime:** [ecs_fargate | cloud_run | gke | EXISTING]
+- **GCP/AWS Region:** [e.g., us-central1, us-east-1]
+
+## Infrastructure
+- **Terraform:** [generate_new | SKIP — existing terraform/]
+- **Terraform module source:** [e.g., github.com/[company]/terraform-modules]
+- **Docker:** [generate_new | SKIP — existing Dockerfiles]
+
+## CI/CD
+- **Pipeline:** [EXISTING | generate_new]
+- **Infrastructure pipeline:** [Jenkins]
+- **Application pipeline:** [Harness]
+- **Deployment strategy:** [canary | blue-green | rolling]
+
+## Observability
+- **APM:** [Dynatrace]
+- **Tracing:** [OpenTelemetry]
+- **Health check path:** [e.g., /api/health]
+
+## EvalOps
+- **Test framework:** [junit | pytest | jest]
+- **Contract testing:** [pact | spring-cloud-contract | none]
+- **Pre-commit threshold:** [e.g., 10% max regression]
+```
+
+---
+
+### B.4 templates/service-tasks-template.md
+
+```markdown
+---
+template: agentcatalyst-service-tasks
+version: "1.0.0"
+description: Task breakdown for microservice applications
+usage: Run /tasks after receiving blueprint
+---
+
+# Task Breakdown
+
+## Generated by coding agent (developer reviews)
+
+| Component | Source (YAML section) | Status |
+|---|---|---|
+| Controller / route handlers | backend.endpoints: | ⬜ Generated |
+| Service layer (business logic first draft) | backend.endpoints: + business_rules: | ⬜ Generated — REVIEW REQUIRED |
+| Entity / model classes | backend.entities: | ⬜ Generated |
+| Repository / data access | backend.entities: | ⬜ Generated |
+| Database migration scripts | backend.entities: | ⬜ Generated |
+| DTOs / request-response models | backend.endpoints: | ⬜ Generated |
+| Frontend components (if applicable) | frontend: | ⬜ Generated |
+| Frontend services + API calls | frontend: | ⬜ Generated |
+| Unit tests | acceptance_criteria: | ⬜ Generated |
+| Integration tests | acceptance_criteria: | ⬜ Generated |
+| Terraform (if greenfield) | infrastructure: | ⬜ Generated or SKIP |
+| Dockerfile (if greenfield) | infrastructure: | ⬜ Generated or SKIP |
+| CI/CD pipeline (if greenfield) | ci_cd: | ⬜ Generated or SKIP |
+| Observability config | observability: | ⬜ Generated |
+| Health check endpoint | observability: | ⬜ Generated |
+
+## Developer implements / reviews
+
+| Task | Why | Priority |
+|---|---|---|
+| Review service layer business logic | First draft from spec rules — refine edge cases | P0 |
+| Authentication / authorization | Company-specific SSO/OAuth patterns | P0 |
+| Performance tuning | Requires load testing with real data volumes | P1 |
+| Custom validation rules | Domain-specific beyond IF/THEN | P1 |
+| Error response format | Company API standards | P2 |
+```
+
+---
+
+### B.5 memory/ files (microservice-specific)
+
+**memory/springboot-reference.md** — Spring Boot patterns: correct annotations (`@RestController`, `@Service`, `@Repository`, `@Entity`), JPA conventions, Flyway migration naming, `application.yml` structure, health check actuator setup, error handling with `@ControllerAdvice`, request/response DTO patterns, HikariCP connection pool configuration.
+
+**memory/angular-reference.md** — Angular patterns: component structure, service injection with `HttpClient`, reactive forms, routing with lazy loading, Angular Material component usage, proxy configuration for backend API calls, environment-specific configuration, build optimization.
+
+**memory/company-patterns.md** — SHARED with agentic preset (identical file). Company coding standards, naming, error handling, logging.
+
+**memory/approved-tools.md** — SHARED with agentic preset (identical file). Approved endpoints and services.
+
+**memory/infra-standards.md** — SHARED with agentic preset (identical file). Terraform modules, CI/CD templates, observability.
+
+---
+
+### B.6 Hello World Brownfield Example: Filled spec.md
+
+```markdown
+# Service Specification — Hello World SPA Reference Implementation
+
+## Service Purpose
+
+Hello World reference implementation for the Angular + Spring Boot SPA
+pattern on ECS Fargate with Oracle RDS. This is NOT a production
+application — it's a minimal working example that proves every layer
+of the stack works end to end.
+
+## API Contracts
+
+GET  /api/greetings         — list all greetings
+POST /api/greetings         — create a greeting (body: { "name": "Alice", "message": "Hello" })
+GET  /api/greetings/{id}    — get greeting by ID
+GET  /api/health            — health check (returns DB connectivity status)
+
+## Dependencies
+
+Oracle RDS — EXISTING database at the endpoint configured in
+    boilerplate/backend/src/main/resources/application.yml.
+    The agent MUST use the EXISTING datasource configuration.
+    DO NOT create a new database or modify the connection settings.
+
+## Data Model
+
+Greeting: id (NUMBER, auto-generated), name (VARCHAR2 100),
+    message (VARCHAR2 500), created_at (TIMESTAMP, auto-generated)
+
+## Frontend Requirements
+
+Angular SPA with one page:
+    - A form with "Name" and "Message" fields + Submit button
+    - A list below showing all submitted greetings (auto-refreshes)
+    - Minimal styling using Angular Material
+    - Calls backend via /api/greetings (proxied through nginx/ALB)
+
+## Infrastructure Requirements
+
+EXISTING infrastructure — DO NOT generate new Terraform.
+Use the existing ECS Fargate + Oracle RDS + ALB from terraform/.
+Use the existing Dockerfiles from boilerplate/.
+Use the existing CI/CD from ci-cd/.
+Only generate application code that runs inside the existing containers.
+
+## Business Rules
+
+Decision Point: Greeting Validation
+  Inputs: name, message
+  IF name is blank THEN return 400 Bad Request with error "name is required"
+  IF message is blank THEN return 400 Bad Request with error "message is required"
+  IF message length > 500 THEN truncate to 500 characters with warning
+  IF name contains special characters THEN sanitize (strip HTML tags)
+
+## Error Handling
+
+Dependency: Oracle RDS
+  Timeout: 5 seconds
+  On failure: Return 503 with retry-after header
+  Connection pool: HikariCP max 10 connections, min-idle 2
+
+## Acceptance Criteria
+
+GIVEN the service is running and database is accessible
+WHEN POST /api/greetings with {"name": "Alice", "message": "Hello"}
+THEN return 201 Created with greeting including auto-generated id and created_at
+
+GIVEN one greeting exists in the database
+WHEN GET /api/greetings
+THEN return 200 with array containing the greeting
+
+GIVEN no greeting with id 999 exists
+WHEN GET /api/greetings/999
+THEN return 404 Not Found
+
+GIVEN the database is unreachable
+WHEN GET /api/health
+THEN return 503 Service Unavailable with {"status": "DOWN", "database": "unreachable"}
+```
+
+---
+
+### B.7 Hello World Brownfield Example: Generated app-blueprint.yaml
+
+```yaml
+# Generated by Blueprint Advisor
+# Spec: spec.md (SHA: xyz789)
+# Plan: plan.md (SHA: uvw012)
+# Archetype: microservice
+# Brownfield: true
+
+archetype: microservice
+
+metadata:
+  name: hello-world-spa
+  template: springboot-angular
+  description: "Hello World ref impl for SPA pattern on ECS Fargate"
+
+platform:
+  runtime: ecs_fargate              # EXISTING — do not provision
+
+backend:
+  framework: spring-boot
+  version: "3.x"
+  base_package: com.company.helloworld
+  build_tool: gradle                # EXISTING build.gradle
+
+  endpoints:
+    - method: GET
+      path: /api/greetings
+      handler: listGreetings
+      description: List all greetings
+    - method: POST
+      path: /api/greetings
+      handler: createGreeting
+      description: Create a new greeting
+    - method: GET
+      path: /api/greetings/{id}
+      handler: getGreeting
+      description: Get greeting by ID
+    - method: GET
+      path: /api/health
+      handler: healthCheck
+      description: Health check with DB status
+
+  entities:
+    - name: Greeting
+      table: GREETINGS
+      fields:
+        - { name: id, type: Long, generated: true }
+        - { name: name, type: String, length: 100, nullable: false }
+        - { name: message, type: String, length: 500, nullable: false }
+        - { name: createdAt, type: Timestamp, generated: true }
+
+  business_rules:
+    - context: greeting_validation
+      rules:
+        - "IF name is blank THEN return 400 Bad Request"
+        - "IF message is blank THEN return 400 Bad Request"
+        - "IF message length > 500 THEN truncate to 500 with warning"
+        - "IF name contains special characters THEN sanitize (strip HTML)"
+
+  database:
+    type: oracle
+    orm: jpa-hibernate
+    migration: flyway
+    config_source: boilerplate/backend/src/main/resources/application.yml  # EXISTING
+
+frontend:
+  framework: angular
+  version: "17+"
+  styling: angular-material
+  pages:
+    - name: GreetingPage
+      route: /
+      components: [GreetingForm, GreetingList]
+  proxy:
+    target: /api/
+    config_source: boilerplate/frontend/proxy.conf.json  # EXISTING
+
+infrastructure:
+  terraform:
+    action: SKIP                    # EXISTING — do not generate
+  docker:
+    action: SKIP                    # EXISTING Dockerfiles
+  cicd:
+    action: SKIP                    # EXISTING Jenkins + Harness
+
+observability:
+  apm: dynatrace
+  health_check: /api/health
+  tracing: opentelemetry
+
+evalops:
+  test_framework: junit
+  contract_testing: spring-cloud-contract
+
+golden_dataset:
+  - given: "service running, DB accessible"
+    when: "POST /api/greetings with valid body"
+    then: "201 Created with auto-generated id"
+  - given: "one greeting exists"
+    when: "GET /api/greetings"
+    then: "200 with array containing greeting"
+  - given: "no greeting with id 999"
+    when: "GET /api/greetings/999"
+    then: "404 Not Found"
+  - given: "database unreachable"
+    when: "GET /api/health"
+    then: "503 with status DOWN"
+
+patterns_used:
+  - pattern: rest-crud
+    confidence: high
+    rationale: "Standard CRUD endpoints for Greeting entity"
+  - pattern: brownfield-integration
+    confidence: high
+    rationale: "Spec contains EXISTING signals — infrastructure reuse"
+  - pattern: spa-backend
+    confidence: high
+    rationale: "Angular frontend + Spring Boot backend pattern"
+```
+
+*End of Appendix B*
+
