@@ -1,0 +1,655 @@
+# AgentCatalyst Brownfield — Operating Playbook
+
+*Procedures for platform engineering and the EA office to build, publish, operate, and evolve the AgentCatalyst Brownfield Spec Kit preset and its supporting Blueprint Advisor.*
+
+*Canonical name: **AgentCatalyst Brownfield**. Repository: `agentcatalyst-brownfield-preset`.*
+
+---
+
+### Document set
+
+| Document | Filename | Covers |
+|---|---|---|
+| Architecture | `csa-tsa-speckit-architecture.md` | **WHY** — design decisions, Blueprint Advisor internals |
+| Developer Guide | `csa-tsa-speckit-developerguide.md` | **HOW** — step-by-step workflow, templates, examples |
+| **This document** | `csa-tsa-speckit-operating-playbook.md` | **PROCEDURES** — operations, governance, onboarding |
+
+---
+
+## Table of Contents
+
+1. [Ownership & SLOs](#1-ownership--slos)
+2. [Building & Publishing the Preset](#2-building--publishing-the-preset)
+3. [Pattern Catalog Operations](#3-pattern-catalog-operations)
+4. [ADR Constraint Store Operations](#4-adr-constraint-store-operations)
+5. [Tech Substitution Decision Table Operations](#5-tech-substitution-decision-table-operations)
+6. [Tool Registry Operations](#6-tool-registry-operations)
+7. [IaC Module Registry Operations](#7-iac-module-registry-operations)
+8. [Blueprint Advisor — Deploy, Scale, Observe](#8-blueprint-advisor--deploy-scale-observe)
+9. [Total Cost of Ownership](#9-total-cost-of-ownership)
+10. [Model Availability Management](#10-model-availability-management)
+11. [Acceptance Telemetry Pipeline](#11-acceptance-telemetry-pipeline)
+12. [Escalation Queues](#12-escalation-queues)
+13. [Incident Response](#13-incident-response)
+14. [Governance Cycle](#14-governance-cycle)
+15. [Onboarding a New LOB](#15-onboarding-a-new-lob)
+
+---
+
+## 1. Ownership & SLOs
+
+| Component | Owner | SLO |
+|---|---|---|
+| Spec Kit preset (publishing, version cuts) | Platform engineering | New version every 4 weeks; hotfix within 24h |
+| Blueprint Advisor MCP Server (Cloud Run) | Platform engineering | 99.5% availability; p95 < 90s |
+| Pattern Catalog (Vertex AI Search) | EA office (content) + Platform eng (corpus) | New pattern within 5 business days of ADR approval |
+| ADR Constraint Store + Rule Authoring UI | EA office (rules) + Platform eng (UI + infra) | Rules effective within 1 business day |
+| Tech Substitution Decision Table + UI | EA office (decisions) + Platform eng (table + UI) | Emergency entry within 5 business days |
+| Tool Registry (Apigee API Hub) | Platform engineering | Existing AgentCatalyst SLA |
+| Runtime compliance (AWS Config rules) | Platform engineering | Rules deployed alongside application |
+| IaC Module Registry | Platform engineering | Updates within 2 business days of provider-version cut |
+
+---
+
+## 2. Building & Publishing the Preset
+
+→ *Architecture §2 covers the Spec Kit framework relationship and version governance.*
+
+### 2.1 Preset repo structure
+
+```
+github.company.com/platform/agentcatalyst-brownfield-preset/
+├── preset.yml                        ← manifest (pinned speckit_version)
+├── templates/
+├── prompts/                          ← rendered per agent integration
+├── agents/
+├── instructions/
+├── memory/
+│   ├── constitution-enterprise.md    ← versioned, read-only in project repos
+│   └── constitution-project-template.md
+├── scripts/
+│   └── package_blueprint_request.py
+├── tests/
+│   ├── fixtures/                     ← sample drawio/mermaid + expected spec output
+│   └── e2e/
+└── CHANGELOG.md
+```
+
+### 2.2 Release pipeline
+
+| Stage | What | Gate |
+|---|---|---|
+| Lint | Validate frontmatter in all .prompt.md, .agent.md, .instructions.md | Schema pass |
+| Fixture tests | Diagram extractor against test drawio/mermaid files | Match expected spec fields |
+| Compatibility | `specify init` against copilot, claude-code, gemini, cursor | All 4 succeed |
+| Spec Kit version | Verify pinned Spec Kit version matches preset.yml | Exact match |
+| E2E | Full pipeline against staging Blueprint Advisor | Blueprint produced |
+| Tag & release | Git tag, publish to internal preset registry | Manual approval |
+
+### 2.3 Spec Kit version governance
+
+→ *Architecture §16 covers the risk assessment and contingency plan.*
+
+The preset pins a specific Spec Kit version in `preset.yml`. Upgrades follow this process:
+
+1. Platform engineering evaluates Spec Kit changelog for breaking changes
+2. Runs preset CI against candidate Spec Kit version
+3. If pass: updates `preset.yml`, cuts a minor-version preset release
+4. If fail: opens issue in `agentcatalyst-brownfield-preset` with the incompatibility; activates internal fork if no workaround within 2 weeks
+
+**Fork contingency:** If Spec Kit breaks compatibility and no fix is forthcoming, platform engineering activates the internal fork at `github.company.com/platform/speckit-fork`. The fork is a designated technical-debt item reviewed every governance cycle. Maximum fork lifespan: 6 months; escalate to CTO office if resolution is not in sight.
+
+### 2.4 Versioning
+
+Semantic versioning:
+- **Major** — breaking schema changes to spec/plan/contract; coordinated with EA quarterly
+- **Minor** — new features, backward compatible
+- **Patch** — bug fixes, prompt clarifications
+
+### 2.5 Rollback
+
+1. Tag bad version `state:withdrawn`
+2. Mark previous-stable `state:current`
+3. Broadcast `specify preset upgrade --force` advisory
+4. Post in `#agentcatalyst`
+5. Open Sev-2 incident
+
+### 2.6 Enterprise constitution governance
+
+→ *Architecture §13 covers the dual-file model. Developer Guide §5 covers developer usage.*
+
+`constitution-enterprise.md` is maintained in the preset repo. Changes follow the same release pipeline as the preset itself. Version tag convention: `v<year>Q<quarter>` (e.g. `v2026Q2`). Changes require EA office sign-off.
+
+---
+
+## 3. Pattern Catalog Operations (Vertex AI Search)
+
+→ *Architecture §10.1 covers the schema. Developer Guide §12 covers how the catalog feeds the Blueprint Advisor.*
+
+### 3.1 Corpus
+
+Vertex AI Search datastore `pattern-catalog-brownfield`. One document per pattern. Embeddings on `description` and `signals`.
+
+### 3.2 Adding a pattern
+
+1. EA office creates draft pattern document; PR to `pattern-catalog-content` repo
+2. CI validates schema (`validate_pattern_schema.py`)
+3. EA assigns 3 reviewers: domain SME, security architect, cost reviewer
+4. Merge triggers `publish_pattern.yaml` (upload + re-embed)
+5. Pattern enters `state: preview` for 30 days
+6. Auto-promotes to `state: active` if no quality regression
+
+### 3.3 Updating a pattern
+
+Edits to `description` or `signals` trigger 7-day shadow mode (old + new scored in parallel; divergence reported).
+
+### 3.4 Retiring a pattern
+
+`state: deprecated` for 90 days (Blueprint Advisor returns it with `requires_review`), then removed. Acceptance telemetry flags production blueprints still referencing retired patterns.
+
+### 3.5 Quality regression suite
+
+Nightly: ~200 representative spec excerpts → Blueprint Advisor → verify expected patterns at confidence ≥ 0.85. Regression failures block preview→active promotion.
+
+### 3.6 Cross-cloud egress pattern
+
+→ *Architecture §15 covers the pattern design.*
+
+The PAT-XCLOUD-001 pattern includes a `phase_0_checklist` and `external_teams_required` fields unique to cross-cloud patterns. When maintaining this pattern, coordinate with GCP-networking and Apigee-platform teams to keep the checklist current (transit methods, cert lifecycle, IP allocation procedures).
+
+### 3.7 CSA Agent diagram quality baseline
+
+→ *Architecture §7 covers the handoff boundary between the CSA Agent and AgentCatalyst Brownfield.*
+
+During LOB onboarding (§15), assess diagram readiness for the pilot app:
+- Does the CSA Agent produce a diagram in a supported format (drawio XML or Mermaid)?
+- Are integration edges labeled with protocol/transport hints?
+- Are cloud/on-prem boundary groups present?
+- Report to LOB lead with the expected spec pre-fill coverage (~40–60% of fields from a typical diagram, balance via elicitation)
+
+---
+
+## 4. ADR Constraint Store Operations
+
+→ *Architecture §10.2 covers the design. Architecture §9.4 covers how rules are evaluated.*
+
+### 4.1 Rule Authoring UI
+
+The EA office uses a browser-based rule authoring UI (`adr-rule-editor`, deployed as Cloud Run in `enterprise-ea-prod`). Features:
+
+- **Grammar-aware editor** with autocomplete for all DSL identifiers
+- **"Test this rule" sandbox** — evaluates the rule against 50 curated spec+plan fixtures; shows pass/fail/skip per fixture
+- **Conflict detection** — before save, checks for contradictions with all existing rules
+- **Version history** with diff view
+- **Bulk import/export** for quarterly reviews
+
+The UI writes to Firestore. The Blueprint Advisor reads from Firestore.
+
+### 4.2 Predicate DSL governance
+
+→ *Architecture §9.4 covers the DSL grammar.*
+
+**Identifier ceiling: 25.** The DSL currently supports 25 identifiers (source_tech, target_tech, r_factor, criticality, etc.). Adding a new identifier requires:
+1. Written justification: why the rule cannot be expressed with existing identifiers
+2. Refactor proposal: would a new identifier be better served by a new context dimension on the substitution table (§5) instead?
+3. Platform-engineering code change to the interpreter
+4. EA office approval
+
+The ceiling is enforced by CI — the interpreter's identifier list is declarative and a PR adding a 26th identifier is blocked.
+
+### 4.3 Mandatory rule unit tests
+
+Every rule ships with ≥3 positive and ≥3 negative test cases in the `adr-constraints-content` repo. Test format:
+
+```yaml
+tests:
+  - name: "MQ refactor to SQS passes"
+    input: { source_tech: "ibm-mq-9.1", target_tech: "aws-sqs", r_factor: "refactor" }
+    expected: PASS
+  - name: "MQ refactor to Amazon MQ is forbidden"
+    input: { source_tech: "ibm-mq-9.1", target_tech: "amazon-mq", r_factor: "refactor" }
+    expected: REJECT
+```
+
+CI runs all rule tests on every PR. A rule without tests is rejected.
+
+### 4.4 Handling contradictions
+
+CI rejects PRs where a new rule contradicts existing rules. EA office must either reword the scope, supersede the existing rule, or resolve in EA meeting.
+
+### 4.5 Exception handling
+
+ADR exceptions are first-class ADRs (e.g. ADR-101-exception) with project-scoped applicability. Same authoring process, same unit tests. The interpreter checks exceptions before rejecting.
+
+### 4.6 Month-6 rule audit
+
+At month 6 of platform operation, the EA office runs a mandatory consolidation audit:
+- Every rule reviewed for clarity and necessity
+- Rules with zero firings evaluated for retirement
+- Rules with high override rate evaluated for refinement
+- DSL identifier usage analyzed; underused identifiers candidates for removal
+
+→ *§14 schedules this in the governance cycle.*
+
+---
+
+## 5. Tech Substitution Decision Table Operations
+
+→ *Architecture §9.3 covers how the table is consumed. Architecture §10.3 covers the schema.*
+
+### 5.1 Context-filtered design
+
+The Tech Substitution Decision Table is a **context-filtered decision table** with bounded dimensions:
+
+| Column | Type | Example | Required? |
+|---|---|---|---|
+| `source_tech` | string | `ibm-mq-9.x` | Yes |
+| `r_factor` | enum | `refactor` | Yes |
+| `criticality` | enum | `tier1/tier2/tier3` | No (wildcard if omitted) |
+| `data_size_class` | enum | `small/medium/large` | No |
+| `compliance_regime` | set | `[SOX, PCI]` | No |
+| `messaging_pattern` | enum | `point-to-point/pub-sub/stream` | No |
+| `region_constraints` | set | `[us-only]` | No |
+| `partner_constraints` | string | free-text | No |
+| `target_tech` | string | `aws-sqs` | Yes (output) |
+| `adr_ref` | string | `ADR-205` | Yes (output) |
+| `transition_pattern_ref` | string | `PAT-T-007` | No (output) |
+| `priority` | int | 100 | Yes (higher wins) |
+
+**Dimension ceiling: 12 context columns.** Adding a 13th requires EA office justification and platform-engineering schema migration. CI enforces the ceiling.
+
+### 5.2 Decision Table Authoring UI
+
+Companion to the ADR rule authoring UI, deployed alongside it. Features:
+- **Decision-tree visualization** of existing entries
+- **"What would this spec match?" simulator** — paste a spec excerpt, see which row matches
+- **Conflict detection** — two entries with same context at same priority
+- **Zero-usage dashboard** — entries never matched in production
+- **Override-rate dashboard** — entries frequently overridden by developers
+
+### 5.3 Adding a substitution
+
+→ *Developer Guide §18 FM-2 covers the developer-facing experience.*
+
+Trigger: developer files `AGENTCATALYST-SUBSTITUTIONS` ticket when `map_current_to_target` returns `NOT_FOUND`.
+
+| Step | Owner | SLA |
+|---|---|---|
+| Triage: reject if out of policy | Platform eng | 1 business day |
+| Open follow-up issue in `tech-substitution-content` repo | Platform eng | 1 business day |
+| EA office reviews (may require multi-dimensional entry) | EA office | 3 business days |
+| Entry added via PR; merge triggers SQL insert | Platform eng | 1 business day |
+| **Total** | | **5 business days** |
+
+Emergency entries (Sev-1 modernization blockers): 24h end-to-end.
+
+If the required entry spans multiple context dimensions and can't be represented as a single row, the EA office escalates to a 30-min working session with the requesting team to define the correct decision-tree branch. This is tracked as an explicit ticket, not absorbed into the 5-day SLA.
+
+### 5.4 Quarterly review
+
+Every quarter:
+- New entries sanity-checked
+- Zero-usage entries flagged for retirement
+- High-override entries flagged for refinement
+- Dimension usage analyzed; underused dimensions considered for removal
+
+---
+
+## 6. Tool Registry Operations
+
+→ *Architecture §10.4 covers the schema and retrieval behavior.*
+
+MCP servers and A2A agents are indexed in Apigee API Hub with enrichment metadata. The Blueprint Advisor's `recommend_architecture` queries the registry filtered by `target_tech` to discover tools matching the integration intent and resolved target technology.
+
+Each tool entry carries: `name`, `purpose`, `mcp_endpoint`, `target_tech_compatibility[]`, `r_factor_relevance[]`, and `lifecycle_state` (preview / active / deprecated / retired). The registry's `target_tech_compatibility` field is what brownfield uses most heavily for filtering. For tools that only exist in target state (e.g. SQS MCP server), set `r_factor_relevance: [refactor, rewrite]` to suppress noise in rehost-only scenarios.
+
+Registration, enrichment metadata curation, deprecation flow, and lifecycle-state transitions follow the standard AgentCatalyst operations process. New tool registrations require: tool name, MCP endpoint URL, purpose description, target-tech compatibility tags, r-factor relevance tags, and a security review confirming the tool operates within the VPC-SC perimeter.
+
+---
+
+## 7. IaC Module Registry Operations
+
+→ *Architecture §10.5 covers the schema and manifest format.*
+
+The IaC Module Registry is a GitHub repository (`github.company.com/platform/tf-modules`) plus a `manifest.yaml` at the repo root. Each module has its own folder with README, examples, and tests. Versions are cut via Git tags. The manifest indexes modules by path, version, supported resources, DR strategies, regions, required tags, and standard references.
+
+### 7.1 Adding a module
+
+Triggered when a new pattern enters the catalog requiring IaC not currently in the registry.
+
+1. Platform engineering authors the module following the company TF module template
+2. PR includes the new entry in `manifest.yaml`
+3. CI runs `terraform validate`, `terraform plan` against a fixture, security scans (Checkov), cost estimate (Infracost)
+4. Code review by IaC reviewers
+5. Merge cuts a `v0.1.0` tag in `state: preview`
+6. After 30 days with no security findings, auto-promotes to `state: active`
+
+### 7.2 Updating a module
+
+Semver. Patch and minor versions auto-promote after 7-day soak. Major versions require explicit promotion. The Blueprint Advisor pins module versions in the design contract — module updates don't retroactively affect produced blueprints.
+
+### 7.3 Drift detection
+
+Nightly comparison of the manifest's `current` version against what's referenced in production design contracts. Drift triggers notification to affected project teams but no automatic migration. Modules >2 major versions behind receive an advisory in the next governance-cycle agenda.
+
+---
+
+## 8. Blueprint Advisor — Deploy, Scale, Observe
+
+→ *Architecture §9 covers the internal design.*
+
+### 8.1 Deployment
+
+Cloud Run `blueprint-advisor-brownfield` in `enterprise-platform-prod`. Min: 2 instances. Max: 20. Concurrency: 10/instance. 4 vCPU, 8 GB memory. Primary: `us-east1`. DR: `us-west1` (cold standby, RTO 30 min).
+
+### 8.2 CI/CD
+
+| Stage | Gate |
+|---|---|
+| Unit tests | 100% pass |
+| Integration tests | Against staging Vertex AI Search + ADR Store + Substitution Table |
+| Contract-schema tests | Schema v2 compatibility |
+| Smoke tests | Canonical fixtures match expected output |
+| Canary deploy | 10% traffic, 1 hour, error rate < 0.5% |
+| Full deploy | Manual approval |
+
+### 8.3 Observability
+
+| Signal | SLO |
+|---|---|
+| Availability | 99.5% monthly |
+| Latency p95 | < 90s |
+| Latency p99 | < 180s |
+| Error rate | < 0.5% |
+| Substitution unresolved rate | < 5% (alert above) |
+| Composition failure rate | < 2% (alert above) |
+
+Dashboards: `Blueprint Advisor — Operational Health`, `Blueprint Advisor — Quality`, `Blueprint Advisor — Audit`.
+
+### 8.4 Rate limiting
+
+10 calls/hour per user. 200/hour per org. 429 with `Retry-After: 60`. Whitelist for platform-eng testing.
+
+### 8.5 Per-call cost breakdown
+
+| Component | Cost |
+|---|---|
+| Cloud Run compute | ~$0.005 |
+| Vertex AI Search queries | ~$0.02 |
+| LlmAgent (tool ⑤) | ~$0.08 |
+| Logging + observability | ~$0.005 |
+| **Per-call total** | **~$0.11** |
+
+### 8.6 Scaling triggers
+
+| Trigger | Action |
+|---|---|
+| p95 > 90s sustained 1 hour | +5 max instances; investigate |
+| 429 rate > 1% sustained 1 hour | Raise per-org limit after EA approval |
+| Vertex AI Search > 1s p95 | Investigate corpus size |
+
+### 8.7 Design contract drift detection
+
+→ *Architecture §11 covers the lifecycle design. Developer Guide §15 covers the `/catalyst.refresh` command.*
+
+A nightly job compares current peripheral-store versions (ADR store, substitution table, IaC manifest) against `staleness_triggers` in all production design contracts. Contracts that would transition to STALE are listed in a report to platform engineering. This is informational — the actual transition happens at pre-commit time in the developer's repo.
+
+### 8.8 Runtime compliance deployment
+
+→ *Architecture §12 covers the design.*
+
+The `company-security` skill generates AWS Config rules from `adr_attestations[]` at `/catalyst.generate` time. These rules are Terraform resources in the generated IaC, deployed by the same Harness pipeline. Post-deploy, AWS Config evaluates continuously. Non-compliant resources trigger CloudWatch alarm → Splunk → platform-engineering pager.
+
+Platform engineering maintains the Lambda functions that back the Config rules in `github.company.com/platform/compliance-lambdas`. One Lambda per attestation class (e.g. `check-no-amazonmq`, `check-apigee-only`, `check-ecs-fargate-only`).
+
+---
+
+## 9. Total Cost of Ownership
+
+→ *Architecture §17.4 references this section.*
+
+### 9.1 Full TCO model (annual, at 210-use-case enterprise scale)
+
+| Line item | Annual cost | Notes |
+|---|---|---|
+| **Blueprint Advisor compute** | $13,200 | 10K calls/month × $0.11 × 12 |
+| **Vertex AI Search** | $18,000 | 500 patterns, 10K queries/day, embedding recomputation |
+| **LLM costs (Opus via Copilot)** | Included in Copilot | Premium requests consumed from org quota |
+| **Cloud Run + Firestore + Postgres** | $9,600 | Blueprint Advisor + ADR Store + Substitution Table infra |
+| **Rule/Table Authoring UIs** | $24,000 | Cloud Run hosting + initial build amortized over 3 years ($72K build / 3) |
+| **EA office curation time** | $150,000 | ~0.75 FTE loaded (patterns, ADRs, substitutions, quarterly reviews) |
+| **Platform engineering ops** | $400,000 | ~2.0 FTE loaded (Blueprint Advisor, peripherals, preset, CI/CD) |
+| **Developer training & onboarding** | $48,000 | 7 LOBs × $6,860 (4-week onboarding × architect + developer time) |
+| **Runtime compliance Lambdas** | $6,000 | AWS Config rule execution at scale |
+| **Copilot licensing delta** | Variable | Incremental premium-request consumption; depends on tier |
+| **Total annual platform TCO** | **~$669,000** | |
+
+### 9.2 Revised ROI at scale
+
+| Metric | Value |
+|---|---|
+| Per-use-case savings (with AgentCatalyst Brownfield) | $39,000 (unchanged) |
+| Use cases at scale | 210 |
+| Gross savings | $8.19M |
+| Platform TCO | ~$669K |
+| Net savings | ~$7.52M |
+| **Revised ROI** | **~11.2×** (vs. original 48× based on compute-only cost) |
+| Break-even | ~18 use cases (~month 4) |
+
+The ROI remains compelling at 10.7× but is materially different from the 48× in the original ELT deck. Recommend updating the ELT deck with these figures.
+
+### 9.3 Cost sensitivities
+
+- EA FTE allocation is the largest single cost. If curation quality drops due to understaffing, downstream quality degrades (pattern accuracy, ADR rule coverage, substitution-table completeness).
+- Platform engineering FTE is the second-largest cost. If preset quality or Blueprint Advisor uptime is de-prioritized, developer rework time increases proportionally.
+- LLM costs may change if Copilot adjusts premium-request multipliers or model pricing.
+
+---
+
+## 10. Model Availability Management
+
+→ *Developer Guide §2.2 covers developer-facing setup.*
+
+### 10.1 Tenant policy
+
+Business/Enterprise: enable Claude Opus 4.6 policy in Copilot admin. Confirm first business day of each month.
+
+### 10.2 Fallback chain
+
+All prompt/agent files use: `model: ['Claude Opus 4.6', 'Claude Opus 4.7', 'Claude Sonnet 4.6']`.
+
+### 10.3 Monitoring
+
+Daily synthetic job runs a sample drawio fixture through `/speckit.specify`. Output compared against canonical expected result. Drift > 10% triggers P3 investigation.
+
+### 10.4 Communication
+
+If Opus 4.6 is removed from tenant: advisory in `#agentcatalyst` within 1 hour. No developer action needed (fallback is automatic).
+
+---
+
+## 11. Acceptance Telemetry Pipeline
+
+→ *Architecture §17.3 covers the feedback loop.*
+
+### 11.1 Captured signals
+
+| Signal | Source |
+|---|---|
+| Blueprint generated | MCP server logs |
+| Plan review status (solo vs. reviewed) | plan.md `review_status` field |
+| Developer modified YAML | Git diff at generate time |
+| **Modification reason** (per field) | **PR-template dropdown** |
+| `requires_review` flags addressed | Edit count |
+| ADR attestation overridden at PR | PR comment |
+| Project reached prod | Harness events |
+| Runtime compliance violation | AWS Config events |
+
+### 11.2 Structured modification reasons
+
+The PR template includes a mandatory dropdown per YAML field edit:
+
+| Reason | What it means for quality |
+|---|---|
+| Advisor wrong | Catalog/table needs refinement |
+| New information | Developer learned something post-blueprint |
+| Scope change | Business decision changed |
+| Mistake (reverted) | Noise — exclude from quality metrics |
+| Preference | Developer preference, not advisor error |
+
+Without this categorization, quality metrics conflate advisor errors with developer-side noise. The EA office uses "advisor wrong" signals to prioritize catalog and rule refinements.
+
+### 11.3 Quality metrics
+
+| Metric | Target |
+|---|---|
+| Acceptance rate (YAML unchanged) | > 70% |
+| Major modification rate (>30% fields) | < 10% |
+| `requires_review` rate | < 15% |
+| ADR override rate | < 5% |
+| Pattern accuracy (post-cutover survey) | > 85% |
+| Solo-plan revision rate at PR | < 30% |
+| Reviewed-plan revision rate at PR | < 10% |
+| Runtime compliance violation rate | < 1% |
+
+### 11.4 Dashboards
+
+- `Acceptance Telemetry — LOB View`
+- `Acceptance Telemetry — Catalog Quality`
+- `Acceptance Telemetry — ADR Effectiveness`
+- `Acceptance Telemetry — Plan Review Impact` (solo vs. reviewed plan outcomes)
+
+---
+
+## 12. Escalation Queues
+
+JIRA project: `AGENTCATALYST`.
+
+| Queue | Purpose | SLA |
+|---|---|---|
+| `AGENTCATALYST-SUBSTITUTIONS` | Missing tech substitutions | 5 business days |
+| `AGENTCATALYST-PATTERNS` | Wrong pattern, missing pattern | EA review (see §14) |
+| `AGENTCATALYST-ADR` | ADR exception, rule clarification | EA review (see §14) |
+| `AGENTCATALYST-TOOLS` | Tool registry gaps | 1–2 weeks |
+| `AGENTCATALYST-IAC` | IaC module gaps/bugs | 2 business days |
+| `AGENTCATALYST-ADVISOR` | Blueprint Advisor bugs/outages | Sev-driven |
+| `AGENTCATALYST-PRESET` | Preset issues (template, prompt, agent) | Sev-driven |
+
+Office hours: EA office Tuesdays 2–3 PM ET. Platform engineering Thursdays 10–11 AM ET.
+
+---
+
+## 13. Incident Response
+
+### 13.1 Severity matrix
+
+| Sev | Definition | Response |
+|---|---|---|
+| Sev-1 | Advisor down or wrong outputs at scale; LOB blocked | < 30 min, on-call paged |
+| Sev-2 | Feature degraded, workaround exists | < 2 hours, on-call notified |
+| Sev-3 | Single-LOB or single-feature issue | Next business day |
+| Sev-4 | Cosmetic, documentation | Next sprint |
+
+### 13.2 Common Sev-1/2 patterns
+
+| Pattern | Likely cause | Mitigation |
+|---|---|---|
+| All calls fail 5xx | Cloud Run or Vertex AI Search outage | Failover to DR region |
+| All ADR checks reject everything | Bad rule pushed | Roll back latest ADR-content PR |
+| All substitutions NOT_FOUND | Postgres issue or schema drift | Verify Cloud SQL; manual failover |
+| Confidence collapsed to ~0.5 | Corpus re-indexing or model change | Wait for re-index; verify model |
+| Slash commands vanished | Preset registry corruption | Republish last-known-good version |
+| Runtime compliance false positives | Config rule Lambda bug | Disable rule; hotfix Lambda |
+
+Postmortem: every Sev-1/2 within 5 business days.
+
+---
+
+## 14. Governance Cycle
+
+Realistic cadence: **quarterly target with semi-annual fallback.** If the EA office cannot meet quarterly, the cycle shifts to semi-annual with a mid-cycle async checkpoint. Build slack into the schedule and don't gate platform decisions on meetings happening exactly on time.
+
+### Cycle 1 (Weeks 1–2): Pattern Catalog + Cross-Cloud Patterns
+
+- Patterns added/updated/retired (sanity check)
+- Zero-usage patterns (retirement candidates)
+- Declining-accuracy patterns (refinement candidates)
+- Cross-cloud patterns: checklist currency verified with GCP/Apigee teams
+- New patterns proposed by LOBs
+
+### Cycle 2 (Weeks 3–4): ADR Constraint Store + Month-6 Audit
+
+- Rules added/updated/retired
+- High-override rules (refinement or formal exception)
+- Zero-firing rules (retirement candidates)
+- DSL identifier usage audit
+- **Month-6 consolidation audit** (first-year only): every rule reviewed for clarity
+
+### Cycle 3 (Weeks 5–6): Tech Substitution Table
+
+- New entries sanity-checked
+- Zero-usage entries (retirement)
+- High-override entries (refinement)
+- Dimension usage audit
+- Cross-check: new enterprise tech standards → entries needed?
+
+### Cycle 4 (Weeks 7–8): Acceptance Telemetry + TCO Review
+
+- Acceptance rate trend per LOB
+- Top modified fields + modification reasons (which "advisor wrong" signals drive what catalog changes?)
+- Solo vs. reviewed plan outcome comparison
+- Runtime compliance violation trend
+- TCO actuals vs. model; revised ROI if materially different
+
+### Output: Quarterly readout
+
+5-slide deck to CIO/CTO office + LOB leads: metrics, top issues, planned changes, investments requested.
+
+### Spec Kit version review
+
+Every governance cycle includes a Spec Kit version assessment: is a new Spec Kit version available? Has it been tested? Should the pin be updated? Is the fork contingency active?
+
+---
+
+## 15. Onboarding a New LOB
+
+### 15.1 Prerequisites (LOB)
+
+- [ ] Copilot Business/Enterprise tenant with Opus 4.6 policy enabled
+- [ ] ≥2 champion architects identified
+- [ ] LOB ADRs reviewed by EA office (present in global store or scoped locally)
+- [ ] Cost-center tagging confirmed
+- [ ] Target AWS account(s) provisioned in landing zone
+- [ ] Pilot app selected (Tier 2/3, < 10 integrations)
+
+### 15.2 Onboarding sequence (5 weeks)
+
+| Week | Activity | Owner |
+|---|---|---|
+| 1 | Kickoff workshop: AgentCatalyst Brownfield workflow using reference case | Platform eng |
+| 1 | **CSA Agent diagram quality check** for pilot app (§3.7) | Platform eng |
+| 2 | Pilot: developer runs full workflow with platform-eng observing | LOB + Platform eng |
+| 2 | Identify gaps: substitutions, patterns, ADRs, scanner analyzers | Both |
+| 3 | Platform eng fills gaps (priority-queue jumps) | Platform eng |
+| 4 | LOB re-runs pilot end-to-end to generated PR | LOB |
+| 4 | Plan review exercise: LOB architect reviews pilot plan | LOB + EA |
+| 5 | LOB readout: time saved, quality, blockers | LOB |
+| 5 | LOB declared GA for brownfield adoption | Platform eng |
+
+### 15.3 Success criteria
+
+- Pilot app reaches deployable PR in ≤ 1 working day
+- ≥ 80% acceptance rate on produced blueprint
+- Zero ADR violations at PR review
+- LOB champions can run a second pilot independently
+
+### 15.4 Ongoing support
+
+After onboarding: `#agentcatalyst` channel, escalation queues, office hours. Monthly check-in for first 6 months with each newly onboarded LOB. Platform engineering commits to a quarterly review of each LOB's acceptance-telemetry dashboard.
+
+---
+
+*End of operating playbook.*
+
+*→ Architecture: `csa-tsa-speckit-architecture.md`*
+*→ Developer Guide: `csa-tsa-speckit-developerguide.md`*
