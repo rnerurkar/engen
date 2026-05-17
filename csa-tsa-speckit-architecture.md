@@ -145,7 +145,7 @@ The transformation problem — moving an existing on-prem application onto AWS �
 
 ## 5. High-Level Component Architecture
 
-![AgentCatalyst Brownfield — End-to-End Component Architecture](diagrams/agentcatalyst-brownfield-architecture.png)
+![AgentCatalyst Brownfield — End-to-End Component Architecture](agentcatalyst-brownfield-architecture.png)
 
 **Read this diagram top-down.** The CSA Agent (⓪, upstream, separate system) produces a validated CSA diagram and places it in the workspace. The coding agent's `csa-extractor` parses the diagram and pre-fills `spec.md` (①). The developer completes a two-stage plan (②), then invokes the Blueprint Advisor (③). Inside the MCP server, four tools run in a fixed order: ④ deterministic context-filtered substitution, ⑤ semantic pattern retrieval and LLM composition (the only LLM stage), ⑥ deterministic ADR compliance enforcement, and ⑦ deterministic blueprint assembly. The output (⑧) is a YAML blueprint plus a design contract with attestations and four Mermaid diagrams. The developer then generates brownfield-aware code (⑨), and can refresh the contract (🔄) at any time if peripherals have changed. Runtime compliance closes the loop between deployment and attestation. The peripheral systems band is maintained by Platform Engineering and consumed read-only at runtime.
 
@@ -269,11 +269,11 @@ A legacy multi-page application runs on vSphere (Java + JSP on Tomcat), with two
 
 ### 8.2 Current State Architecture
 
-![Reference Case — Current State Architecture (CSA)](diagrams/reference-case-csa.png)
+![Reference Case — Current State Architecture (CSA)](reference-case-csa.png)
 
 ### 8.3 Target State Architecture
 
-![Reference Case — Target State Architecture (TSA)](diagrams/reference-case-tsa.png)
+![Reference Case — Target State Architecture (TSA)](reference-case-tsa.png)
 
 ### 8.4 Transformation per integration
 
@@ -302,11 +302,11 @@ The Blueprint Advisor is an ADK-based agent exposed as an MCP Server, deployed o
 
 ### 9.2 Component view
 
-![Blueprint Advisor — Internal Component Architecture](diagrams/blueprint-advisor-components.png)
+![Blueprint Advisor — Internal Component Architecture](blueprint-advisor-components.png)
 
 ### 9.3 Call sequence
 
-→ *Standalone Mermaid file: [`diagrams/blueprint-advisor-sequence.mmd`](diagrams/blueprint-advisor-sequence.mmd)*
+→ *Standalone Mermaid file: [`blueprint-advisor-sequence.mmd`](blueprint-advisor-sequence.mmd)*
 
 ```mermaid
 sequenceDiagram
