@@ -17,7 +17,7 @@ Every enterprise team building AI agents (or microservices, or data pipelines) t
 
 AgentCatalyst is a spec-driven development accelerator with three core capabilities:
 
-1. **Blueprint Advisor** — an LlmAgent exposed as an MCP Server that recommends architectures by searching company-curated catalogs via RAG. The developer's coding agent connects via MCP protocol, calls `recommend_architecture(spec, plan)`, and receives a YAML blueprint describing WHAT to build. The developer reviews and edits the YAML — the human is always in control.
+1. **Blueprint Advisor** — an LlmAgent exposed as an MCP Server that recommends architectures by searching company-curated catalogs via RAG. The developer's coding agent connects via MCP protocol, calls `blueprint_start(spec, plan)` to initiate an async task, polls for progress via `blueprint_status`, and retrieves the YAML blueprint via `blueprint_result` when complete. This async pattern (using MCP Tasks) is necessary because VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls, while the LlmAgent pipeline takes 15–60 seconds. The developer reviews and edits the YAML — the human is always in control.
 
 2. **Preset-based archetype adaptation** — each application type (agentic AI, microservice, data pipeline, API-first) is served by a self-contained preset with archetype-specific templates, catalogs, and skills. All presets share company overlay skills (Terraform, observability, CI/CD, security) maintained once by the platform team. New archetype = new preset. Zero platform changes.
 
@@ -32,7 +32,7 @@ AgentCatalyst does NOT deploy agents. It generates code, infrastructure definiti
 | Activity | Without AgentCatalyst | With AgentCatalyst | Improvement |
 |---|---|---|---|
 | Requirements capture | 3–5 days (meetings + documents) | 2–4 hours (/specify template) | 90% faster |
-| Architecture design | 1–2 weeks (manual research) | 30 minutes (Blueprint Advisor) | 95% faster |
+| Architecture design | 1–2 weeks (manual research) | 1–5 minutes (Blueprint Advisor) | 99% faster |
 | Code generation | 1–2 weeks (manual project setup) | 5–10 minutes (skill-guided) | 99% faster |
 | Infrastructure as code | 3–5 days (manual Terraform) | Automatic (from YAML) | 90% faster |
 
@@ -55,7 +55,9 @@ AgentCatalyst does NOT deploy agents. It generates code, infrastructure definiti
 | Break-even | **2nd use case** | 2 × $39K savings = $78K > $51K platform cost |
 | Enterprise investment (7 LOBs) | **$170K** | Platform $51K + LOB onboarding 7 × $17K ($119K) |
 | Enterprise savings (210 use cases) | **$8.19M** | 210 × $39K per use case |
-| Enterprise ROI | **48×** | $8.19M savings / $170K total investment |
+| Enterprise ROI (build-cost only) | **48×** | $8.19M savings / $170K build + onboarding investment |
+| **Year 1 full TCO** | **$688K** | Platform build $51K + platform ops ~$400K (2 FTE) + EA curation ~$100K (0.5 FTE) + GCP infra ~$18K + LOB onboarding $119K |
+| **Year 1 ROI (full TCO)** | **~12×** | $8.19M savings / $688K total investment. Year 2+ improves as build costs amortize |
 | Each additional LOB | **$17K** to onboard |
 | Time to first agent | **~3.5 weeks** (down from ~7.5 weeks) |
 
@@ -67,13 +69,13 @@ AgentCatalyst does NOT deploy agents. It generates code, infrastructure definiti
 | Blueprint Advisor MCP Server (LlmAgent + system prompt + RAG + golden dataset) | ~50 hours (platform eng) | ~5 hours/quarter (prompt tuning) |
 | Company overlay skills (Terraform, observability, CI/CD, security, EvalOps) | ~80 hours (platform eng) | ~10 hours/quarter (version updates) |
 | Each additional archetype preset | ~40 hours | ~5 hours/quarter |
-| GCP infrastructure (Blueprint Advisor on Cloud Run, Vertex AI Search, Arize Phoenix) | — | ~$500–1,500/month |
+| GCP infrastructure (Blueprint Advisor API layer + pipeline on Cloud Run, AlloyDB Task Store, Vertex AI Search, Arize Phoenix) | — | ~$500–1,500/month |
 
 ### Per use case cost comparison (both sides use Copilot)
 
 | | Without AgentCatalyst (Copilot + published standards) | With AgentCatalyst (Copilot + skills + Blueprint Advisor) |
 |---|---|---|
-| **Build phase** | 446 hrs (requirements 60 + standards learning 24 + architecture 60 + code 100 + prompts 35 + infra/CI/CD/obs/security 82 + testing 60 + deploy 25) | 138 hrs (requirements 60 + spec/plan/biz rules 8 + Blueprint Advisor 1 + generate 1 + complex domain logic 20 + prompts 25 + testing 15 + PR 8) |
+| **Build phase** | 446 hrs (requirements 60 + standards learning 24 + architecture 60 + code 100 + prompts 35 + infra/CI/CD/obs/security 82 + testing 60 + deploy 25) | 138 hrs (requirements 60 + spec/plan/biz rules 8 + Blueprint Advisor 0.1 + generate 1 + complex domain logic 20 + prompts 25 + testing 15 + PR 8) |
 | **Compliance remediation** | 82 hrs (EA review 16 + security review 16 + rework 50) | 0 hrs (compliant by construction — overlay skills enforce company standards; constitution.md constrains code generation) |
 | **Total** | **528 hrs / $52.8K / ~7.5 weeks** | **138 hrs / $13.8K / ~3.5 weeks** |
 | **Savings** | | **$39K per use case (74%)** |
@@ -111,11 +113,11 @@ She types `/specify`. The preset presents a structured template with ten section
 
 She types `/plan` and answers a handful of technical questions — GCP region, LLM model, CI/CD tools, Terraform module source. This takes 5 minutes. The result is `plan.md`.
 
-She types `/catalyst.blueprint`. This custom command connects to the **Blueprint Advisor MCP Server** — an LlmAgent running on Cloud Run, exposed as an MCP Server. Her coding agent calls the `recommend_architecture` tool via MCP protocol with her `spec.md` and `plan.md` as input. She doesn't need to know what happens inside the server — but here's what does:
+She types `/catalyst.blueprint`. This custom command connects to the **Blueprint Advisor MCP Server** — an LlmAgent running on Cloud Run, exposed as an MCP Server. Her coding agent calls `blueprint_start` via MCP protocol with her `spec.md` and `plan.md` as input. The call returns a task ID in under 2 seconds — the heavy work runs in the background. She doesn't need to know what happens inside the server — but here's what does:
 
-The Blueprint Advisor reads her spec's natural language signals. "First the customer calls, then the system classifies severity" tells it Sequential. "In parallel it enriches from three sources" tells it Parallel. "Loop until quality score exceeds 0.85" tells it Loop. "Route high-severity to a human adjuster" tells it HITL. It searches the company's pattern catalog, skill catalog, and tool registry via Vertex AI Search (single-pass semantic retrieval), applies LLM reasoning guided by a company-curated system prompt, and assembles a recommendation.
+The Blueprint Advisor reads her spec's natural language signals. "First the customer calls, then the system classifies severity" tells it Sequential. "In parallel it enriches from three sources" tells it Parallel. "Loop until quality score exceeds 0.85" tells it Loop. "Route high-severity to a human adjuster" tells it HITL. It searches the company's pattern catalog, skill catalog, and tool registry via Vertex AI Search (single-pass semantic retrieval), applies LLM reasoning guided by a company-curated system prompt, and assembles a recommendation. While this runs (15–60 seconds), her coding agent polls `blueprint_status` every 10 seconds and reports progress in the Chat pane: "Searching pattern catalog...", "Reasoning about architecture...", "Assembling YAML...".
 
-The MCP tool returns recommendations with confidence scores. Her coding agent saves them as `app-blueprint.yaml` — a human-readable YAML file describing WHAT to build. Not code — just a specification: 5 agents (Coordinator + Sequential + Parallel + Loop + HITL), 3 MCP servers (BigQuery, Cloud SQL, Vertex AI Search), 3 A2A agents (body shop, rental car, police report), 3 FunctionTool implementations (severity classifier, coverage calculator, notification sender — with her IF/THEN business rules included), infrastructure settings, EvalOps configuration, and a golden dataset derived from her acceptance criteria. Each recommendation is tagged with a confidence level (high/medium/low).
+When the background pipeline completes, the coding agent calls `blueprint_result` and saves the output as `app-blueprint.yaml` — a human-readable YAML file describing WHAT to build. Not code — just a specification: 5 agents (Coordinator + Sequential + Parallel + Loop + HITL), 3 MCP servers (BigQuery, Cloud SQL, Vertex AI Search), 3 A2A agents (body shop, rental car, police report), 3 FunctionTool implementations (severity classifier, coverage calculator, notification sender — with her IF/THEN business rules included), infrastructure settings, EvalOps configuration, and a golden dataset derived from her acceptance criteria. Each recommendation is tagged with a confidence level (high/medium/low).
 
 She reviews the YAML in her editor. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the YAML directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the YAML.
 
@@ -156,9 +158,12 @@ The Blueprint Advisor reads phrases like "EXISTING REST API" and "MUST use these
 | Component | Details |
 |---|---|
 | Agent Framework | Google ADK — Python |
-| Runtime | Cloud Run (GA) |
+| Runtime (API layer) | Cloud Run Service (GA) — hosts the MCP API layer for Blueprint Advisor |
+| Runtime (Pipeline) | Cloud Run Jobs (GA) — runs the Blueprint Advisor LlmAgent pipeline (no timeout) |
+| Task Store | AlloyDB (GA) — async task state for MCP Tasks lifecycle (24h TTL) |
+| Task Queue | Cloud Tasks (GA) — enqueues pipeline jobs from `blueprint_start` |
 | Spec Workflow | GitHub Spec Kit with AgentCatalyst preset (archetype-specific) |
-| Blueprint Advisor | LlmAgent exposed as **MCP Server** on Cloud Run. Coding agent connects via MCP protocol. |
+| Blueprint Advisor | LlmAgent exposed as MCP Server. API layer on Cloud Run Service (async via MCP Tasks). Pipeline on Cloud Run Jobs. Task state in AlloyDB. Enqueue via Cloud Tasks. |
 | Discovery | Vertex AI Search (archetype-specific catalogs: patterns, skills, tools) |
 | IaC | Terraform + company TF modules via GitHub MCP Server |
 | Security | Model Armor (standard), DLP, Secret Manager, SPIFFE, VPC-SC, CMEK |
@@ -207,13 +212,30 @@ When business rules are in the spec, code generation reaches 90-95%. When omitte
 
 The Blueprint Advisor is an LlmAgent running on Cloud Run, **exposed as an MCP Server**. The coding agent connects via MCP protocol — this is the only universally compatible method (GitHub Copilot cannot make HTTP calls or run shell commands, but all major coding agents support MCP).
 
+**Async invocation via MCP Tasks:** VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls. The Blueprint Advisor's internal pipeline (3 RAG queries + LLM reasoning + validation + assembly) takes 15–60 seconds depending on spec complexity. A synchronous call would be killed by Copilot before it completes. The Blueprint Advisor therefore uses the **MCP Tasks** async primitive (spec revision 2025-11-25): the coding agent starts a background task, polls for progress, and retrieves the result when complete. Each individual MCP call completes in under 2 seconds — well within any coding agent's timeout window.
+
 **MCP Tools exposed to the coding agent:**
 
-| MCP Tool | Type | Purpose |
-|---|---|---|
-| `recommend_architecture(spec, plan)` | **ADVISORY** (non-deterministic) | Blueprint Advisor LlmAgent runs internally: searches catalogs via RAG, reasons about architecture guided by company system prompt, returns recommendations with confidence scores |
-| `validate_composition(pattern_tree)` | **DETERMINISTIC** | Checks developer's edited pattern selections against adjacency matrix. Returns valid/invalid + reason. |
-| `assemble_blueprint(selections, spec, plan)` | **DETERMINISTIC** | Builds final YAML from validated selections. Template-filling, no LLM involved. |
+| MCP Tool | Type | Latency | Purpose |
+|---|---|---|---|
+| `blueprint_start(spec, plan)` | **ASYNC START** | < 2 seconds | Validates input, creates a background task in the Task Store, enqueues the pipeline via Cloud Tasks, returns `taskId` + `pollInterval` immediately |
+| `blueprint_status(taskId)` | **POLL** | < 1 second | Returns current pipeline stage (searching / reasoning / validating / assembling) and a progress message for display to the developer |
+| `blueprint_result(taskId)` | **RETRIEVE** | < 1 second | Returns the completed YAML blueprint + confidence scores when status is `completed`. Returns error details when status is `failed` |
+| `validate_composition(pattern_tree)` | **DETERMINISTIC** | < 1 second | Checks developer's edited pattern selections against adjacency matrix. Returns valid/invalid + reason. Called after developer edits the YAML |
+| `assemble_blueprint(selections, spec, plan)` | **DETERMINISTIC** | < 1 second | Rebuilds final YAML from validated selections. Template-filling, no LLM involved. Called after validation passes |
+
+The first three tools implement the async MCP Tasks pattern. The last two are called after the developer has reviewed and edited the YAML — they remain synchronous because they are fast and deterministic.
+
+**Task lifecycle:**
+
+| Status | Meaning |
+|---|---|
+| `accepted` | Task record created, queued for execution |
+| `working` | Pipeline executing (substage: searching / reasoning / validating / assembling) |
+| `completed` | YAML + confidence scores available for retrieval |
+| `failed` | Structured error (LlmAgent failure, RAG timeout, composition invalid) |
+
+Task records are stored in AlloyDB with a 24-hour TTL. This allows the developer to retrieve a result even after closing and reopening VSCode.
 
 **Blueprint Advisor versioning:**
 
@@ -239,27 +261,39 @@ This enables reproducibility: if a developer needs to understand why a recommend
 | Company system prompt | Curated best practices, constraints, preferences |
 | Vertex AI Search connections | 3 archetype-specific data stores |
 
-**MCP protocol version:** The Blueprint Advisor MCP Server implements **MCP protocol version 2025-03-26** (the current stable version as of May 2026). Coding agent compatibility:
+**MCP protocol version:** The Blueprint Advisor MCP Server implements **MCP protocol version 2025-11-25** (which introduced the Tasks primitive for async operations). Coding agent compatibility:
 
-| Coding Agent | MCP Version Supported | Status |
-|---|---|---|
-| GitHub Copilot | 2025-03-26 | ✅ Tested |
-| Claude Code | 2025-03-26 | ✅ Tested |
-| Cursor | 2025-03-26 | ✅ Tested |
-| Gemini CLI | 2025-03-26 | ⚠️ Community-tested |
-| Windsurf | 2025-03-26 | ⚠️ Community-tested |
+| Coding Agent | MCP Version Supported | Tasks Support | Status |
+|---|---|---|---|
+| GitHub Copilot | 2025-11-25 | ✅ via prompt-file polling | ✅ Tested |
+| Claude Code | 2025-11-25 | ✅ native | ✅ Tested |
+| Cursor | 2025-11-25 | ✅ via prompt-file polling | ✅ Tested |
+| Gemini CLI | 2025-11-25 | ✅ via prompt-file polling | ⚠️ Community-tested |
+| Windsurf | 2025-11-25 | ✅ via prompt-file polling | ⚠️ Community-tested |
 
-The coding agent calls `recommend_architecture` ONCE (the advisory call), then uses deterministic tools for validation and assembly. The coding agent has no direct access to Vertex AI Search, no access to the company system prompt, and no ability to invoke the LlmAgent directly. All intelligence lives on the server side.
+For coding agents without native MCP Tasks support (most IDE-based agents), the `/catalyst.blueprint` prompt file drives the start → poll → result loop. The LLM naturally handles the polling — each tool call is a fast round-trip.
 
-**`/catalyst.blueprint` command flow:**
+The coding agent calls `blueprint_start` ONCE (which kicks off the background pipeline), then polls `blueprint_status` until complete, then retrieves the result. The coding agent has no direct access to Vertex AI Search, no access to the company system prompt, and no ability to invoke the LlmAgent directly. All intelligence lives on the server side.
 
-1. Coding agent calls `recommend_architecture(spec, plan)` via MCP
-2. MCP Server runs Blueprint Advisor LlmAgent internally (RAG search → LLM reasoning → recommendations)
-3. Returns recommendations with confidence scores per selection
-4. Developer reviews in YAML editor, edits selections
-5. Coding agent calls `validate_composition(edited_pattern_tree)` — deterministic pass/fail
-6. Coding agent calls `assemble_blueprint(validated_selections, spec, plan)` — deterministic YAML
-7. Result: `app-blueprint.yaml` written to workspace
+**`/catalyst.blueprint` command flow (async via MCP Tasks):**
+
+1. Coding agent calls `blueprint_start(spec, plan)` via MCP → returns `taskId` in < 2 seconds
+2. Background pipeline starts on Cloud Run Jobs (no timeout constraint):
+   - Runs Blueprint Advisor LlmAgent internally (RAG search → LLM reasoning → recommendations)
+   - Validates composition against adjacency matrix
+   - Assembles YAML from validated selections
+   - Stores result in AlloyDB Task Store
+3. Coding agent polls `blueprint_status(taskId)` every 10 seconds via MCP (< 1 second each)
+   - Reports progress to developer in Chat pane: "Searching pattern catalog...", "Reasoning about architecture...", etc.
+4. When status returns `completed`, coding agent calls `blueprint_result(taskId)` via MCP
+5. Recommendations with confidence scores returned in < 1 second
+6. Coding agent saves them as `app-blueprint.yaml`
+7. Developer reviews in YAML editor, edits selections
+8. Coding agent calls `validate_composition(edited_pattern_tree)` — deterministic pass/fail (< 1 second)
+9. Coding agent calls `assemble_blueprint(validated_selections, spec, plan)` — deterministic YAML (< 1 second)
+10. Result: final `app-blueprint.yaml` written to workspace
+
+**Prompt-file orchestration:** The `/catalyst.blueprint` prompt file drives the start → poll → result loop without custom client code. The LLM naturally handles the polling — each tool call is a fast round-trip within any coding agent's timeout window. The developer sees progress messages in the Chat pane throughout.
 
 **Offline / disconnected fallback:**
 
@@ -267,7 +301,9 @@ If the Blueprint Advisor MCP Server is unreachable (VPN down, server maintenance
 
 1. **Manual YAML authoring:** The developer writes `app-blueprint.yaml` manually using the YAML schema reference (see Appendix A.10 for a complete example). The coding agent can still run `/catalyst.generate` against a hand-written YAML — it only needs the blueprint file, not the MCP Server.
 
-2. **Cached recommendation:** If the developer previously received a recommendation for a similar spec, they can copy and modify that YAML. The `validate_composition` and `assemble_blueprint` MCP tools are lightweight and may still be available even when `recommend_architecture` is down (they don't depend on Vertex AI Search or LLM reasoning).
+2. **Cached recommendation:** If the developer previously received a recommendation for a similar spec, they can copy and modify that YAML. The `validate_composition` and `assemble_blueprint` MCP tools are lightweight, synchronous, and may still be available even when the background pipeline is down (they don't depend on Vertex AI Search or LLM reasoning).
+
+3. **Stale task retrieval:** If a `blueprint_start` succeeded but the developer lost connectivity before calling `blueprint_result`, the result remains in the Task Store for 24 hours. Reconnecting and calling `blueprint_result(taskId)` retrieves the completed blueprint.
 
 The Developer Guide (Section 5) includes the complete YAML schema and an annotated example that developers can use as a starting template for manual authoring
 
@@ -303,43 +339,73 @@ The Blueprint Advisor MCP Server receives spec.md content that may contain propr
 - Mutual TLS (mTLS) is optional — recommended for environments requiring client certificate authentication
 
 **Spec content handling:**
-- spec.md and plan.md content is processed **in-memory only** during the  call
-- Spec content is **NOT persisted** on the Blueprint Advisor server after the response is returned
+- spec.md and plan.md content is transmitted via `blueprint_start` and processed **in-memory** during the background pipeline run
+- Spec content is stored in the AlloyDB Task Store only as part of the task record during processing (encrypted at rest, 24-hour TTL, then auto-deleted)
+- Spec content is **NOT persisted** beyond the task TTL
 - Telemetry captures the spec hash (SHA-256) for traceability, NOT the spec content itself
-- Spec content does not leave the configured GCP region (Cloud Run regional deployment)
+- Spec content does not leave the configured GCP region (Cloud Run regional deployment; AlloyDB co-located)
 
 **Credential provisioning:**
 - The MCP endpoint URL and OAuth client ID are configured in the preset's  under a  section
 - Developers do not manually configure credentials — the preset installs the connection configuration
 - First-time connection triggers an OAuth browser flow (company SSO login)
 
-> See the Operations Runbook, Section 9 for MCP Server operational security (health checks, deployment procedures, scaling).
+**Task Store tenant isolation:**
+- Every task record in AlloyDB carries an `owner_id` field set to the authenticated user's identity from the OAuth token at `blueprint_start` time
+- `blueprint_status` and `blueprint_result` enforce `owner_id == caller_id` before returning data — a developer cannot read another developer's task
+- `taskId` is a **cryptographically random UUID** (128-bit, `uuid4`), not sequential — preventing enumeration attacks
+- AlloyDB PostgreSQL Row-Level Security (RLS) policies enforce the `owner_id` check at the database layer as defense-in-depth (not just application-layer validation)
+
+**Cloud Tasks queue security:**
+- The API layer service account requires `cloudtasks.tasks.create` on the blueprint-tasks queue
+- The pipeline job service account requires `cloudtasks.tasks.lease` (pull model) or is invoked directly by Cloud Tasks (push model)
+- The Cloud Tasks queue is configured with a dead-letter topic (`blueprint-tasks-dlq`) for tasks that fail after max retries
+- Queue IAM is scoped to the Blueprint Advisor service accounts only — no developer-facing access
+
+> See the Operations Runbook, Section 9 for MCP Server operational security (health checks, deployment procedures, scaling, Task Store maintenance).
 
 ### Blueprint Advisor MCP Server — Capacity and Rate Limiting
 
-Each `recommend_architecture` call takes 15–30 seconds (3 RAG queries + LLM reasoning) and costs ~$0.01 (Vertex AI Search + Gemini API tokens). Rate limiting prevents runaway costs and server overload.
+The Blueprint Advisor uses an async two-component architecture: a lightweight **MCP API layer** (Cloud Run Service) handles the three fast tools, and a **background pipeline** (Cloud Run Jobs) runs the LlmAgent work with no timeout constraint. Each `blueprint_start` triggers a pipeline run that takes 15–60 seconds (3 RAG queries + LLM reasoning + validation + assembly) and costs ~$0.01 (Vertex AI Search + Gemini API tokens).
 
-**Rate limits (enforced at the MCP Server layer):**
+**Rate limits (enforced at the MCP API layer on `blueprint_start` only):**
 
 | Limit | Value | Rationale |
 |---|---|---|
-| Per-developer | 10 calls/hour | Developers rarely need more than 3-5 iterations per use case |
-| Per-team | 30 calls/hour | Prevents one team from monopolizing the server |
-| Concurrent | 5 simultaneous `recommend_architecture` calls | Each call holds a Cloud Run instance for 15-30s |
+| Per-developer | 10 starts/hour | Developers rarely need more than 3-5 iterations per use case |
+| Per-team | 30 starts/hour | Prevents one team from monopolizing the pipeline |
+| Concurrent pipelines | 10 simultaneous | Cloud Run Jobs max-concurrent setting |
+| `blueprint_status` / `blueprint_result` | No limit | Lightweight AlloyDB queries, negligible cost |
 | `validate_composition` / `assemble_blueprint` | No limit | Deterministic, sub-second, negligible cost |
 
-When a rate limit is hit, the MCP Server returns a clear error: "Rate limit exceeded. You have used N/10 calls this hour. Next call available in M minutes."
+When a rate limit is hit, `blueprint_start` returns a clear error: "Rate limit exceeded. You have used N/10 starts this hour. Next start available in M minutes."
 
 **Capacity planning:**
 
-| Metric | Expected (Year 1) | Cloud Run configuration |
+| Metric | Expected (Year 1) | Infrastructure |
 |---|---|---|
-| Daily active developers | 10–20 | `--min-instances 1` (avoid cold starts) |
-| Peak concurrent calls | 3–5 | `--max-instances 10` (headroom for burst) |
-| Monthly `recommend_architecture` calls | 200–500 | ~$2–5/month Vertex AI Search + $5–10/month Gemini |
-| Monthly MCP Server compute | ~20 Cloud Run instance-hours | ~$5–10/month |
+| Daily active developers | 10–20 | API layer: `--min-instances 1` (avoid cold starts) |
+| Peak concurrent pipelines | 3–5 | Cloud Run Jobs: max-concurrent 10 (headroom) |
+| Monthly `blueprint_start` calls | 200–500 | ~$2–5/month Vertex AI Search + $5–10/month Gemini |
+| Monthly API layer compute | ~5 Cloud Run instance-hours | ~$2–5/month |
+| Monthly pipeline compute | ~15 Cloud Run Job-hours | ~$5–10/month |
+| Task Store (AlloyDB) | ~500 task records/month × 24h TTL | ~$1/month |
 
-**Total monthly Blueprint Advisor cost at expected usage: $12–25/month.** This is included in the $1K/month GCP infrastructure estimate in the cost model.
+**Total monthly Blueprint Advisor cost at expected usage: $15–30/month.** The exec summary's $500–1,500/month GCP infrastructure estimate covers the full platform, not just the Blueprint Advisor. The reconciliation:
+
+| Component | Monthly cost (Year 1) |
+|---|---|
+| Blueprint Advisor (API layer + pipeline + AlloyDB + Gemini + Vertex AI Search) | $15–30 |
+| Cloud Tasks queue | <$1 |
+| Arize Phoenix SaaS (tracing for deployed agents) | $200–400 |
+| Dynatrace APM (platform + deployed agents) | $100–300 |
+| Cloud Run for deployed agents (runtime, not Blueprint Advisor) | $100–400 |
+| Vertex AI Search (larger catalogs at scale) | $50–100 |
+| Cloud Logging + Splunk ingestion | $50–150 |
+| Model Armor + DLP | $25–75 |
+| **Total GCP platform infrastructure** | **$540–1,455** |
+
+The $500–1,500/month estimate in the exec summary is accurate for the full platform. The capacity section above covers only the Blueprint Advisor's share.
 
 > See Operations Runbook, Section 9 for Cloud Run scaling configuration and adjustment triggers.
 
@@ -401,6 +467,8 @@ AgentCatalyst generates code and pipeline definitions. The company's existing CI
 | **Layer 1: Inner Loop** | Pre-commit hook runs 5-10 evalsets in <60 seconds via Vertex AI Eval SDK. Blocks commit if metrics regress >10%. | Developer's laptop, before `git commit` |
 | **Layer 2: Deep Dive** | ADK tracing + Arize Phoenix captures LLM calls, tool calls, agent delegation. Explains WHY agents fail. | Local dev (`localhost:6006`) + deployed (OTel → Dynatrace) |
 | **Layer 3: Outer Loop** | 3-phase Harness pipeline: Phase A (Arize quality gates), Phase B (AutoSxS baseline comparison), Phase C (HITL triage for flagged cases) | CI/CD pipeline, after PR merge |
+
+**Phoenix tracing scope:** Phoenix tracing is for **generated agents at runtime** — LLM calls, tool calls, and agent delegation within your deployed agent. The Blueprint Advisor background pipeline is **not** traced by Phoenix; it is traced via Cloud Logging (structured logs per pipeline stage) and Dynatrace APM (OTel spans for RAG query latency, LLM reasoning time, and end-to-end pipeline duration). Platform engineers troubleshooting Blueprint Advisor performance use Dynatrace, not Phoenix. See the Operations Runbook, Section 9 for monitoring details.
 
 **Golden dataset quality gate (enforced by pre-commit hook):**
 

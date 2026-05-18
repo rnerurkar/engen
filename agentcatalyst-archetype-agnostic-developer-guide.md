@@ -25,7 +25,7 @@ gemini skills install github.com/company/agentcatalyst-skills --scope user
 # 4. In VSCode with your coding agent:
 /specify              # fill in the structured template → spec.md
 /plan                 # answer technical questions → plan.md
-/catalyst.blueprint   # Connects to Blueprint Advisor MCP Server → returns app-blueprint.yaml
+/catalyst.blueprint   # Connects to Blueprint Advisor MCP Server (async) → returns app-blueprint.yaml
 # review + edit the YAML
 /catalyst.generate    # coding agent generates everything using skills
 ```
@@ -46,7 +46,7 @@ They've already set up everything you need. You don't configure any of this:
 | Pattern catalog (per archetype) | Vertex AI Search | Blueprint Advisor searches this to recommend patterns |
 | Domain skills (per archetype) | `github.com/company/agentcatalyst-skills` | Teach the coding agent how to write correct code for ADK, Spring Boot, etc. |
 | Company overlay skills (shared) | Same repo | Teach Terraform patterns, Dynatrace config, Jenkins/Harness pipelines, security standards |
-| Blueprint Advisor MCP Server | Cloud Run (GCP) | LlmAgent exposed as MCP Server. Your coding agent calls `recommend_architecture`, `validate_composition`, `assemble_blueprint` via MCP protocol. |
+| Blueprint Advisor MCP Server | Cloud Run + Cloud Run Jobs (GCP) | LlmAgent exposed as MCP Server (async via MCP Tasks). Your coding agent calls `blueprint_start`, `blueprint_status`, `blueprint_result`, `validate_composition`, `assemble_blueprint` via MCP protocol. |
 | Approved tools registry | Apigee API Hub + `memory/approved-tools.md` | What MCP servers, APIs, and A2A agents you can connect to |
 | Company Terraform modules | `github.com/company/tf-modules` | Pre-approved infrastructure modules |
 
@@ -57,7 +57,7 @@ They've already set up everything you need. You don't configure any of this:
 | 1 | Install the preset + skills (one-time) | 5 min |
 | 2 | `/specify` — describe your problem in structured English | 15 min |
 | 3 | `/plan` — answer technical questions | 5 min |
-| 4 | `/catalyst.blueprint` — get AI architecture advice | 30 sec (wait) |
+| 4 | `/catalyst.blueprint` — get AI architecture advice | 1–5 min (async, progress in chat) |
 | 5 | Review and edit the YAML | 10 min |
 | 6 | `/catalyst.generate` — coding agent generates the project | 5–10 min |
 | 7 | Write business logic + system prompts (the 20%) | 2–4 hours |
@@ -214,35 +214,54 @@ Saved as `plan.md`. (~5 min)
 
 ### 2.5 `/catalyst.blueprint` — Get AI advice via Blueprint Advisor MCP Server
 
-Type `/catalyst.blueprint`. Wait ~30 seconds. `app-blueprint.yaml` appears in your workspace.
+Type `/catalyst.blueprint`. The coding agent connects to the **Blueprint Advisor MCP Server** and starts a background task. You see progress in the Chat pane as the pipeline runs (typically 1–5 minutes). When complete, `app-blueprint.yaml` appears in your workspace.
 
-**What happens behind the scenes in those 30 seconds:**
+**Why async?** VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls. The Blueprint Advisor's internal pipeline (3 RAG searches + LLM reasoning + validation + assembly) takes 15–60 seconds. A single blocking call would be killed before it completes. Instead, the coding agent uses three fast MCP tools — `blueprint_start` (< 2s), `blueprint_status` (< 1s), `blueprint_result` (< 1s) — to drive an async loop. You don't need to think about this; the prompt file handles it automatically.
 
-The coding agent connects to the **Blueprint Advisor MCP Server** and calls the `recommend_architecture` tool with your `spec.md` + `plan.md`. The server runs the Blueprint Advisor LlmAgent internally — you never interact with it directly. The LlmAgent reads your spec and does three searches against the company's curated catalogs:
-
-1. **Pattern search** — reads your Workflow section's ordering words ("First," "Simultaneously," "Refine until") and searches the pattern catalog to find the right agent topology. "First... then..." → Sequential. "Simultaneously" → Parallel. "Refine until" → Loop.
-
-2. **Tool search** — reads your Data Sources and External Integrations sections and searches the tool registry for the specific tools your agent needs. The tool registry is chunked at the **individual tool level**, not the server level — so when you write "BigQuery analytical queries," the search matches the specific `execute_query` tool on the BigQuery MCP server, not just "BigQuery" generically. MCP tools and A2A agent tasks are in the same registry, so one search finds both. If you wrote "they operate their own body shop service," the search finds the A2A agent. If the company had built an internal MCP server instead, it would find that.
-
-3. **Skill search** — finds skills that match the tools and capabilities your agent needs. Skills are automatically paired with their corresponding tools — the `bigquery` skill gets assigned to the same agent that uses the BigQuery MCP server.
-
-**How the Blueprint Advisor decides which tool goes to which agent:**
-
-It uses **co-occurrence** — which data source is mentioned in the same sentence as which workflow step. Your spec says: *"First, verify coverage **by querying our BigQuery**."* BigQuery is mentioned in the same sentence as "verify" → BigQuery MCP is assigned to the `verify_policy` agent. This is why the language in your spec matters — clear co-occurrence leads to correct assignments.
-
-The coding agent shows a summary:
+**What you see in the Chat pane:**
 
 ```
+You: /catalyst.blueprint
+
+Agent: Blueprint generation started. Checking progress...
+Agent: Searching pattern catalog...
+Agent: Searching tool registry for BigQuery, Cloud SQL, Vertex AI Search tools...
+Agent: Searching skill catalog for matching skills...
+Agent: LLM reasoning: mapping tools to agents based on co-occurrence...
+Agent: Validating composition...
+Agent: Assembling YAML...
+Agent: Blueprint ready! Saved app-blueprint.yaml to your workspace.
+
 Blueprint Advisor recommends:
   5 agents: LlmAgent (coordinator), SequentialAgent (intake),
             ParallelAgent (enrichment), LoopAgent (summary), LlmAgent (HITL)
   3 MCP servers: bigquery-policy, cloud-sql-claims, vertex-search-policies
   3 A2A agents: body-shop-network, rental-car-service, police-report-service
-  3 FunctionTool implementations (first draft from spec business rules): severity_classifier, coverage_calculator, notification_sender
+  3 FunctionTool implementations: severity_classifier, coverage_calculator, notification_sender
   2 skills: bigquery v1.2.0, fraud-detection v2.0.1
 
 Review the YAML and edit before running /catalyst.generate.
 ```
+
+**What happens behind the scenes:**
+
+1. Your coding agent calls `blueprint_start` with `spec.md` + `plan.md`. The server validates the input, creates a background task, and returns a task ID in under 2 seconds.
+
+2. The background pipeline (running on Cloud Run Jobs with no timeout) does three searches against the company's curated catalogs:
+
+   - **Pattern search** — reads your Workflow section's ordering words ("First," "Simultaneously," "Refine until") and searches the pattern catalog. "First... then..." → Sequential. "Simultaneously" → Parallel. "Refine until" → Loop.
+
+   - **Tool search** — reads your Data Sources and External Integrations sections and searches the tool registry for the specific tools your agent needs. The tool registry is chunked at the **individual tool level**, not the server level — so when you write "BigQuery analytical queries," the search matches the specific `execute_query` tool on the BigQuery MCP server, not just "BigQuery" generically. MCP tools and A2A agent tasks are in the same registry, so one search finds both.
+
+   - **Skill search** — finds skills that match the tools and capabilities your agent needs. Skills are automatically paired with their corresponding tools.
+
+3. Your coding agent polls `blueprint_status` every 10 seconds. Each poll returns the current stage and a progress message displayed in the Chat pane.
+
+4. When the pipeline completes, your coding agent calls `blueprint_result` to retrieve the YAML and saves it as `app-blueprint.yaml`.
+
+**How the Blueprint Advisor decides which tool goes to which agent:**
+
+It uses **co-occurrence** — which data source is mentioned in the same sentence as which workflow step. Your spec says: *"First, verify coverage **by querying our BigQuery**."* BigQuery is mentioned in the same sentence as "verify" → BigQuery MCP is assigned to the `verify_policy` agent. This is why the language in your spec matters — clear co-occurrence leads to correct assignments.
 
 ### 2.6 Review and edit the YAML
 
@@ -545,7 +564,7 @@ Use the existing CI/CD from ci-cd/.
 Only generate application code that runs inside the existing containers.
 ```
 
-**Key language:** Notice the repeated "EXISTING" and "DO NOT create new" signals. This tells the Blueprint Advisor MCP Server (which the coding agent calls via `recommend_architecture`) and the coding agent to work within the existing infrastructure, not generate new infrastructure.
+**Key language:** Notice the repeated "EXISTING" and "DO NOT create new" signals. This tells the Blueprint Advisor MCP Server (which the coding agent invokes via `blueprint_start`) and the coding agent to work within the existing infrastructure, not generate new infrastructure.
 
 #### Step 3: `/plan` — Technical decisions
 
@@ -558,9 +577,20 @@ Terraform:         SKIP — infrastructure already exists
 CI/CD:             EXISTING Jenkinsfile + harness-pipeline.yaml
 ```
 
-#### Step 4: `/catalyst.blueprint` — Get AI advice via MCP
+#### Step 4: `/catalyst.blueprint` — Get AI advice via MCP (async)
 
-The Blueprint Advisor reads the spec and recognizes the brownfield signals. It returns `app-blueprint.yaml` that references existing infrastructure rather than creating new infrastructure:
+The Blueprint Advisor reads the spec and recognizes the brownfield signals. Like the greenfield flow (see §2.5 for the full async explanation), your coding agent starts a background task, polls for progress, and retrieves the result. You see progress in the Chat pane:
+
+```
+Agent: Blueprint generation started. Checking progress...
+Agent: Searching pattern catalog for microservice patterns...
+Agent: Searching tool registry — recognizing EXISTING signals for Oracle, Angular, ECS...
+Agent: Reasoning: brownfield mode — skipping infrastructure generation...
+Agent: Assembling YAML...
+Agent: Blueprint ready! Saved app-blueprint.yaml.
+```
+
+This typically takes 1–3 minutes for a brownfield spec. The returned `app-blueprint.yaml` references existing infrastructure rather than creating new infrastructure:
 
 ```yaml
 metadata:
@@ -1157,7 +1187,7 @@ This shows you exactly which agent failed, which tool returned bad data, and whe
 
 > **If the Blueprint Advisor is unavailable:** You can author `app-blueprint.yaml` manually using the YAML schema below and the FNOL example in the Architecture Document (Appendix A.10) as a template. The `/catalyst.generate` command only needs the YAML file — it does not require the MCP Server. You lose the AI-guided recommendation but are not blocked from generating code.
 
-> **How the YAML is created:** Your coding agent calls `recommend_architecture(spec, plan)` on the Blueprint Advisor MCP Server. The server runs the Blueprint Advisor LlmAgent internally (RAG search + LLM reasoning + company system prompt) and returns recommendations with confidence scores. Your coding agent then calls `validate_composition(pattern_tree)` to check your edits, and `assemble_blueprint(selections, spec, plan)` to finalize the YAML. All three calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document for the full MCP Server tool table.
+> **How the YAML is created:** Your coding agent calls `blueprint_start(spec, plan)` on the Blueprint Advisor MCP Server, which returns a task ID immediately. The background pipeline runs the Blueprint Advisor LlmAgent internally (RAG search + LLM reasoning + company system prompt) and stores the result when complete. Your coding agent polls `blueprint_status(taskId)` for progress and retrieves the result via `blueprint_result(taskId)`. After reviewing and editing, your coding agent calls `validate_composition(pattern_tree)` to check your edits, and `assemble_blueprint(selections, spec, plan)` to finalize the YAML. All calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document for the full MCP Server tool table.
 
 ### Agentic blueprint — key fields
 
@@ -1750,6 +1780,7 @@ Both are essential. Jenkins ensures the agent's environment is correct. Harness 
 | Problem | Cause | Fix |
 |---|---|---|
 | `/catalyst.blueprint` returns error | Blueprint Advisor API unreachable | Check `CATALYST_BLUEPRINT_API` env var |
+| Blueprint task stuck in "working" for >5 min | Pipeline slow or Cloud Run Jobs quota exceeded | Check the Chat pane for the last progress message. If stuck on "Searching pattern catalog," the Vertex AI Search may be slow. If stuck on "Reasoning," the LLM call is running long. Wait up to 10 min for complex specs (10+ integrations). If no progress after 10 min, cancel and re-run with a simpler spec. Report to Platform Engineering if persistent. |
 | YAML validation fails | Schema error | Common: missing `assigned_to`, unpinned version, invalid type |
 | Skill provenance check fails | Skill updated since YAML generated | Update `version:` in YAML |
 | Skills not visible | Not installed | Run `gemini skills install github.com/company/agentcatalyst-skills --scope user` |
@@ -1775,7 +1806,7 @@ Both are essential. Jenkins ensures the agent's environment is correct. Harness 
 
 ---
 
-## 14. Reference — All Commands
+## 15. Reference — All Commands
 
 | Command | What it does |
 |---|---|
