@@ -149,7 +149,7 @@ The Blueprint Advisor reads phrases like "EXISTING REST API" and "MUST use these
 
 **Architecture infographic:**
 
-![AgentCatalyst Component Architecture](AgentCatalyst-Component-Architecture.png)
+![AgentCatalyst Component Architecture](AgentCatalyst-GA-Architecture-Infographic.png)
 
 ---
 
