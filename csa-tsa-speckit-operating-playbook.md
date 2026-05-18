@@ -41,7 +41,7 @@
 | Component | Owner | SLO |
 |---|---|---|
 | Spec Kit preset (publishing, version cuts) | Platform engineering | New version every 4 weeks; hotfix within 24h |
-| Blueprint Advisor MCP Server (Cloud Run) | Platform engineering | 99.5% availability; p95 < 90s |
+| Blueprint Advisor MCP Server (Cloud Run + Jobs) | Platform engineering | 99.5% API availability; pipeline p95 < 5 min (4 integrations) |
 | Pattern Catalog (Vertex AI Search) | EA office (content) + Platform eng (corpus) | New pattern within 5 business days of ADR approval |
 | ADR Constraint Store + Rule Authoring UI | EA office (rules) + Platform eng (UI + infra) | Rules effective within 1 business day |
 | Tech Substitution Decision Table + UI | EA office (decisions) + Platform eng (table + UI) | Emergency entry within 5 business days |
@@ -340,53 +340,77 @@ Nightly comparison of the manifest's `current` version against what's referenced
 
 ### 8.1 Deployment
 
-Cloud Run `blueprint-advisor-brownfield` in `enterprise-platform-prod`. Min: 2 instances. Max: 20. Concurrency: 10/instance. 4 vCPU, 8 GB memory. Primary: `us-east1`. DR: `us-west1` (cold standby, RTO 30 min).
+The Blueprint Advisor has two deployment components:
+
+**MCP API layer** — Cloud Run service `blueprint-advisor-api` in `enterprise-platform-prod`. Handles the three fast MCP tools (`blueprint_start`, `blueprint_status`, `blueprint_result`). Min: 2 instances. Max: 10. Concurrency: 80/instance (these are lightweight reads/writes to Firestore). Request timeout: 30 seconds (each call completes in <2s). 2 vCPU, 4 GB memory.
+
+**Background pipeline** — Cloud Run Jobs `blueprint-advisor-pipeline` in `enterprise-platform-prod`. Runs the 4-stage pipeline (map → recommend → check → assemble) with no request-timeout constraint. Triggered by Cloud Tasks queue `blueprint-tasks`. 4 vCPU, 8 GB memory per job. Max concurrent jobs: 20.
+
+**Task store** — Firestore collection `blueprint_tasks` in `enterprise-platform-prod`. Stores task records (taskId, status, stage, progress, result). TTL: 24 hours. Replicated across regions for DR.
+
+Primary region: `us-east1`. DR: `us-west1` (cold standby for API layer, RTO 30 min; task store is multi-region by default).
 
 ### 8.2 CI/CD
+
+Pipeline `blueprint-advisor-release` (deploys both API layer and pipeline job):
 
 | Stage | Gate |
 |---|---|
 | Unit tests | 100% pass |
 | Integration tests | Against staging Vertex AI Search + ADR Store + Substitution Table |
-| Contract-schema tests | Schema v2 compatibility |
-| Smoke tests | Canonical fixtures match expected output |
-| Canary deploy | 10% traffic, 1 hour, error rate < 0.5% |
+| Async round-trip test | `blueprint_start` → poll → `blueprint_result` against canonical fixtures | Match expected output |
+| Contract-schema tests | Schema compatibility |
+| Canary deploy (API layer) | 10% traffic, 1 hour, error rate < 0.5% |
+| Pipeline job deploy | Deploy new Cloud Run Job revision |
 | Full deploy | Manual approval |
 
 ### 8.3 Observability
 
 | Signal | SLO |
 |---|---|
-| Availability | 99.5% monthly |
-| Latency p95 | < 90s |
-| Latency p99 | < 180s |
-| Error rate | < 0.5% |
+| API layer availability | 99.5% monthly |
+| `blueprint_start` latency p95 | < 2s |
+| `blueprint_status` latency p95 | < 500ms |
+| `blueprint_result` latency p95 | < 2s |
+| Pipeline completion p95 (4 integrations) | < 5 min |
+| Pipeline completion p95 (10 integrations) | < 15 min |
+| Pipeline error rate | < 0.5% |
 | Substitution unresolved rate | < 5% (alert above) |
 | Composition failure rate | < 2% (alert above) |
+| Task store availability | 99.9% (Firestore SLA) |
 
-Dashboards: `Blueprint Advisor — Operational Health`, `Blueprint Advisor — Quality`, `Blueprint Advisor — Audit`.
+Dashboards: `Blueprint Advisor — Operational Health` (API latency, pipeline duration, error rate), `Blueprint Advisor — Quality` (confidence distributions, reject reasons), `Blueprint Advisor — Audit` (per-task attestation log).
 
 ### 8.4 Rate limiting
 
-10 calls/hour per user. 200/hour per org. 429 with `Retry-After: 60`. Whitelist for platform-eng testing.
+Rate limits apply to `blueprint_start` only (the expensive operation that triggers a pipeline run):
 
-### 8.5 Per-call cost breakdown
+- 10 starts/hour per user
+- 200 starts/hour per org
+- Exceeded calls return 429 with `Retry-After: 60`
+
+`blueprint_status` and `blueprint_result` are not rate-limited (lightweight Firestore reads). Whitelist available for platform-eng operational testing.
+
+### 8.5 Per-task cost breakdown
 
 | Component | Cost |
 |---|---|
-| Cloud Run compute | ~$0.005 |
-| Vertex AI Search queries | ~$0.02 |
-| LlmAgent (tool ⑤) | ~$0.08 |
+| Cloud Run API layer (start + ~18 polls + result) | ~$0.002 |
+| Cloud Run Jobs (pipeline execution, 4 integrations) | ~$0.01 |
+| Vertex AI Search queries (4–8 per task) | ~$0.02 |
+| LlmAgent (stage ⑤ pattern composition) | ~$0.08 |
+| Firestore (task record + result storage, 24h TTL) | ~$0.001 |
 | Logging + observability | ~$0.005 |
-| **Per-call total** | **~$0.11** |
+| **Per-task total** | **~$0.12** |
 
 ### 8.6 Scaling triggers
 
 | Trigger | Action |
 |---|---|
-| p95 > 90s sustained 1 hour | +5 max instances; investigate |
-| 429 rate > 1% sustained 1 hour | Raise per-org limit after EA approval |
-| Vertex AI Search > 1s p95 | Investigate corpus size |
+| Pipeline completion p95 > 15 min (4 integrations) | Investigate slow stage; consider Vertex AI Search partitioning |
+| Cloud Run Jobs concurrent > 15 sustained 1 hour | Raise max concurrent jobs; investigate queue depth |
+| 429 rate on blueprint_start > 1% sustained 1 hour | Raise per-org rate limit after EA approval |
+| Task store read latency > 100ms p95 | Investigate Firestore indexing |
 
 ### 8.7 Design contract drift detection
 
@@ -554,7 +578,9 @@ Office hours: EA office Tuesdays 2–3 PM ET. Platform engineering Thursdays 10�
 
 | Pattern | Likely cause | Mitigation |
 |---|---|---|
-| All calls fail 5xx | Cloud Run or Vertex AI Search outage | Failover to DR region |
+| All `blueprint_start` calls fail 5xx | Cloud Run API layer down | Failover to DR region |
+| All pipelines stuck in "working" | Cloud Run Jobs quota exhausted or Cloud Tasks queue jammed | Check Cloud Tasks queue depth; flush stuck tasks; scale Jobs quota |
+| Task store unavailable | Firestore outage | Firestore is multi-region; if regional, traffic auto-routes; if global, engage GCP support |
 | All ADR checks reject everything | Bad rule pushed | Roll back latest ADR-content PR |
 | All substitutions NOT_FOUND | Postgres issue or schema drift | Verify Cloud SQL; manual failover |
 | Confidence collapsed to ~0.5 | Corpus re-indexing or model change | Wait for re-index; verify model |

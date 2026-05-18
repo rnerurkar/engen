@@ -145,7 +145,7 @@ The transformation problem — moving an existing on-prem application onto AWS �
 
 ## 5. High-Level Component Architecture
 
-![AgentCatalyst Brownfield — End-to-End Component Architecture](agentcatalyst-brownfield-architecture.png)
+![AgentCatalyst Brownfield — End-to-End Component Architecture](diagrams/agentcatalyst-brownfield-architecture.png)
 
 **Read this diagram top-down.** The CSA Agent (⓪, upstream, separate system) produces a validated CSA diagram and places it in the workspace. The coding agent's `csa-extractor` parses the diagram and pre-fills `spec.md` (①). The developer completes a two-stage plan (②), then invokes the Blueprint Advisor (③). Inside the MCP server, four tools run in a fixed order: ④ deterministic context-filtered substitution, ⑤ semantic pattern retrieval and LLM composition (the only LLM stage), ⑥ deterministic ADR compliance enforcement, and ⑦ deterministic blueprint assembly. The output (⑧) is a YAML blueprint plus a design contract with attestations and four Mermaid diagrams. The developer then generates brownfield-aware code (⑨), and can refresh the contract (🔄) at any time if peripherals have changed. Runtime compliance closes the loop between deployment and attestation. The peripheral systems band is maintained by Platform Engineering and consumed read-only at runtime.
 
@@ -169,9 +169,11 @@ The developer invokes `/speckit.specify`. The preset's `csa-extractor` agent par
 
 The developer runs `/speckit.plan.draft` to produce a first-pass `plan.md` with r-factor, cutover, and sequencing decisions per integration. Then `/speckit.plan.review` publishes the draft for async review by an EA architect or LOB lead, who adds structured comments. The developer resolves comments and the plan enters `reviewed` state. Acceptance telemetry tracks solo-drafted vs. reviewed plans and correlates with downstream quality.
 
-### ③ /catalyst.blueprint — Package and invoke
+### ③ /catalyst.blueprint — Package and invoke (async)
 
-The developer invokes `/catalyst.blueprint`. The command packages `spec.md` and `plan.md` into a single JSON envelope conforming to a versioned schema (`blueprint_request.schema.json`), then invokes the Blueprint Advisor MCP server via the MCP protocol. The coding agent never touches Vertex AI Search, the ADR store, or the LlmAgent directly. The MCP server is the single point of governance for blueprint generation.
+The developer invokes `/catalyst.blueprint`. The command packages `spec.md` and `plan.md` into a single JSON envelope conforming to a versioned schema (`blueprint_request.schema.json`), then invokes the Blueprint Advisor MCP server using the **MCP Tasks** async protocol.
+
+VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls. A synchronous call that blocks for the full blueprint generation (1–30 minutes depending on integration count) would be killed immediately. The Blueprint Advisor therefore exposes three MCP tools — `blueprint_start`, `blueprint_status`, `blueprint_result` — instead of one blocking call. The prompt file orchestrates the polling loop: start the task, poll for status at the server-recommended interval, report progress to the developer in the Chat pane, and retrieve the result when complete. Each individual MCP call completes in under 2 seconds. The coding agent never touches Vertex AI Search, the ADR store, or the LlmAgent directly. The MCP server remains the single point of governance. → *§9 details the three-tool async interface and the internal 4-stage pipeline.*
 
 ### ④ map_current_to_target — Context-filtered technology substitution
 
@@ -269,11 +271,11 @@ A legacy multi-page application runs on vSphere (Java + JSP on Tomcat), with two
 
 ### 8.2 Current State Architecture
 
-![Reference Case — Current State Architecture (CSA)](reference-case-csa.png)
+![Reference Case — Current State Architecture (CSA)](diagrams/reference-case-csa.png)
 
 ### 8.3 Target State Architecture
 
-![Reference Case — Target State Architecture (TSA)](reference-case-tsa.png)
+![Reference Case — Target State Architecture (TSA)](diagrams/reference-case-tsa.png)
 
 ### 8.4 Transformation per integration
 
@@ -298,73 +300,115 @@ A legacy multi-page application runs on vSphere (Java + JSP on Tomcat), with two
 
 ### 9.1 Overview
 
-The Blueprint Advisor is an ADK-based agent exposed as an MCP Server, deployed on Cloud Run in the company's GCP project. It exposes four tools via the MCP protocol, plus one internal sub-step. It is OAuth 2.0 protected, rate-limited at 10 calls/hour per user, and does not persist the inbound spec or plan beyond the call boundary. Audit logs (caller, timestamp, integrations summary, output blueprint hash) are written to Splunk.
+The Blueprint Advisor is an ADK-based agent exposed as an MCP Server, deployed on Cloud Run in the company's GCP project. It is OAuth 2.0 protected and does not persist the inbound spec or plan beyond the task boundary. Audit logs (caller, timestamp, integrations summary, output blueprint hash) are written to Splunk.
+
+The MCP interface exposes **three async tools** using the MCP Tasks primitive (spec revision 2025-11-25). This is necessary because VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls, while the internal 4-stage pipeline (map → recommend → check → assemble) can take 1–30 minutes depending on integration count and pattern-catalog query volume.
+
+| MCP tool | What it does | Latency |
+|---|---|---|
+| `blueprint_start` | Validates input, creates a background task, returns `taskId` | < 2 seconds |
+| `blueprint_status` | Returns current pipeline stage and progress message | < 1 second |
+| `blueprint_result` | Returns the completed YAML + design contract + diagrams | < 1 second |
+
+Internally, the background task runs the 4-stage pipeline described in §9.4–§9.7. The background work executes on **Cloud Run Jobs** (no request-timeout constraint), triggered by `blueprint_start` via Cloud Tasks. Task state (taskId, status, progress, result) is stored in Firestore with a configurable TTL (default: 24 hours).
+
+Rate limiting applies to `blueprint_start` (10 starts/hour per user, 200/hour per org) but not to `blueprint_status` or `blueprint_result` (polling is lightweight).
 
 ### 9.2 Component view
 
-![Blueprint Advisor — Internal Component Architecture](blueprint-advisor-components.png)
+![Blueprint Advisor — Internal Component Architecture](diagrams/blueprint-advisor-components.png)
 
-### 9.3 Call sequence
+### 9.3 Call sequence (async MCP Tasks)
 
-→ *Standalone Mermaid file: [`blueprint-advisor-sequence.mmd`](blueprint-advisor-sequence.mmd)*
+→ *Standalone Mermaid file: [`diagrams/blueprint-advisor-sequence.mmd`](diagrams/blueprint-advisor-sequence.mmd)*
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Agent as Coding Agent
+    participant Agent as Coding Agent (VSCode Copilot)
     participant MCP as Blueprint Advisor MCP Server
-    participant T1 as ④ map_current_to_target
-    participant TS as Tech Substitution Decision Table
-    participant T2 as ⑤ recommend_architecture (LlmAgent)
-    participant PC as Pattern Catalog (Vertex AI Search)
-    participant TR as Tool Registry (Apigee API Hub)
-    participant T3 as ⑥ adr_compliance_check
-    participant ADR as ADR Constraint Store (Firestore)
-    participant T4 as ⑦ assemble_blueprint
-    participant IAC as IaC Module Registry (GitHub)
+    participant BG as Background Job (Cloud Run Jobs)
+    participant TS as Tech Substitution Table
+    participant PC as Pattern Catalog
+    participant ADR as ADR Constraint Store
+    participant IAC as IaC Module Registry
+    participant FS as Task Store (Firestore)
 
-    Agent->>MCP: { spec, plan } (JSON, versioned schema)
-    MCP->>T1: map_current_to_target(integrations, r_factors)
-    loop For each integration
-        T1->>TS: lookup(source_tech, r_factor, context_dimensions)
-        TS-->>T1: { target_tech, adr_ref, transition_pattern_ref } or NOT_FOUND
+    Note over Agent,MCP: Phase 1 — Start (< 2s, within Copilot timeout)
+    Agent->>MCP: blueprint_start({ spec, plan })
+    MCP->>MCP: validate schema
+    MCP->>FS: create task record (status: ACCEPTED)
+    MCP->>BG: enqueue via Cloud Tasks
+    MCP-->>Agent: { taskId, status: "working", pollInterval: 10000 }
+
+    Note over Agent,MCP: Phase 2 — Poll (< 1s each, prompt-file loop)
+    loop Every pollInterval seconds
+        Agent->>MCP: blueprint_status(taskId)
+        MCP->>FS: read task status
+        FS-->>MCP: { status, stage, message }
+        MCP-->>Agent: { status: "working", stage: "recommending", message: "..." }
     end
-    T1-->>MCP: tech_substitutions[] + unresolved[]
 
-    alt Any unresolved
-        MCP-->>Agent: error { requires_manual_substitution }
-    else All resolved
-        MCP->>T2: recommend_architecture(spec, plan, tech_substitutions)
-        loop For each integration
-            T2->>PC: hybrid_search(intent + categories + target_tech)
-            PC-->>T2: candidate_patterns[] with scores
-            T2->>TR: discover_tools(integration_intent, target_tech)
-            TR-->>T2: applicable_tools[]
-        end
-        T2->>T2: validate_composition(pattern_tree)
-        T2-->>MCP: pattern_selections[] + confidence_scores[]
+    Note over BG,IAC: Background — 4-stage pipeline (1–30 min)
+    BG->>FS: status → "substituting"
+    BG->>TS: map_current_to_target (per integration)
+    TS-->>BG: tech_substitutions[]
+    BG->>FS: status → "recommending"
+    BG->>PC: hybrid_search (per integration)
+    PC-->>BG: candidate_patterns[]
+    BG->>BG: validate_composition
+    BG->>FS: status → "checking"
+    BG->>ADR: adr_compliance_check
+    ADR-->>BG: compliance_results[]
+    BG->>FS: status → "assembling"
+    BG->>IAC: resolve_modules
+    IAC-->>BG: module_refs[]
+    BG->>BG: generate YAML + contract + 4 Mermaid diagrams
+    BG->>FS: store result, status → "completed"
 
-        MCP->>T3: adr_compliance_check(selections, substitutions)
-        loop For each (integration, pattern, target_tech)
-            T3->>ADR: query(source_tech, target_tech, functional_category)
-            ADR-->>T3: applicable_adrs[] with rule predicates
-            T3->>T3: evaluate predicates deterministically
-        end
-        T3-->>MCP: compliance_results[] (pass/flag/reject)
-
-        alt Any rejections
-            MCP-->>Agent: error { rejected_mappings, reason }
-        else Pass (with possible flags)
-            MCP->>T4: assemble_blueprint(...)
-            T4->>IAC: resolve_modules(tech_set, dr_strategy)
-            IAC-->>T4: module_refs[] (path, version)
-            T4->>T4: generate Mermaid (4 diagrams)
-            T4->>T4: check cross-cloud → emit Phase-0 if PrivateLink+PSC
-            T4-->>MCP: yaml + contract (lifecycle: LIVE)
-            MCP-->>Agent: { yaml, contract, diagrams }
-        end
-    end
+    Note over Agent,MCP: Phase 3 — Retrieve (< 1s)
+    Agent->>MCP: blueprint_status(taskId)
+    MCP-->>Agent: { status: "completed" }
+    Agent->>MCP: blueprint_result(taskId)
+    MCP->>FS: read result
+    FS-->>MCP: { yaml, contract, diagrams }
+    MCP-->>Agent: app-blueprint.yaml + design_contract.json
 ```
+
+### 9.3.1 Prompt-file orchestration
+
+The `/catalyst.blueprint` prompt file drives the three-phase loop:
+
+```markdown
+---
+model: ['Claude Opus 4.6', 'Claude Opus 4.7', 'Claude Sonnet 4.6']
+tools: ['blueprint_start', 'blueprint_status', 'blueprint_result']
+---
+Step 1: Package spec.md and plan.md into JSON. Call blueprint_start.
+        Capture taskId. Tell user: "Blueprint generation started."
+
+Step 2: Wait pollInterval. Call blueprint_status(taskId).
+
+Step 3: If "working", report stage + message to user. Wait. Repeat Step 2.
+        If "failed", report error with reason. Stop.
+
+Step 4: When "completed", call blueprint_result(taskId).
+        Write YAML and contract to workspace.
+```
+
+Each tool call completes in under 2 seconds. The LLM naturally handles the polling loop. The user sees progress in the Chat pane ("Stage ⑤: pattern retrieval for INT-003...").
+
+### 9.3.2 Task lifecycle
+
+| Status | Meaning | Transitions to |
+|---|---|---|
+| `accepted` | Queued for execution | → `working` |
+| `working` | Pipeline executing (substage: substituting / recommending / checking / assembling) | → `completed` or `failed` |
+| `completed` | Result available | Terminal |
+| `failed` | Structured error (unresolved substitution, ADR rejection, composition failure) | Terminal |
+| `cancelled` | Developer cancelled | Terminal |
+
+Task records are retained in Firestore for 24 hours (configurable TTL), then auto-deleted. This allows retrieval even after closing and reopening VSCode.
 
 ### 9.4 Tool 1 — `map_current_to_target` (context-filtered decision table)
 
@@ -910,6 +954,8 @@ The per-call compute cost (~$0.11/blueprint) represents ~2% of total platform TC
 | Runtime compliance violation | AWS Config rule fires | Pager → investigation | Playbook §13 |
 | Cross-cloud plumbing incomplete | Phase-0 exit criteria not met | Integration blocked until verified | Dev Guide §18 FM-6 |
 | Spec Kit breaking change | Preset CI fails after upgrade | Pin to previous version; activate fork | Playbook §2.3 |
+| Blueprint task timeout | `blueprint_status` returns `working` for >30 min | Developer cancels and re-runs with simplified spec; investigate slow pipeline stage | Dev Guide §18 FM-9 |
+| Task store unavailable | `blueprint_start` fails with Firestore error | Failover to DR region; task store is replicated | Playbook §13 |
 | Constitution drift | Pre-commit hook detects contradiction | Developer resolves project rule | Dev Guide §5 |
 
 ---

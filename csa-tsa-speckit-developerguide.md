@@ -55,7 +55,7 @@ specify init --here --preset agentcatalyst-brownfield --integration copilot
 /speckit.specify            # diagram extraction → spec.md pre-fill → elicitation
 /speckit.plan.draft         # first-pass r-factor + cutover per integration
 /speckit.plan.review        # async EA/architect review of the plan
-/catalyst.blueprint         # 4-tool Blueprint Advisor → YAML + design contract
+/catalyst.blueprint         # async: start → poll (progress in chat) → retrieve YAML + contract
 # review the YAML, contract, 4 Mermaid diagrams
 /catalyst.generate          # brownfield-aware code + IaC + pipelines
 
@@ -154,7 +154,7 @@ Verify: in Copilot Chat, Agent mode, type `/` and confirm `speckit.constitution`
 | 2 | `/speckit.specify` | csa-extractor parses diagram → pre-fills spec.md → elicits details | 30 min |
 | 3 | `/speckit.plan.draft` | Developer first-pass: r-factor + cutover per integration | 30 min |
 | 4 | `/speckit.plan.review` | Async EA/architect review with structured comments | 1–3 days |
-| 5 | `/catalyst.blueprint` | 4-tool Blueprint Advisor → YAML + design contract | 60 sec |
+| 5 | `/catalyst.blueprint` | Async: start → poll (progress in chat) → retrieve | 1–30 min |
 | 6 | Review | Review YAML, contract, 4 Mermaid diagrams | 30 min |
 | 7 | `/catalyst.generate` | Brownfield-aware skills generate code + IaC + pipelines | 5–10 min |
 | 8 | Developer work | Review, refine, business logic, tests, commit | 2–4 hours |
@@ -643,15 +643,42 @@ The developer resolves comments, updates `plan.md`, and the agent marks the plan
 
 ## 12. `/catalyst.blueprint`
 
-→ *Architecture §9 covers the 4-tool internal design in detail.*
+→ *Architecture §9 covers the async MCP Tasks design and the 4-stage internal pipeline.*
 
 ```
 /catalyst.blueprint
 ```
 
-Takes ~60 seconds. Packages `spec.md` + `plan.md` into JSON, invokes the Blueprint Advisor MCP Server. Four tools run: ④ context-filtered substitution → ⑤ semantic pattern retrieval + LLM composition → ⑥ ADR compliance check → ⑦ YAML + contract assembly. Returns `app-blueprint.yaml` and `design_contract.json`.
+The Blueprint Advisor uses the **MCP Tasks async protocol** because VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls, and the internal pipeline can take 1–30 minutes depending on integration count. Instead of one blocking call, three fast MCP tools work together:
 
-If anything fails, you get an actionable error before any code is generated. See §18 for specific failure modes.
+**What you see in the Chat pane:**
+
+```
+You: /catalyst.blueprint
+
+Agent: Blueprint generation started (task abc-123). Checking progress...
+Agent: Stage ④: substitution — 4 integrations resolved ✓
+Agent: Stage ⑤: pattern retrieval for INT-001...
+Agent: Stage ⑤: pattern retrieval for INT-003 (cross-cloud)...
+Agent: Stage ⑤: composition validation ✓ (14 rules checked)
+Agent: Stage ⑥: ADR compliance — 4 integrations passed ✓
+Agent: Stage ⑦: assembling YAML + design contract...
+Agent: Blueprint ready. Writing app-blueprint.yaml and design_contract.json
+       to your workspace. Review the 4 Mermaid diagrams inline.
+```
+
+**What happens under the hood:**
+
+1. The prompt file calls `blueprint_start` with your spec + plan as JSON. The MCP server validates the input, creates a background task, and returns a `taskId` — all within 2 seconds.
+2. The prompt file polls `blueprint_status(taskId)` every 10 seconds. Each poll returns the current pipeline stage and a progress message. The agent reports these to you in the Chat pane.
+3. The background job (Cloud Run Jobs, no timeout constraint) runs the 4-stage pipeline: ④ context-filtered substitution → ⑤ semantic pattern retrieval + LLM composition → ⑥ ADR compliance check → ⑦ YAML + contract assembly.
+4. When the poll returns `status: "completed"`, the prompt file calls `blueprint_result(taskId)` to retrieve the output and writes `app-blueprint.yaml` and `design_contract.json` to your workspace.
+
+If anything fails — substitution unresolved, ADR rejected, composition invalid — the poll returns `status: "failed"` with a structured error. You get the same actionable error messages as before; they just arrive via the polling mechanism.
+
+**Timing:** For the reference case (4 integrations), expect 2–5 minutes. For a complex app with 15 integrations, expect 15–30 minutes. You can continue working in other files during the poll — the agent will notify you when the blueprint is ready.
+
+**If the task takes too long (>30 minutes):** See §18 FM-9.
 
 ---
 
@@ -824,6 +851,11 @@ Defaults are restored with `specify preset reset`.
 
 **Diagnosis:** Pre-commit hook blocks with specific enterprise rule ID.
 **Fix:** Remove or reword the conflicting project rule in `constitution-project.md`. → *§5.*
+
+### FM-9: Blueprint task running too long (>30 minutes)
+
+**Diagnosis:** `blueprint_status` keeps returning `working` for more than 30 minutes. The most common cause is a large integration count (>10) combined with slow Vertex AI Search responses or a complex composition-validation pass.
+**Fix:** Cancel the task and simplify. Common strategies: split the spec into two batches (first batch: the 5 highest-priority integrations; second batch: the rest), or reduce ambiguity in integration intent paragraphs so pattern retrieval resolves faster. If the problem persists, file an `AGENTCATALYST-ADVISOR` ticket — platform engineering will investigate which pipeline stage is the bottleneck. → *Architecture §9.3.2 covers task lifecycle.*
 
 ---
 

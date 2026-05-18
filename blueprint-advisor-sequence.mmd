@@ -1,4 +1,4 @@
-%% Blueprint Advisor — Call Sequence Diagram
+%% Blueprint Advisor — Async Call Sequence (MCP Tasks)
 %% AgentCatalyst Brownfield
 %% File: blueprint-advisor-sequence.mmd
 
@@ -6,68 +6,58 @@ sequenceDiagram
     autonumber
     participant Agent as Coding Agent<br/>(VSCode + Copilot)
     participant MCP as Blueprint Advisor<br/>MCP Server (Cloud Run)
-    participant T1 as ④ map_current_to_target
+    participant BG as Background Job<br/>(Cloud Run Jobs)
     participant TS as Tech Substitution<br/>Decision Table
-    participant T2 as ⑤ recommend_architecture<br/>(LlmAgent)
     participant PC as Pattern Catalog<br/>(Vertex AI Search)
     participant TR as Tool Registry<br/>(Apigee API Hub)
-    participant T3 as ⑥ adr_compliance_check
     participant ADR as ADR Constraint Store<br/>(Firestore)
-    participant T4 as ⑦ assemble_blueprint
     participant IAC as IaC Module Registry<br/>(GitHub)
+    participant FS as Task Store<br/>(Firestore)
 
-    Agent->>MCP: /catalyst.blueprint<br/>{ spec, plan } (JSON, versioned schema)
+    rect rgb(214, 234, 248)
+    Note over Agent,MCP: Phase 1 — Start (< 2s, within Copilot timeout)
+    Agent->>MCP: blueprint_start({ spec, plan })
+    MCP->>MCP: validate JSON schema
+    MCP->>FS: create task record (status: ACCEPTED)
+    MCP->>BG: enqueue via Cloud Tasks
+    MCP-->>Agent: { taskId, status: "working", pollInterval: 10000 }
+    end
+
+    rect rgb(214, 234, 248)
+    Note over Agent,MCP: Phase 2 — Poll (< 1s each, prompt-file loop)
+    loop Every pollInterval seconds
+        Agent->>MCP: blueprint_status(taskId)
+        MCP->>FS: read task status
+        MCP-->>Agent: { status, stage, message }
+    end
+    end
 
     rect rgb(209, 242, 235)
-    Note over MCP,TS: Stage ④ — Deterministic tech substitution (no LLM)
-    MCP->>T1: map_current_to_target(integrations, r_factors, context)
-    loop For each integration
-        T1->>TS: lookup(source_tech, r_factor, context_dimensions)
-        TS-->>T1: { target_tech, adr_ref, transition_pattern_ref } or NOT_FOUND
+    Note over BG,FS: Background — 4-stage pipeline (1–30 min)
+    BG->>FS: status → "substituting"
+    BG->>TS: map_current_to_target (per integration)
+    TS-->>BG: tech_substitutions[]
+    BG->>FS: status → "recommending"
+    BG->>PC: hybrid_search (per integration)
+    PC-->>BG: candidate_patterns[]
+    BG->>TR: discover_tools
+    TR-->>BG: applicable_tools[]
+    BG->>BG: validate_composition
+    BG->>FS: status → "checking"
+    BG->>ADR: adr_compliance_check
+    ADR-->>BG: compliance_results[]
+    BG->>FS: status → "assembling"
+    BG->>IAC: resolve_modules
+    IAC-->>BG: module_refs[]
+    BG->>BG: generate YAML + contract + diagrams
+    BG->>FS: store result, status → "completed"
     end
-    T1-->>MCP: tech_substitutions[] + unresolved[]
-    end
 
-    alt Any unresolved substitutions
-        MCP-->>Agent: ERROR { requires_manual_substitution: [...] }
-    else All substitutions resolved
-        rect rgb(209, 242, 235)
-        Note over MCP,TR: Stage ⑤ — Semantic pattern retrieval + LLM composition
-        MCP->>T2: recommend_architecture(spec, plan, tech_substitutions)
-        loop For each integration
-            T2->>PC: hybrid_search(intent + functional_category[] + target_tech)
-            PC-->>T2: candidate_patterns[] with scores
-            T2->>TR: discover_tools(integration_intent, target_tech)
-            TR-->>T2: applicable_tools[]
-        end
-        T2->>T2: validate_composition(pattern_tree)
-        T2-->>MCP: pattern_selections[] + confidence_scores[]
-        end
-
-        rect rgb(209, 242, 235)
-        Note over MCP,ADR: Stage ⑥ — Deterministic ADR compliance (no LLM)
-        MCP->>T3: adr_compliance_check(pattern_selections, tech_substitutions)
-        loop For each (integration, pattern, target_tech)
-            T3->>ADR: query(source_tech, target_tech, functional_category)
-            ADR-->>T3: applicable_adrs[] with rule predicates
-            T3->>T3: evaluate predicates deterministically (DSL interpreter)
-        end
-        T3-->>MCP: compliance_results[] (pass / flag / reject per integration)
-        end
-
-        alt Any ADR rejections
-            MCP-->>Agent: ERROR { rejected_mappings: [...], violated_adr, reason }
-        else All pass (with possible flags)
-            rect rgb(213, 245, 227)
-            Note over MCP,IAC: Stage ⑦ — Deterministic blueprint assembly (no LLM)
-            MCP->>T4: assemble_blueprint(substitutions, patterns, attestations)
-            T4->>IAC: resolve_modules(target_tech_set, dr_strategy)
-            IAC-->>T4: module_refs[] (path, version)
-            T4->>T4: generate 4 Mermaid diagrams
-            T4->>T4: check cross-cloud → inject Phase-0 if PrivateLink+PSC
-            T4->>T4: set lifecycle: LIVE + staleness_triggers
-            T4-->>MCP: app-blueprint.yaml + design_contract.json
-            end
-            MCP-->>Agent: { yaml, contract, diagrams, lifecycle: LIVE }
-        end
+    rect rgb(213, 245, 227)
+    Note over Agent,MCP: Phase 3 — Retrieve (< 1s)
+    Agent->>MCP: blueprint_status(taskId)
+    MCP-->>Agent: { status: "completed" }
+    Agent->>MCP: blueprint_result(taskId)
+    MCP->>FS: read result
+    MCP-->>Agent: YAML + contract + diagrams
     end
