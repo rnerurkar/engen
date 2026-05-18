@@ -14,6 +14,13 @@
 | **This document** | `csa-tsa-speckit-developerguide.md` | **HOW** — step-by-step workflow, templates, examples |
 | Operating Playbook | `csa-tsa-speckit-operating-playbook.md` | **PROCEDURES** — operations, governance, onboarding |
 
+### Related core AgentCatalyst documents
+
+| Core document | Filename | Consult for |
+|---|---|---|
+| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield workflows (§2–§3), spec signal words (§4), YAML schema reference (§5), confidence scores (§8), troubleshooting (§14) |
+| Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Base Blueprint Advisor MCP design (Layer 2), EvalOps three-layer lifecycle (Layer 4) |
+
 ---
 
 ## Table of Contents

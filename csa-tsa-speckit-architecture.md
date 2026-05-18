@@ -14,6 +14,16 @@
 | Developer Guide | `csa-tsa-speckit-developerguide.md` | Developers | **HOW** — step-by-step workflow, templates, worked examples |
 | Operating Playbook | `csa-tsa-speckit-operating-playbook.md` | Platform engineering, EA office | **PROCEDURES** — operate, maintain, govern, onboard |
 
+### Related core AgentCatalyst documents
+
+The brownfield document set extends (does not replace) the core AgentCatalyst platform documentation:
+
+| Core document | Filename | Consult for |
+|---|---|---|
+| Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Blueprint Advisor MCP wire format (Layer 2), MCP Tasks async protocol design, base overlay skill architecture (Layer 3), EvalOps three-layer lifecycle (Layer 4) |
+| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield agentic/microservice workflows (§2–§3), spec signal words (§4), YAML schema reference (§5), confidence scores (§8) |
+| Core Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | Vertex AI Search wire-level API calls (§1), MCP tool wire format (§1a), search quality regression suite (§2), acceptance telemetry (§3), catalog backup/DR (§4a), shared MCP Server operations (§9) |
+
 ---
 
 ## Table of Contents
@@ -310,7 +320,7 @@ The MCP interface exposes **three async tools** using the MCP Tasks primitive (s
 | `blueprint_status` | Returns current pipeline stage and progress message | < 1 second |
 | `blueprint_result` | Returns the completed YAML + design contract + diagrams | < 1 second |
 
-Internally, the background task runs the 4-stage pipeline described in §9.4–§9.7. The background work executes on **Cloud Run Jobs** (no request-timeout constraint), triggered by `blueprint_start` via Cloud Tasks. Task state (taskId, status, progress, result) is stored in Firestore with a configurable TTL (default: 24 hours).
+Internally, the background task runs the 4-stage pipeline described in §9.4–§9.7. The background work executes on **Cloud Run Jobs** (no request-timeout constraint), triggered by `blueprint_start` via Cloud Tasks. Task state (taskId, status, progress, result) is stored in AlloyDB with a 24-hour retention enforced by a scheduled Cloud Scheduler cleanup job (hourly: `DELETE FROM blueprint_tasks WHERE created_at < NOW() - INTERVAL '24 hours'`).
 
 Rate limiting applies to `blueprint_start` (10 starts/hour per user, 200/hour per org) but not to `blueprint_status` or `blueprint_result` (polling is lightweight).
 
@@ -332,7 +342,7 @@ sequenceDiagram
     participant PC as Pattern Catalog
     participant ADR as ADR Constraint Store
     participant IAC as IaC Module Registry
-    participant FS as Task Store (Firestore)
+    participant FS as Task Store (AlloyDB)
 
     Note over Agent,MCP: Phase 1 — Start (< 2s, within Copilot timeout)
     Agent->>MCP: blueprint_start({ spec, plan })
@@ -408,7 +418,38 @@ Each tool call completes in under 2 seconds. The LLM naturally handles the polli
 | `failed` | Structured error (unresolved substitution, ADR rejection, composition failure) | Terminal |
 | `cancelled` | Developer cancelled | Terminal |
 
-Task records are retained in Firestore for 24 hours (configurable TTL), then auto-deleted. This allows retrieval even after closing and reopening VSCode.
+Task records are retained in AlloyDB for 24 hours (enforced by scheduled cleanup job), then deleted. This allows retrieval even after closing and reopening VSCode.
+
+### 9.3.3 Task Store tenant isolation
+
+Every task record carries an `owner_id` column set to the authenticated user's identity (from the OAuth token) at `blueprint_start` time. Access control is enforced at two layers:
+
+- **Application layer:** `blueprint_status` and `blueprint_result` verify `owner_id == caller_id` before returning data. A developer cannot read another developer's task — this prevents leakage of CSA-to-TSA mappings, ADR attestations, and migration-phase sequencing.
+- **Database layer:** AlloyDB PostgreSQL **Row-Level Security (RLS)** policies enforce the `owner_id` check as defense-in-depth. Even if the application-layer check is bypassed, the database rejects cross-user queries.
+- **TaskId unpredictability:** `taskId` is a **cryptographically random UUID** (`uuid4`, 128-bit), not sequential — preventing enumeration attacks.
+
+The `blueprint_tasks` table schema includes:
+
+```sql
+CREATE TABLE blueprint_tasks (
+  task_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id     TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'accepted',
+  stage        TEXT,
+  progress_msg TEXT,
+  spec_hash    TEXT,
+  plan_hash    TEXT,
+  result_yaml  TEXT,
+  result_contract JSONB,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Row-Level Security
+ALTER TABLE blueprint_tasks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY task_owner_policy ON blueprint_tasks
+  USING (owner_id = current_setting('app.current_user'));
+```
 
 ### 9.4 Tool 1 — `map_current_to_target` (context-filtered decision table)
 
@@ -648,11 +689,25 @@ sequence_template_endstate: |
 
 New patterns require ADR-approval before publication. Retrieval API: `hybrid_search(query, filters)` filtered by `functional_categories`, `r_factor_supports`, and `target_tech_compatibility`. → *Operating Playbook §3 covers add/update/retire lifecycle and quality regression suite.*
 
-### 10.2 ADR Constraint Store (Firestore + Rule Authoring UI)
+### 10.2 ADR Constraint Store (AlloyDB + Rule Authoring UI)
 
 → *Operating Playbook §4 covers full operational procedures including the authoring UI, identifier governance, unit-test requirements, and exception handling.*
 
-A structured policy store, separate from the Pattern Catalog, implementing deterministic constraint enforcement. Firestore datastore in `enterprise-ea-prod`, collection `adr_constraints`. One document per ADR.
+A structured policy store, separate from the Pattern Catalog, implementing deterministic constraint enforcement. AlloyDB table `adr_constraints` in the `enterprise-ea-prod` AlloyDB cluster. Schema:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `adr_id` | `VARCHAR(20)` PRIMARY KEY | e.g. `ADR-205` |
+| `title` | `TEXT` | Human-readable title |
+| `status` | `VARCHAR(20)` | `active` / `deprecated` / `superseded` |
+| `effective_date` | `DATE` | When the rule took effect |
+| `supersedes` | `VARCHAR(20)` | FK to replaced ADR, nullable |
+| `scope` | `JSONB` | `{ "source_techs": [...], "target_techs": [...], "functional_categories": [...] }` |
+| `rules` | `JSONB` | Array of `{ "type": "REQUIRE/FORBID/PREFER", "predicate": "...", "human_readable": "..." }` |
+| `created_at` | `TIMESTAMPTZ` | Row creation timestamp |
+| `updated_at` | `TIMESTAMPTZ` | Last modification timestamp |
+
+The JSONB columns for `scope` and `rules` preserve the flexible nested structure from the original document model while gaining PostgreSQL query performance, indexing (GIN indexes on JSONB), and Row-Level Security support.
 
 **ADR schema:**
 ```yaml
@@ -925,6 +980,8 @@ Spec Kit-specific code is isolated to two layers: the `specify` CLI (used only f
 
 Every MCP call emits structured logs to Splunk with: caller identity, spec hash, plan hash, integration count, per-tool latency, per-integration confidence scores, ADR attestations, and final blueprint hash. Dynatrace APM instruments the Cloud Run service. OpenTelemetry traces are emitted through the OTel Collector. Additional brownfield signals: runtime compliance alerts (§12), contract lifecycle state changes.
 
+**Blueprint Advisor pipeline tracing scope:** The Blueprint Advisor background pipeline (4-stage: map → recommend → check → assemble) is traced via **Cloud Logging** (structured logs per pipeline stage) and **Dynatrace APM** (OTel spans for RAG query latency, LLM reasoning time, and end-to-end pipeline duration). Arize Phoenix tracing is for **generated agents at runtime** only — it does not trace the Blueprint Advisor pipeline. Platform engineers troubleshooting pipeline performance use Dynatrace, not Phoenix.
+
 ### 17.2 Security
 
 OAuth 2.0 enforced at the MCP server boundary. Specs and plans are not persisted past the call. All peripheral stores are read-only from the Blueprint Advisor's perspective. Service-account-to-service-account auth uses Workload Identity Federation between Cloud Run and the data stores. All data stores are inside the GCP VPC-SC perimeter; the only egress is the MCP response.
@@ -955,7 +1012,7 @@ The per-call compute cost (~$0.11/blueprint) represents ~2% of total platform TC
 | Cross-cloud plumbing incomplete | Phase-0 exit criteria not met | Integration blocked until verified | Dev Guide §18 FM-6 |
 | Spec Kit breaking change | Preset CI fails after upgrade | Pin to previous version; activate fork | Playbook §2.3 |
 | Blueprint task timeout | `blueprint_status` returns `working` for >30 min | Developer cancels and re-runs with simplified spec; investigate slow pipeline stage | Dev Guide §18 FM-9 |
-| Task store unavailable | `blueprint_start` fails with Firestore error | Failover to DR region; task store is replicated | Playbook §13 |
+| Task store unavailable | `blueprint_start` fails with AlloyDB connection error | Failover to DR region; AlloyDB cross-region replica auto-promotes | Playbook §13 |
 | Constitution drift | Pre-commit hook detects contradiction | Developer resolves project rule | Dev Guide §5 |
 
 ---

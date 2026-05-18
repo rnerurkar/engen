@@ -10,9 +10,9 @@ sequenceDiagram
     participant TS as Tech Substitution<br/>Decision Table
     participant PC as Pattern Catalog<br/>(Vertex AI Search)
     participant TR as Tool Registry<br/>(Apigee API Hub)
-    participant ADR as ADR Constraint Store<br/>(Firestore)
+    participant ADR as ADR Constraint Store<br/>(AlloyDB)
     participant IAC as IaC Module Registry<br/>(GitHub)
-    participant FS as Task Store<br/>(Firestore)
+    participant FS as Task Store<br/>(AlloyDB)
 
     rect rgb(214, 234, 248)
     Note over Agent,MCP: Phase 1 — Start (< 2s, within Copilot timeout)

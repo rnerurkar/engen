@@ -14,6 +14,14 @@
 | Developer Guide | `csa-tsa-speckit-developerguide.md` | **HOW** — step-by-step workflow, templates, examples |
 | **This document** | `csa-tsa-speckit-operating-playbook.md` | **PROCEDURES** — operations, governance, onboarding |
 
+### Related core AgentCatalyst documents
+
+| Core document | Filename | Consult for |
+|---|---|---|
+| Core Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | Vertex AI Search wire-level API (§1), MCP tool wire format (§1a), search quality regression suite (§2), shared MCP Server operations (§9) |
+| Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Base Blueprint Advisor design (Layer 2), overlay skill architecture (Layer 3), EvalOps (Layer 4) |
+| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield workflows (§2–§3), spec signal words (§4), YAML schema (§5) |
+
 ---
 
 ## Table of Contents
@@ -183,7 +191,7 @@ The EA office uses a browser-based rule authoring UI (`adr-rule-editor`, deploye
 - **Version history** with diff view
 - **Bulk import/export** for quarterly reviews
 
-The UI writes to Firestore. The Blueprint Advisor reads from Firestore.
+The UI writes to AlloyDB via a PostgreSQL connection pool. The Blueprint Advisor pipeline reads from AlloyDB.
 
 ### 4.2 Predicate DSL governance
 
@@ -342,11 +350,11 @@ Nightly comparison of the manifest's `current` version against what's referenced
 
 The Blueprint Advisor has two deployment components:
 
-**MCP API layer** — Cloud Run service `blueprint-advisor-api` in `enterprise-platform-prod`. Handles the three fast MCP tools (`blueprint_start`, `blueprint_status`, `blueprint_result`). Min: 2 instances. Max: 10. Concurrency: 80/instance (these are lightweight reads/writes to Firestore). Request timeout: 30 seconds (each call completes in <2s). 2 vCPU, 4 GB memory.
+**MCP API layer** — Cloud Run service `blueprint-advisor-api` in `enterprise-platform-prod`. Handles the three fast MCP tools (`blueprint_start`, `blueprint_status`, `blueprint_result`). Min: 2 instances. Max: 10. Concurrency: 80 requests/instance (lightweight queries to AlloyDB via connection pool — 20 PostgreSQL connections per instance via AlloyDB Auth Proxy sidecar). Request timeout: 30 seconds (each call completes in <2s). 2 vCPU, 4 GB memory.
 
 **Background pipeline** — Cloud Run Jobs `blueprint-advisor-pipeline` in `enterprise-platform-prod`. Runs the 4-stage pipeline (map → recommend → check → assemble) with no request-timeout constraint. Triggered by Cloud Tasks queue `blueprint-tasks`. 4 vCPU, 8 GB memory per job. Max concurrent jobs: 20.
 
-**Task store** — Firestore collection `blueprint_tasks` in `enterprise-platform-prod`. Stores task records (taskId, status, stage, progress, result). TTL: 24 hours. Replicated across regions for DR.
+**Task store** — AlloyDB table `blueprint_tasks` in `enterprise-platform-prod` AlloyDB cluster. Stores task records (taskId, owner_id, status, stage, progress, result). 24-hour retention enforced by hourly Cloud Scheduler cleanup job. Cross-region replication enabled for DR.
 
 Primary region: `us-east1`. DR: `us-west1` (cold standby for API layer, RTO 30 min; task store is multi-region by default).
 
@@ -358,11 +366,20 @@ Pipeline `blueprint-advisor-release` (deploys both API layer and pipeline job):
 |---|---|
 | Unit tests | 100% pass |
 | Integration tests | Against staging Vertex AI Search + ADR Store + Substitution Table |
-| Async round-trip test | `blueprint_start` → poll → `blueprint_result` against canonical fixtures | Match expected output |
+| Async round-trip test | `blueprint_start` → poll → `blueprint_result` against canonical fixtures; match expected output |
 | Contract-schema tests | Schema compatibility |
+| **Drain in-flight tasks** | Check AlloyDB for `working` tasks; wait up to 5 min for completion. Cloud Run Jobs retains old revision until all executions complete. |
 | Canary deploy (API layer) | 10% traffic, 1 hour, error rate < 0.5% |
 | Pipeline job deploy | Deploy new Cloud Run Job revision |
 | Full deploy | Manual approval |
+| Post-deploy verify | Confirm no tasks remain on old pipeline revision after 1 hour |
+
+**Drain procedure:**
+```bash
+# Check in-flight tasks before deploying new pipeline revision
+psql $ALLOYDB_CONNECTION -c "SELECT task_id, status, created_at FROM blueprint_tasks WHERE status = 'working';"
+# If empty, proceed. If not, wait up to 5 minutes or proceed (old revision handles them).
+```
 
 ### 8.3 Observability
 
@@ -377,7 +394,7 @@ Pipeline `blueprint-advisor-release` (deploys both API layer and pipeline job):
 | Pipeline error rate | < 0.5% |
 | Substitution unresolved rate | < 5% (alert above) |
 | Composition failure rate | < 2% (alert above) |
-| Task store availability | 99.9% (Firestore SLA) |
+| Task store availability | 99.99% (AlloyDB SLA with cross-region replication) |
 
 Dashboards: `Blueprint Advisor — Operational Health` (API latency, pipeline duration, error rate), `Blueprint Advisor — Quality` (confidence distributions, reject reasons), `Blueprint Advisor — Audit` (per-task attestation log).
 
@@ -389,7 +406,7 @@ Rate limits apply to `blueprint_start` only (the expensive operation that trigge
 - 200 starts/hour per org
 - Exceeded calls return 429 with `Retry-After: 60`
 
-`blueprint_status` and `blueprint_result` are not rate-limited (lightweight Firestore reads). Whitelist available for platform-eng operational testing.
+`blueprint_status` and `blueprint_result` are not rate-limited (lightweight AlloyDB queries). Whitelist available for platform-eng operational testing.
 
 ### 8.5 Per-task cost breakdown
 
@@ -399,7 +416,7 @@ Rate limits apply to `blueprint_start` only (the expensive operation that trigge
 | Cloud Run Jobs (pipeline execution, 4 integrations) | ~$0.01 |
 | Vertex AI Search queries (4–8 per task) | ~$0.02 |
 | LlmAgent (stage ⑤ pattern composition) | ~$0.08 |
-| Firestore (task record + result storage, 24h TTL) | ~$0.001 |
+| AlloyDB (task record + result storage, 24h retention) | ~$0.001 |
 | Logging + observability | ~$0.005 |
 | **Per-task total** | **~$0.12** |
 
@@ -410,7 +427,7 @@ Rate limits apply to `blueprint_start` only (the expensive operation that trigge
 | Pipeline completion p95 > 15 min (4 integrations) | Investigate slow stage; consider Vertex AI Search partitioning |
 | Cloud Run Jobs concurrent > 15 sustained 1 hour | Raise max concurrent jobs; investigate queue depth |
 | 429 rate on blueprint_start > 1% sustained 1 hour | Raise per-org rate limit after EA approval |
-| Task store read latency > 100ms p95 | Investigate Firestore indexing |
+| Task store read latency > 100ms p95 | Investigate AlloyDB query plan and connection pool sizing |
 
 ### 8.7 Design contract drift detection
 
@@ -426,6 +443,79 @@ The `company-security` skill generates AWS Config rules from `adr_attestations[]
 
 Platform engineering maintains the Lambda functions that back the Config rules in `github.company.com/platform/compliance-lambdas`. One Lambda per attestation class (e.g. `check-no-amazonmq`, `check-apigee-only`, `check-ecs-fargate-only`).
 
+### 8.9 Health checks
+
+| Check | Method | Frequency |
+|---|---|---|
+| API layer reachable | MCP protocol handshake | 60s |
+| `blueprint_start` functional | Golden spec (1 integration) → task created | 3 min |
+| Pipeline completion | Golden spec (1 integration) → poll until completed | 3 min |
+| `validate_composition` | Known-valid tree | 5 min |
+| `assemble_blueprint` | Known selections | 5 min |
+| Task Store | AlloyDB `SELECT 1` connection check | 60s |
+| Cross-user access blocked | `blueprint_result` with wrong `owner_id` → 403 | 15 min |
+
+The pipeline completion check uses a lightweight golden spec (1 integration, minimal RAG) that completes in <30 seconds, so a 3-minute interval adds negligible load while ensuring failures are detected within 3 minutes.
+
+### 8.10 Cloud Tasks queue configuration
+
+The `blueprint-tasks` queue connects `blueprint_start` (API layer) to the background pipeline (Cloud Run Jobs).
+
+| Setting | Value | Rationale |
+|---|---|---|
+| Queue name | `blueprint-tasks` | Single queue for all brownfield blueprint pipeline tasks |
+| Max dispatches per second | 10 | Matches Cloud Run Jobs max-concurrent |
+| Max concurrent dispatches | 10 | Prevents pipeline overload |
+| Max retry attempts | 3 | Failed tasks retry with exponential backoff |
+| Min backoff | 10 seconds | Allow transient failures to resolve |
+| Max backoff | 300 seconds | Cap retry delay at 5 minutes |
+| Dead-letter topic | `blueprint-tasks-dlq` (Pub/Sub) | Tasks that fail after 3 retries land here for investigation |
+
+**IAM permissions:**
+- API layer service account: `cloudtasks.tasks.create` on `blueprint-tasks`
+- Pipeline job service account: invoked by Cloud Tasks push handler
+- Platform engineering admin: `cloudtasks.queues.purge` for emergency flush
+
+**Flushing stuck tasks:**
+```bash
+# View queue state
+gcloud tasks queues describe blueprint-tasks --project=$PROJECT
+
+# Purge all pending tasks (emergency only)
+gcloud tasks queues purge blueprint-tasks --project=$PROJECT
+
+# After purge, mark corresponding AlloyDB task records as "failed"
+psql $ALLOYDB_CONNECTION -c "UPDATE blueprint_tasks SET status='failed', progress_msg='queue_purged' WHERE status IN ('accepted','working');"
+```
+
+### 8.11 Task Store (AlloyDB) disaster recovery
+
+→ *Architecture §9.3.3 covers the Task Store schema and tenant isolation.*
+
+The AlloyDB Task Store holds transient async task records with a 24-hour retention. It is **not** a durable data store — all content is derived from the spec/plan inputs and the pipeline output, both of which can be regenerated by re-running `/catalyst.blueprint`.
+
+**Why AlloyDB Task Store DR is lower-priority than Vertex AI Search DR:**
+- AlloyDB is a managed, highly available service with a 99.99% SLA and automated cross-region replication
+- Task records are ephemeral (24h retention) — no historical data is at risk
+- Loss of in-flight tasks is recoverable: the developer re-runs `/catalyst.blueprint`
+
+**Scenario: AlloyDB regional outage**
+1. AlloyDB with cross-region replication fails over automatically to the read replica
+2. If single-region: API layer returns errors on all task operations
+3. Recovery: wait for AlloyDB auto-failover, or promote cross-region read replica
+4. Notify developers: "Blueprint Advisor temporarily unavailable. Author YAML manually (Developer Guide, §7) or wait for recovery."
+5. Estimated RTO: 0 (auto-failover) or 15–30 minutes (manual promotion)
+
+**Scenario: Task records corrupted**
+1. No restore needed — records are transient
+2. Developers with `working` tasks see `not_found` on `blueprint_status`
+3. Developer re-runs `/catalyst.blueprint`
+4. No data loss — spec/plan inputs are in the developer's workspace
+
+### 8.12 Blueprint Advisor pipeline tracing scope
+
+The Blueprint Advisor background pipeline (4-stage: map → recommend → check → assemble) is traced via **Cloud Logging** (structured logs per pipeline stage) and **Dynatrace APM** (OTel spans for RAG query latency, LLM reasoning time, and end-to-end pipeline duration). Arize Phoenix tracing is for **generated agents at runtime** only — it does not trace the Blueprint Advisor pipeline. Platform engineers troubleshooting pipeline performance use Dynatrace, not Phoenix.
+
 ---
 
 ## 9. Total Cost of Ownership
@@ -439,7 +529,7 @@ Platform engineering maintains the Lambda functions that back the Config rules i
 | **Blueprint Advisor compute** | $13,200 | 10K calls/month × $0.11 × 12 |
 | **Vertex AI Search** | $18,000 | 500 patterns, 10K queries/day, embedding recomputation |
 | **LLM costs (Opus via Copilot)** | Included in Copilot | Premium requests consumed from org quota |
-| **Cloud Run + Firestore + Postgres** | $9,600 | Blueprint Advisor + ADR Store + Substitution Table infra |
+| **Cloud Run + AlloyDB (Task Store + ADR Store + Substitution Table)** | $9,600 | Blueprint Advisor + ADR Store + Substitution Table on consolidated AlloyDB cluster |
 | **Rule/Table Authoring UIs** | $24,000 | Cloud Run hosting + initial build amortized over 3 years ($72K build / 3) |
 | **EA office curation time** | $150,000 | ~0.75 FTE loaded (patterns, ADRs, substitutions, quarterly reviews) |
 | **Platform engineering ops** | $400,000 | ~2.0 FTE loaded (Blueprint Advisor, peripherals, preset, CI/CD) |
@@ -535,6 +625,13 @@ Without this categorization, quality metrics conflate advisor errors with develo
 | Solo-plan revision rate at PR | < 30% |
 | Reviewed-plan revision rate at PR | < 10% |
 | Runtime compliance violation rate | < 1% |
+| `blueprint_start` latency p95 | < 2 seconds |
+| Pipeline completion p95 (4 integrations) | < 5 minutes |
+| Pipeline completion p95 (10 integrations) | < 15 minutes |
+| Task status transitions in correct order | 100% |
+| Failed tasks return structured error (not hang) | 100% |
+
+Regression tests should include a **deliberately malformed spec** golden test case to verify the pipeline produces a `failed` task with a structured error rather than hanging indefinitely.
 
 ### 11.4 Dashboards
 
@@ -580,7 +677,7 @@ Office hours: EA office Tuesdays 2–3 PM ET. Platform engineering Thursdays 10�
 |---|---|---|
 | All `blueprint_start` calls fail 5xx | Cloud Run API layer down | Failover to DR region |
 | All pipelines stuck in "working" | Cloud Run Jobs quota exhausted or Cloud Tasks queue jammed | Check Cloud Tasks queue depth; flush stuck tasks; scale Jobs quota |
-| Task store unavailable | Firestore outage | Firestore is multi-region; if regional, traffic auto-routes; if global, engage GCP support |
+| Task store unavailable | AlloyDB health check failure | AlloyDB has automated cross-region failover; verify instance status; if global outage, engage GCP support |
 | All ADR checks reject everything | Bad rule pushed | Roll back latest ADR-content PR |
 | All substitutions NOT_FOUND | Postgres issue or schema drift | Verify Cloud SQL; manual failover |
 | Confidence collapsed to ~0.5 | Corpus re-indexing or model change | Wait for re-index; verify model |
