@@ -127,7 +127,7 @@ The preview premium affects build cost, not delivery speed. The 22% is engineeri
 
 ## How It Works — Visual Overview
 
-![AgentForge Future-State — How It Works](agentforge-future-architecture-infographic.png)
+![AgentForge Future-State — How It Works](Agentforge-future-architecture-infographic.png)
 
 *6 steps from structured spec to production-ready agent. GCP-native defaults with enterprise overlay swaps for Dynatrace, Splunk, and Arize Phoenix. Design Agent invoked asynchronously via MCP Tasks with CloudSQL Task Store.*
 
