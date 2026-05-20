@@ -11,6 +11,7 @@
 |---|---|---|
 | **AgentCatalyst Architecture Document** (GA or agents-cli) | Architects | Provides the WHY behind each system this runbook maintains. When you need to understand why the Blueprint Advisor MCP Server is designed a certain way, consult the Architecture Document (Layer 2). |
 | **AgentCatalyst Developer Guide** (GA or agents-cli) | Developers | Provides the HOW for developers. When a developer reports an issue, this runbook tells you how to diagnose it. The Developer Guide (Section 9 and Section 11) tells developers what information to include in tickets. |
+| **Governance Guardian Architecture Extension** | Architects, EA office | Provides the design for `/catalyst.assess` and `recordTechDebt` governance gate. When Governance Guardian issues arise, consult the extension document for solution package schema, scorecard format, and Tech Debt Registry. |
 
 ### Cross-reference map
 
@@ -25,6 +26,7 @@
 | 7. Composition Validator | Layer 2 — Pattern composition | Section 6 — Iterating on the Design |
 | 8. EvalOps Operations | Layer 4 — EvalOps 3-layer lifecycle | Section 4b — EvalOps Workflow |
 | 9. MCP Server Operations | Layer 2 — Blueprint Advisor MCP Server | Section 2.5 — `/catalyst.blueprint` (async invocation) |
+| 10. Governance Guardian Operations | Governance Guardian Architecture Extension | Section 2.7a — `/catalyst.assess` |
 
 ---
 
@@ -432,12 +434,16 @@ The AlloyDB Task Store holds transient async task records (taskId, status, stage
 | Tool endpoint down | Health check (5 min) | Set `maintenance`. Exclude from results. |
 | System prompt regression | Telemetry (acceptance rate drop) | Roll back prompt. Add regression test. |
 | Model quota exceeded | Gemini API monitoring | Request quota increase. Pipeline queues naturally. |
+| Governance Guardian unreachable | MCP health check (60s) | Check Cloud Run health for Governance Guardian service. Same OAuth as Blueprint Advisor. |
+| Governance assessment stuck | Assessment health check (3 min) | Check Cloud Tasks `governance-assess` queue. Flush if jammed. EA assessment engine may be down — contact EA office. |
+| Tech Debt Registry unavailable | CloudSQL/AlloyDB health (60s) | Same database as Blueprint Advisor Task Store. Check connection pool. |
 
 ### Escalation
 
 | Severity | Response | Who |
 |---|---|---|
 | P1 — API layer down or all pipelines failing | 15 min | Platform Engineering on-call |
+| P1 — Governance Guardian down (blocks all /catalyst.generate) | 15 min | Platform Engineering on-call + EA office |
 | P2 — Degraded results or pipeline slow | 4 hours | Platform Engineering |
 | P3 — Single tool/skill issue | 1 business day | Platform Engineering |
 | P4 — Enhancement | Sprint planning | EA + Platform Engineering |
@@ -600,6 +606,54 @@ python3 scripts/mark_orphaned_tasks.py --status=failed --reason="queue_purged"
 
 ---
 
+## 10. Governance Guardian MCP Server Operations
+
+> **Architecture context:** Governance Guardian Architecture Extension (full design). **Developer Guide context:** Developer Guide, Section 2.7a (`/catalyst.assess`), Section 2.8 (governance gate in `/catalyst.generate`).
+
+The Governance Guardian uses the same async MCP Tasks pattern as the Blueprint Advisor. It shares the same AlloyDB instance (separate table `governance_tasks`) and the same OAuth authentication.
+
+### Health checks
+
+| Check | Method | Frequency |
+|---|---|---|
+| API layer reachable | MCP protocol handshake | 60s |
+| `assess_start` functional | Golden FNOL solution package → task created | 3 min |
+| Assessment completion | Golden FNOL solution package → poll until completed | 3 min |
+| `recordTechDebt` functional | Known assessment ID → resume/stop signal | 5 min |
+| EA assessment engine reachable | Health endpoint on EA service | 60s |
+| Task Store (`governance_tasks`) | AlloyDB `SELECT 1` | 60s |
+| Tech Debt Registry (`tech_debt`) | AlloyDB `SELECT 1` | 60s |
+
+### Deployment
+
+The Governance Guardian follows the same deployment procedure as the Blueprint Advisor (§9): build → regression suite → drain → canary → full deploy. The EA assessment engine is deployed independently by the EA office — it is a black box to AgentCatalyst.
+
+### Cloud Tasks queue
+
+| Setting | Value |
+|---|---|
+| Queue name | `governance-assess` |
+| Max dispatches/sec | 10 |
+| Max concurrent | 10 |
+| Max retries | 3 |
+| Dead-letter topic | `governance-assess-dlq` |
+
+### Task Store maintenance
+
+Same as Blueprint Advisor (§9): hourly cleanup of `governance_tasks` records older than 24 hours. The `tech_debt` table is **NOT** subject to TTL cleanup — tech debt records are persistent until manually resolved.
+
+### EA assessment engine SLA
+
+The EA assessment engine is a black box. Platform Engineering monitors the transport (is it reachable?) but does not operate the assessment logic. SLA is negotiated between Platform Engineering and the EA office:
+
+| Metric | Target | Alert |
+|---|---|---|
+| Assessment completion p95 | < 60 seconds | > 120 seconds |
+| Assessment availability | 99.5% | < 99% |
+| False positive rate (showstoppers that shouldn't be) | < 5% | > 10% |
+
+---
+
 *This runbook is maintained by the Platform Engineering team. Review cadence: Monthly.*
 
-*For architectural decisions, see the AgentCatalyst Architecture Document. For developer workflows, see the AgentCatalyst Developer Guide.*
+*For architectural decisions, see the AgentCatalyst Architecture Document. For developer workflows, see the AgentCatalyst Developer Guide. For governance assessment design, see the Governance Guardian Architecture Extension.*

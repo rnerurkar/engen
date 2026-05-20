@@ -27,7 +27,8 @@ gemini skills install github.com/company/agentcatalyst-skills --scope user
 /plan                 # answer technical questions → plan.md
 /catalyst.blueprint   # Connects to Blueprint Advisor MCP Server (async) → returns app-blueprint.yaml
 # review + edit the YAML
-/catalyst.generate    # coding agent generates everything using skills
+/catalyst.assess      # Governance Guardian assessment → findings + scorecard (fix + re-assess until passed)
+/catalyst.generate    # Governance gate + coding agent generates everything using skills
 ```
 
 That's it. Your complete project is generated. Skip to [Section 2](#2-greenfield-agentic--fnol-agent-from-scratch) for the full agentic walkthrough, or [Section 3](#3-brownfield-microservices--angular--spring-boot-on-ecs-fargate) for the microservices brownfield example.
@@ -59,7 +60,8 @@ They've already set up everything you need. You don't configure any of this:
 | 3 | `/plan` — answer technical questions | 5 min |
 | 4 | `/catalyst.blueprint` — get AI architecture advice | 1–5 min (async, progress in chat) |
 | 5 | Review and edit the YAML | 10 min |
-| 6 | `/catalyst.generate` — coding agent generates the project | 5–10 min |
+| 5a | **`/catalyst.assess` — governance assessment (iterative)** | **1–5 min per assessment** |
+| 6 | `/catalyst.generate` — coding agent generates the project (with governance gate) | 5–10 min |
 | 7 | Write business logic + system prompts (the 20%) | 2–4 hours |
 | 8 | Commit, PR, CI/CD | Standard process |
 
@@ -298,9 +300,69 @@ Type `/tasks`. See the 80/20 split:
 
 **You implement:** System prompts, `severity_classifier()`, `coverage_calculator()`, `notification_sender()`, test data
 
+### 2.7a `/catalyst.assess` — Governance assessment
+
+→ *Governance Guardian Architecture Extension covers the full assessment flow, solution package schema, and scorecard format.*
+
+After reviewing and editing the YAML, run the governance assessment before generating code:
+
+```
+/catalyst.assess
+```
+
+The coding agent extracts solution artifacts from your workspace — TSA component diagram from your drawio file, HA/DR views, sequence diagrams (mermaid), NFRs, architecture decisions log, tech stack, and patterns used — packages them as JSON, and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll → `assess_result`).
+
+**What you see in the Chat pane:**
+
+```
+You: /catalyst.assess
+
+Agent: Extracting solution artifacts from workspace...
+       ✓ TSA component diagram (claims-portal-tsa.drawio.xml)
+       ✓ HA/DR views (2 views found)
+       ✓ Sequence diagrams (3 mermaid files)
+       ✓ NFRs (from plan.md)
+       ✓ Architecture Decisions Log (4 entries from adl.md)
+       ✓ Tech stack (from app-blueprint.yaml)
+       ✓ Patterns used (3 patterns)
+
+       Governance assessment started. Checking progress...
+       Evaluating architecture compliance...
+       Checking pattern adherence...
+       Scoring HA/DR readiness...
+       Assessment complete!
+
+       SCORECARD: 72/100 (Grade C)
+       🔴 SHOWSTOPPER: F-001 — No cross-region DR for Aurora PostgreSQL (ADR-205)
+       🟠 HIGH: F-002 — WAF rules not using enterprise managed rule group
+       🟡 MEDIUM: F-003 — Angular 17 not on approved tech radar
+
+       Fix the showstopper and run /catalyst.assess again.
+```
+
+**The assess-fix loop:** Fix the showstopper findings in your workspace (update Terraform, drawio diagrams, etc.), then run `/catalyst.assess` again. Repeat until no showstoppers remain. Non-showstopper findings will be recorded as tech debt when you run `/catalyst.generate`.
+
+**Missing artifacts:** If the coding agent can't find a drawio file or NFR section, it includes the artifact as `null` with a reason. The Governance Guardian will likely flag missing artifacts as findings.
+
 ### 2.8 `/catalyst.generate` — Generate everything
 
-Type `/catalyst.generate`. The coding agent reads the YAML and uses installed skills to generate the project:
+Type `/catalyst.generate`. **Before the generation pipeline runs**, the coding agent makes one call to the Governance Guardian — `recordTechDebt`. This checks whether any showstopper findings remain from your latest `/catalyst.assess` run:
+
+- **If showstoppers exist → BLOCKED.** The coding agent reports the showstoppers and tells you to fix them and re-run `/catalyst.assess`.
+- **If no showstoppers → RESUME.** Remaining findings are recorded as tech debt (you'll see the tech debt ID). Code generation proceeds.
+- **If no assessment exists → WARNING.** The coding agent suggests running `/catalyst.assess` first, or you can type `skip` to proceed without governance assessment.
+
+```
+You: /catalyst.generate
+
+Agent: Checking governance gate...
+       Governance passed. Tech debt recorded (TD-2026-0142):
+       - F-002: WAF managed rule group (HIGH) — tech debt
+       - F-003: Angular 17 tech radar (MEDIUM) — tech debt
+       Proceeding with code generation...
+```
+
+The coding agent then reads the YAML and uses installed skills to generate the project:
 
 ```
 fnol-agent/
@@ -1781,6 +1843,9 @@ Both are essential. Jenkins ensures the agent's environment is correct. Harness 
 |---|---|---|
 | `/catalyst.blueprint` returns error | Blueprint Advisor API unreachable | Check `CATALYST_BLUEPRINT_API` env var |
 | Blueprint task stuck in "working" for >5 min | Pipeline slow or Cloud Run Jobs quota exceeded | Check the Chat pane for the last progress message. If stuck on "Searching pattern catalog," the Vertex AI Search may be slow. If stuck on "Reasoning," the LLM call is running long. Wait up to 10 min for complex specs (10+ integrations). If no progress after 10 min, cancel and re-run with a simpler spec. Report to Platform Engineering if persistent. |
+| `/catalyst.assess` returns error | Governance Guardian MCP Server unreachable | Check network connectivity. The Governance Guardian uses the same OAuth as Blueprint Advisor. If persistent, proceed without assessment: `/catalyst.generate` will warn but allow `skip`. |
+| Assessment finds showstoppers you disagree with | EA standards may not match your use case | Contact the EA office to discuss. If the standard doesn't apply, request an exception via the governance exception process. You cannot bypass showstoppers — they must be resolved or exempted by EA. |
+| `/catalyst.generate` blocked by governance gate | Showstopper findings still present | Run `/catalyst.assess` to see current findings. Fix showstoppers and re-assess. Only showstoppers block generation — non-showstoppers are recorded as tech debt. |
 | YAML validation fails | Schema error | Common: missing `assigned_to`, unpinned version, invalid type |
 | Skill provenance check fails | Skill updated since YAML generated | Update `version:` in YAML |
 | Skills not visible | Not installed | Run `gemini skills install github.com/company/agentcatalyst-skills --scope user` |
@@ -1843,9 +1908,12 @@ Every file in the `.specify/` folder serves a specific purpose:
 │   ├── catalyst.blueprint.md    ← /catalyst.blueprint — instructions for
 │   │                                the coding agent to call Blueprint
 │   │                                Advisor API and save YAML
-│   └── catalyst.generate.md     ← /catalyst.generate — skill activation
-│                                    sequence with CRITICAL override:
-│                                    DO NOT deploy directly
+│   ├── catalyst.assess.md       ← /catalyst.assess — instructions for
+│   │                                the coding agent to extract artifacts
+│   │                                and call Governance Guardian API
+│   └── catalyst.generate.md     ← /catalyst.generate — governance gate
+│                                    + skill activation sequence with
+│                                    CRITICAL override: DO NOT deploy directly
 │
 └── memory/
     ├── adk-reference.md          ← ADK class reference — loaded into
@@ -1894,6 +1962,7 @@ A: The brownfield SPA example in Section 3 uses AWS (ECS Fargate + Oracle RDS). 
 | **AgentCatalyst GA Architecture Document** | Architects, tech leads | WHY — architectural decisions, Blueprint Advisor MCP Server design (3-tool architecture), preset-based archetype adaptation, 5-layer architecture, cost model, ROI | When you need to understand why something is designed the way it is |
 | **This Developer Guide** | Developers | HOW — step-by-step walkthroughs (greenfield FNOL + brownfield microservice), spec writing, business logic capture, EvalOps workflow, troubleshooting | When you need to build something |
 | **AgentCatalyst Operations Runbook** | Platform engineering | PROCEDURES — wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix | When you need to debug platform issues or maintain the Blueprint Advisor |
+| **Governance Guardian Architecture Extension** | Architects, EA office, developers | `/catalyst.assess` design, solution package schema, scorecard format, `recordTechDebt` gate, tech debt registry | When you need to understand the governance assessment flow or troubleshoot assessment findings |
 
 ### Key cross-references from this guide to the Architecture Document
 

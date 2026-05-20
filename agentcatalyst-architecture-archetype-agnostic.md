@@ -107,7 +107,7 @@ Every GCP service used by AgentCatalyst is Generally Available with SLA backing.
 
 Before diving into the five layers, here is the complete flow as a narrative. No jargon, no architecture diagrams — just what happens step by step from the developer's perspective.
 
-A developer is asked to build an AI agent that processes auto insurance claims (FNOL). She opens VSCode with her preferred coding agent — Claude Code, in her case — and installs the AgentCatalyst preset: `specify preset add agentcatalyst-enterprise`. This installs a structured spec template, a plan template, custom commands (`/catalyst.blueprint`, `/catalyst.generate`), memory files with company reference material, company overlay skills, and an `adk-agents` domain skill.
+A developer is asked to build an AI agent that processes auto insurance claims (FNOL). She opens VSCode with her preferred coding agent — Claude Code, in her case — and installs the AgentCatalyst preset: `specify preset add agentcatalyst-enterprise`. This installs a structured spec template, a plan template, custom commands (`/catalyst.blueprint`, `/catalyst.assess`, `/catalyst.generate`), memory files with company reference material, company overlay skills, and an `adk-agents` domain skill.
 
 She types `/specify`. The preset presents a structured template with ten sections — Business Context, Workflow Step by Step, Regulatory Requirements, Data Systems, External Partners, What We Own, Business Rules, Transformation Rules, Error Handling, and Acceptance Criteria. She fills it in using plain English, describing the step-by-step workflow ("first the customer calls, then the system classifies severity, then in parallel it enriches from three sources..."), the data systems involved, the external partner APIs, and her proprietary business logic as structured IF/THEN conditions. This takes about 20 minutes. The result is `spec.md` — a structured requirements document saved in her workspace.
 
@@ -121,7 +121,13 @@ When the background pipeline completes, the coding agent calls `blueprint_result
 
 She reviews the YAML in her editor. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the YAML directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the YAML.
 
-She types `/catalyst.generate`. The coding agent reads the YAML and generates all the code — but it doesn't guess HOW to write the code. It has **skills** installed that teach it the right way:
+Before generating code, she runs the governance check. She types `/catalyst.assess`. The coding agent extracts solution artifacts from her workspace — the TSA component diagram from her drawio file, HA/DR views, sequence diagrams, NFRs from plan.md, her architecture decisions log, the tech stack from the YAML, and the patterns used — packages them as a JSON document, and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). While the EA assessment engine evaluates her solution (a black box to AgentCatalyst — the EA office owns all the assessment logic), she sees progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...".
+
+The assessment returns a scorecard and findings. One showstopper: her Aurora PostgreSQL has no cross-region DR strategy, violating ADR-205. Two non-critical findings: WAF rules not using the enterprise managed rule group, and Angular 17 not yet on the approved tech radar. She fixes the showstopper — adds Aurora Global Database with a us-west-2 read replica to her Terraform and updates the HA/DR view in her drawio. She runs `/catalyst.assess` again. This time: no showstoppers, score 88/100. The two remaining findings are flagged as acceptable tech debt.
+
+She types `/catalyst.generate`. Before the 18-step generation pipeline runs, the coding agent makes one final call to the Governance Guardian — `recordTechDebt`. This tool checks whether any showstopper findings remain from her latest assessment. None do — the two remaining findings are classified as tech debt, recorded in the governance database (TD-2026-0142), and the Governance Guardian returns `{ signal: "resume" }`. The coding agent reports: "Governance gate passed. Tech debt recorded. Generating code..." and proceeds.
+
+The coding agent reads the YAML and generates all the code — but it doesn't guess HOW to write the code. It has **skills** installed that teach it the right way:
 
 - **`adk-agents` skill** teaches it how to write correct ADK Python code — the right import paths, the right class constructors, the right way to wire tools to agents.
 - **Company overlay skills** teach it which Terraform modules to use (with pinned versions), how to configure Dynatrace observability, how to generate Jenkins + Harness pipeline definitions (NOT deploy directly), and how to generate Model Armor callbacks.
@@ -507,15 +513,17 @@ All runtime services are GA with SLA backing:
 
 | Component | Owner | Responsibilities |
 |---|---|---|
-| AgentCatalyst platform | Platform Engineering | Blueprint Advisor MCP Server, overlay skills, preset catalog, Vertex AI Search data stores |
+| AgentCatalyst platform | Platform Engineering | Blueprint Advisor MCP Server, Governance Guardian MCP Server, overlay skills, preset catalog, Vertex AI Search data stores |
 | Pattern catalog | Enterprise Architecture | Pattern documentation, composition rules, HA/DR views |
-| Individual use cases | LOB development teams | Spec writing, blueprint review, FunctionTool refinement, system prompts |
+| **EA governance standards** | **Enterprise Architecture** | **Governance Guardian assessment logic, scoring rubrics, EA standards (black box to AgentCatalyst)** |
+| **Tech Debt Registry** | **Enterprise Architecture + LOB teams** | **Accepted tech debt tracking, resolution follow-up** |
+| Individual use cases | LOB development teams | Spec writing, blueprint review, governance assessment review, FunctionTool refinement, system prompts |
 | CI/CD pipelines | DevOps / Platform Engineering | Jenkins + Harness configuration, deployment policies |
 | Company overlay skills | Platform Engineering | Terraform modules, observability templates, security policies |
 
 ### How to request changes
 
-To request new patterns, skills, or tools: submit a PR to the AgentCatalyst catalog repo. The platform team reviews weekly. To report Blueprint Advisor quality issues: file a ticket with the spec.md and the generated YAML. See the Operations Runbook for telemetry-driven quality improvement procedures.
+To request new patterns, skills, or tools: submit a PR to the AgentCatalyst catalog repo. The platform team reviews weekly. To report Blueprint Advisor quality issues: file a ticket with the spec.md and the generated YAML. To report Governance Guardian assessment issues: file a ticket with the solution_package JSON and the findings — the EA office reviews assessment logic. See the Operations Runbook for telemetry-driven quality improvement procedures and the Governance Guardian Architecture Extension for assessment procedures.
 
 ---
 
@@ -543,8 +551,12 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 | 8 | Golden dataset baseline established | ⬜ |
 | 9 | FNOL reference implementation passing all evaluation gates | ⬜ |
 | 10 | 3 additional use cases validated beyond FNOL | ⬜ |
-| 11 | Developer documentation (dev guide) published | ⬜ |
-| 12 | Operations runbook (ops procedures) published | ⬜ |
+| 11 | Governance Guardian MCP Server deployed with OAuth 2.0 | ⬜ |
+| 12 | EA assessment engine connected and returning valid findings for FNOL reference case | ⬜ |
+| 13 | Tech Debt Registry table created and accessible | ⬜ |
+| 14 | `/catalyst.assess` → `/catalyst.generate` flow tested end-to-end (including showstopper block + tech debt resume) | ⬜ |
+| 15 | Developer documentation (dev guide) published | ⬜ |
+| 16 | Operations runbook (ops procedures) published | ⬜ |
 
 ---
 
@@ -557,6 +569,7 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 | 3 | Stale catalogs produce outdated recommendations | Medium | Medium | Weekly catalog health checks. Embedding freshness pipeline. Search quality regression suite. See Operations Runbook. |
 | 4 | Business rules too complex for IF/THEN format | Medium | Low | Spec template coaching prompts help developers decompose complex rules. Proprietary algorithms handled as manual P1 tasks (5-20%). |
 | 5 | Adoption resistance | Medium | High | Start with high-pain use case (agentic — 4-6 week gap). Demonstrate ROI with FNOL pilot. Let early adopters create pull. |
+| 6 | Governance Guardian becomes bottleneck | Medium | Medium | Assessment is async (non-blocking). SA can skip assessment with `/catalyst.generate --skip-assess` (recorded as policy exception). Tech debt path allows proceeding with non-showstoppers. EA office monitors assessment turnaround via telemetry. |
 
 ---
 
@@ -567,6 +580,7 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 | **This Architecture Document** | Architects, tech leads | Architectural decisions, layer deep dives, cost model, ROI |
 | **AgentCatalyst Developer Guide** (GA) | Developers | Step-by-step walkthroughs, full preset file contents, code examples, spec writing, troubleshooting |
 | **AgentCatalyst Operations Runbook** | Platform engineering | Wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix, EvalOps operations |
+| **Governance Guardian Architecture Extension** | Architects, EA office | `/catalyst.assess` design, async assessment flow, `recordTechDebt` gate in `/catalyst.generate`, Tech Debt Registry, solution package schema, scorecard format |
 
 *Operational procedures (wire-level APIs, regression testing, telemetry, tool lifecycle, failure modes) are maintained in the Operations Runbook to keep this architecture document focused on architectural decisions.*
 
@@ -587,6 +601,8 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 │   └── tasks-template.md                   ← /tasks loads this — generated vs manual work
 ├── commands/
 │   ├── catalyst.blueprint.md               ← Custom command: sends spec+plan to Blueprint Advisor
+│   ├── catalyst.assess.md                  ← Custom command: sends solution artifacts to Governance Guardian
+│   └── catalyst.generate.md                ← Custom command: generates code (with governance gate)
 │   └── catalyst.generate.md                ← Custom command: reads YAML, triggers skill-guided generation
 ├── memory/
 │   ├── adk-reference.md                    ← ADK framework patterns, imports, constructors
