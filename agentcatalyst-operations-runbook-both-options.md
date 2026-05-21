@@ -17,7 +17,7 @@
 
 | This runbook section | Architecture doc section | Developer guide section |
 |---|---|---|
-| 1. Wire-Level API Calls | Layer 2 — Blueprint Advisor MCP Server | Section 2.5 — `/catalyst.blueprint` (async invocation) + Section 5 — Understanding the YAML Blueprint |
+| 1. Wire-Level API Calls | Layer 2 — Blueprint Advisor MCP Server | Section 2.5 — `/catalyst.blueprint` (async invocation) + Section 5 — Understanding the app-blueprint.md |
 | 2. Search Quality Regression | Layer 2 — Blueprint Advisor | Section 8 — Reading Confidence Scores |
 | 3. Acceptance Telemetry | Layer 2 — Blueprint Advisor | Section 9 — When the Blueprint Advisor Gets It Wrong |
 | 4. Catalog Quality | Layer 2 — Vertex AI Search data stores | Section 4 — Writing Effective Specs |
@@ -93,7 +93,7 @@ POST https://discoveryengine.googleapis.com/v1/projects/{PROJECT}/locations/{LOC
 3. `summary.summaryText` — search engine natural language synthesis
 4. Confidence scoring: exact metadata match = high, snippet match = medium, summary-only = low
 
-> **Developer Guide context:** Developers see confidence scores in the YAML blueprint (Developer Guide, Section 8). When they report low-confidence results, check the response processing chain above.
+> **Developer Guide context:** Developers see confidence scores in the markdown blueprint (Developer Guide, Section 8). When they report low-confidence results, check the response processing chain above.
 
 ### Data store identifiers
 
@@ -177,7 +177,7 @@ Stage values: `accepted` → `searching` → `reasoning` → `validating` → `a
 {
   "content": [{
     "type": "text",
-    "text": "{\"taskId\": \"a1b2c3d4...\", \"status\": \"completed\", \"yaml\": \"<app-blueprint.yaml content>\", \"confidence_scores\": {...}}"
+    "text": "{\"taskId\": \"a1b2c3d4...\", \"status\": \"completed\", \"yaml\": \"<app-blueprint.md content>\", \"confidence_scores\": {...}}"
   }]
 }
 ```
@@ -228,7 +228,7 @@ tests/golden/
 }
 ```
 
-The `business_rules` assertions verify that business rules pass through from spec to YAML. When the Blueprint Advisor drops rules, the coding agent generates stubs instead of first-draft implementations — a significant quality regression.
+The `business_rules` assertions verify that business rules pass through from spec to blueprint. When the Blueprint Advisor drops rules, the coding agent generates stubs instead of first-draft implementations — a significant quality regression.
 
 The `async_lifecycle` assertions verify the MCP Tasks transport layer — not just the content quality. If the async handoff breaks (e.g., Cloud Tasks enqueue fails silently, AlloyDB writes are delayed, status transitions skip stages), these assertions catch it before developers experience the failure. A **deliberately malformed spec** golden test case should also be included to verify that the pipeline produces a `failed` task with a structured error rather than hanging indefinitely.
 
@@ -273,9 +273,9 @@ The suite calls the MCP Server via the same async protocol the coding agent uses
 | Event | Captured | Storage |
 |---|---|---|
 | `blueprint_start` called | Task ID + spec hash + MCP request ID | `telemetry.blueprint_started` |
-| `blueprint_result` retrieved | Full YAML + pipeline duration + completion status | `telemetry.blueprint_completed` |
-| Developer edits YAML | Git diff | `telemetry.blueprint_edited` |
-| `assemble_blueprint` called | Final YAML + validated selections | `telemetry.blueprint_accepted` |
+| `blueprint_result` retrieved | Full blueprint + pipeline duration + completion status | `telemetry.blueprint_completed` |
+| Developer edits blueprint | Git diff | `telemetry.blueprint_edited` |
+| `assemble_blueprint` called | Final blueprint + validated selections | `telemetry.blueprint_accepted` |
 | `/catalyst.generate` runs | Generated files + skill versions | `telemetry.code_generated` |
 | CI/CD result | Pass/fail + stage + error | `telemetry.cicd_results` |
 
@@ -367,7 +367,7 @@ The GitHub repos are the source of truth. Vertex AI Search data stores are deriv
 
 While data stores are being rebuilt, the Blueprint Advisor API layer can operate in **degraded mode**:
 - `blueprint_start` creates a task, but the pipeline returns a cached response for specs matching a known golden test case (hash match)
-- For unknown specs, returns an error with guidance: "Blueprint Advisor temporarily unavailable. You can author the YAML manually using the template in the Developer Guide (Section 5)."
+- For unknown specs, returns an error with guidance: "Blueprint Advisor temporarily unavailable. You can author the blueprint manually using the template in the Developer Guide (Section 5)."
 - `validate_composition` and `assemble_blueprint` continue to work normally (they don't depend on Vertex AI Search)
 
 ### Task Store (AlloyDB) disaster recovery
@@ -383,7 +383,7 @@ The AlloyDB Task Store holds transient async task records (taskId, status, stage
 1. AlloyDB with cross-region replication fails over automatically to the read replica — no manual action required
 2. If using single-region AlloyDB: the API layer returns errors on all `blueprint_start` / `blueprint_status` / `blueprint_result` calls
 3. Recovery: wait for AlloyDB to restore (GCP manages automated failover), or promote the cross-region read replica and update API layer connection string
-4. Notify developers via `#agentcatalyst` Slack: "Blueprint Advisor temporarily unavailable due to AlloyDB outage. You can author YAML manually (Developer Guide, Section 5) or wait for recovery."
+4. Notify developers via `#agentcatalyst` Slack: "Blueprint Advisor temporarily unavailable due to AlloyDB outage. You can author blueprint manually (Developer Guide, Section 5) or wait for recovery."
 5. Estimated RTO: 0 (cross-region replica auto-promotion) or 15–30 minutes (single-region, manual failover)
 
 **Scenario: Task records corrupted or deleted**
@@ -436,7 +436,7 @@ The AlloyDB Task Store holds transient async task records (taskId, status, stage
 | Model quota exceeded | Gemini API monitoring | Request quota increase. Pipeline queues naturally. |
 | Governance Guardian unreachable | MCP health check (60s) | Check Cloud Run health for Governance Guardian service. Same OAuth as Blueprint Advisor. |
 | Governance assessment stuck | Assessment health check (3 min) | Check Cloud Tasks `governance-assess` queue. Flush if jammed. EA assessment engine may be down — contact EA office. |
-| Tech Debt Registry unavailable | CloudSQL/AlloyDB health (60s) | Same database as Blueprint Advisor Task Store. Check connection pool. |
+| Tech Debt Registry unavailable | AlloyDB health (60s) | Same database as Blueprint Advisor Task Store. Check connection pool. |
 
 ### Escalation
 
@@ -464,7 +464,7 @@ The AlloyDB Task Store holds transient async task records (taskId, status, stage
 | Loop | Sequential, Parallel, Custom, FunctionTool | Another Loop |
 | HITL | FunctionTool, Custom | Parallel |
 
-On failure: MCP Server returns `{"valid": false, "errors": [...]}` with reason + suggestion. Developer edits YAML and retries.
+On failure: MCP Server returns `{"valid": false, "errors": [...]}` with reason + suggestion. Developer edits blueprint and retries.
 
 ---
 
@@ -494,7 +494,7 @@ Starts as first-draft entries from acceptance criteria (see Developer Guide, Sec
 
 ## 9. Blueprint Advisor MCP Server Operations
 
-> **Architecture context:** Architecture Document, Layer 2 (MCP Server with 5 tools, async via MCP Tasks). **Developer Guide context:** Developer Guide, Section 2.5 (how the YAML is created asynchronously).
+> **Architecture context:** Architecture Document, Layer 2 (MCP Server with 5 tools, async via MCP Tasks). **Developer Guide context:** Developer Guide, Section 2.5 (how the blueprint is created asynchronously).
 
 The Blueprint Advisor has two deployment components: the **MCP API layer** (Cloud Run Service) handling the three fast tools plus two deterministic tools, and the **background pipeline** (Cloud Run Jobs) running the LlmAgent work. A **AlloyDB Task Store** connects them.
 
@@ -515,11 +515,26 @@ The pipeline completion check uses a lightweight golden spec (1 integration) tha
 ### Versioning
 
 The Blueprint Advisor uses semantic versioning (`major.minor.patch`):
-- **Major:** Breaking change to YAML schema, MCP tool interface, or task lifecycle
+- **Major:** Breaking change to blueprint schema, MCP tool interface, or task lifecycle
 - **Minor:** System prompt update, new pattern added, catalog change
 - **Patch:** Bug fix, performance improvement
 
-Maintain **2 versions in production** at all times (current + previous) for rollback. Version metadata is embedded in every generated YAML:
+Maintain **2 versions in production** at all times (current + previous) for rollback.
+
+### Authentication troubleshooting (OAuth 2.1 / Entra ID)
+
+Both Blueprint Advisor and Governance Guardian use OAuth 2.1 with Microsoft Entra ID. Same app registration, same audience scope (`agentcatalyst.mcp`), same JWKS endpoint. See Architecture Document, Layer 2 Security for the full sequence diagram.
+
+| Symptom | Cause | Resolution |
+|---|---|---|
+| 401 Unauthorized on first call | Token expired or never acquired | Developer: close and reopen VSCode to trigger fresh SSO login |
+| 401 after long idle | Refresh token expired (>24 hours) | Developer: re-authenticate via browser SSO |
+| 401 for one developer, others OK | Entra ID account issue | Check Entra ID: account active, not locked, group membership includes `agentcatalyst-users` |
+| 403 Forbidden | Token valid but wrong audience scope | Check Entra ID app registration: audience must be `agentcatalyst.mcp` |
+| JWKS validation failure | Entra ID JWKS endpoint unreachable | Check network: MCP Server must reach `login.microsoftonline.com`. Check VPC-SC egress rules. |
+| Intermittent 401 | JWKS cache stale after Entra ID key rotation | MCP Server JWKS cache TTL is 24 hours. Force refresh: restart Cloud Run revision. |
+
+**Health check:** Entra ID JWKS endpoint reachability — `curl https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys` — 60-second frequency. Version metadata is embedded in every generated blueprint:
 
 ```yaml
 # Generated by: blueprint-advisor/v2.3.1
@@ -540,7 +555,7 @@ When a developer reports an issue, the version metadata tells you exactly which 
    ```
 4. Deploy API layer with `--no-traffic`
 5. Deploy pipeline job revision
-6. Smoke test: golden FNOL → `blueprint_start` → poll → `blueprint_result` → verify YAML
+6. Smoke test: golden FNOL → `blueprint_start` → poll → `blueprint_result` → verify blueprint
 7. Traffic shift (API layer): 10% (15 min) → 50% (15 min) → 100%
 8. Monitor telemetry 24 hours — roll back if acceptance drops > 5%
 9. Verify no tasks remain on old pipeline revision after 1 hour. If old executions persist, investigate.
@@ -610,7 +625,7 @@ python3 scripts/mark_orphaned_tasks.py --status=failed --reason="queue_purged"
 
 > **Architecture context:** Governance Guardian Architecture Extension (full design). **Developer Guide context:** Developer Guide, Section 2.7a (`/catalyst.assess`), Section 2.8 (governance gate in `/catalyst.generate`).
 
-The Governance Guardian uses the same async MCP Tasks pattern as the Blueprint Advisor. It shares the same AlloyDB instance (separate table `governance_tasks`) and the same OAuth authentication.
+The Governance Guardian uses the same async MCP Tasks pattern as the Blueprint Advisor. It shares the same AlloyDB instance (separate table `governance_tasks`) and the same OAuth 2.1 / Entra ID authentication (same `agentcatalyst.mcp` audience scope — no separate Entra ID app registration needed). See §9 Authentication troubleshooting for common auth issues. See Architecture Document, Layer 2 Security for the full OAuth 2.1 sequence diagram.
 
 ### Health checks
 
@@ -620,6 +635,7 @@ The Governance Guardian uses the same async MCP Tasks pattern as the Blueprint A
 | `assess_start` functional | Golden FNOL solution package → task created | 3 min |
 | Assessment completion | Golden FNOL solution package → poll until completed | 3 min |
 | `recordTechDebt` functional | Known assessment ID → resume/stop signal | 5 min |
+| `getAssessmentHistory` functional | Known solution_id → returns assessment history | 5 min |
 | EA assessment engine reachable | Health endpoint on EA service | 60s |
 | Task Store (`governance_tasks`) | AlloyDB `SELECT 1` | 60s |
 | Tech Debt Registry (`tech_debt`) | AlloyDB `SELECT 1` | 60s |
@@ -651,6 +667,48 @@ The EA assessment engine is a black box. Platform Engineering monitors the trans
 | Assessment completion p95 | < 60 seconds | > 120 seconds |
 | Assessment availability | 99.5% | < 99% |
 | False positive rate (showstoppers that shouldn't be) | < 5% | > 10% |
+
+### 10a. Governance Guardian MCP Wire Format
+
+**`assess_start` — request:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "assess_start",
+    "arguments": {
+      "solution_package": { "solution_id": "...", "tsa_component_diagram": {...}, "nfrs": {...}, "..." : "..." }
+    }
+  }
+}
+```
+
+**`assess_start` — response:**
+```json
+{ "content": [{ "type": "text", "text": "{\"taskId\": \"gov-456\", \"status\": \"accepted\", \"pollInterval\": 10000}" }] }
+```
+
+**`assess_status` — response (stage values):**
+```json
+{ "content": [{ "type": "text", "text": "{\"taskId\": \"gov-456\", \"status\": \"working\", \"stage\": \"checking_patterns\", \"message\": \"Evaluating pattern adherence...\"}" }] }
+```
+
+Stage values: `accepted` → `extracting_artifacts` → `checking_compliance` → `checking_patterns` → `scoring_nfrs` → `scoring_hadr` → `scoring_security` → `compiling_scorecard` → `completed` (or `failed`).
+
+**`assess_result` — response (completed):**
+```json
+{ "content": [{ "type": "text", "text": "{\"assessment_id\": \"GA-2026-0089\", \"overall_score\": 88, \"grade\": \"B\", \"scorecard\": {...}, \"findings\": [...], \"verdict\": \"PASSED\"}" }] }
+```
+
+**`recordTechDebt` — response (resume):**
+```json
+{ "content": [{ "type": "text", "text": "{\"signal\": \"resume\", \"tech_debt_id\": \"TD-2026-0142\", \"debt_items\": [{\"finding_id\": \"F-002\", \"severity\": \"high\", \"title\": \"WAF rules\"}]}" }] }
+```
+
+**`recordTechDebt` — response (stop):**
+```json
+{ "content": [{ "type": "text", "text": "{\"signal\": \"stop\", \"showstoppers\": [{\"finding_id\": \"F-001\", \"severity\": \"showstopper\", \"title\": \"No cross-region DR\"}]}" }] }
+```
 
 ---
 

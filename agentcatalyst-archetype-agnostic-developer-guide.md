@@ -25,8 +25,8 @@ gemini skills install github.com/company/agentcatalyst-skills --scope user
 # 4. In VSCode with your coding agent:
 /specify              # fill in the structured template → spec.md
 /plan                 # answer technical questions → plan.md
-/catalyst.blueprint   # Connects to Blueprint Advisor MCP Server (async) → returns app-blueprint.yaml
-# review + edit the YAML
+/catalyst.blueprint   # Connects to Blueprint Advisor MCP Server (async) → returns app-blueprint.md
+# review + edit the markdown blueprint
 /catalyst.assess      # Governance Guardian assessment → findings + scorecard (fix + re-assess until passed)
 /catalyst.generate    # Governance gate + coding agent generates everything using skills
 ```
@@ -59,7 +59,7 @@ They've already set up everything you need. You don't configure any of this:
 | 2 | `/specify` — describe your problem in structured English | 15 min |
 | 3 | `/plan` — answer technical questions | 5 min |
 | 4 | `/catalyst.blueprint` — get AI architecture advice | 1–5 min (async, progress in chat) |
-| 5 | Review and edit the YAML | 10 min |
+| 5 | Review and edit the markdown blueprint | 10 min |
 | 5a | **`/catalyst.assess` — governance assessment (iterative)** | **1–5 min per assessment** |
 | 6 | `/catalyst.generate` — coding agent generates the project (with governance gate) | 5–10 min |
 | 7 | Write business logic + system prompts (the 20%) | 2–4 hours |
@@ -216,7 +216,9 @@ Saved as `plan.md`. (~5 min)
 
 ### 2.5 `/catalyst.blueprint` — Get AI advice via Blueprint Advisor MCP Server
 
-Type `/catalyst.blueprint`. The coding agent connects to the **Blueprint Advisor MCP Server** and starts a background task. You see progress in the Chat pane as the pipeline runs (typically 1–5 minutes). When complete, `app-blueprint.yaml` appears in your workspace.
+Type `/catalyst.blueprint`. The coding agent connects to the **Blueprint Advisor MCP Server** and starts a background task.
+
+> **First-time authentication:** The first time you run `/catalyst.blueprint` or `/catalyst.assess`, your coding agent opens a browser for company SSO login (Microsoft Entra ID). After authenticating once (including MFA), tokens are cached securely in your OS keychain. Subsequent commands use silent token refresh — no browser popup. Both the Blueprint Advisor and Governance Guardian share the same OAuth 2.1 authentication, so you authenticate once for both. Tokens last 1 hour with automatic refresh. See Architecture Document, Layer 2 Security for the full OAuth 2.1 flow with Entra ID. You see progress in the Chat pane as the pipeline runs (typically 1–5 minutes). When complete, the coding agent writes several files to your workspace: `app-blueprint.md` (the structured markdown blueprint), component diagram PNGs, HA/DR diagram PNGs, and their editable `.drawio.xml` counterparts — all in your feature directory. The diagrams render inline when you preview the markdown in VSCode.
 
 **Why async?** VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls. The Blueprint Advisor's internal pipeline (3 RAG searches + LLM reasoning + validation + assembly) takes 15–60 seconds. A single blocking call would be killed before it completes. Instead, the coding agent uses three fast MCP tools — `blueprint_start` (< 2s), `blueprint_status` (< 1s), `blueprint_result` (< 1s) — to drive an async loop. You don't need to think about this; the prompt file handles it automatically.
 
@@ -231,8 +233,8 @@ Agent: Searching tool registry for BigQuery, Cloud SQL, Vertex AI Search tools..
 Agent: Searching skill catalog for matching skills...
 Agent: LLM reasoning: mapping tools to agents based on co-occurrence...
 Agent: Validating composition...
-Agent: Assembling YAML...
-Agent: Blueprint ready! Saved app-blueprint.yaml to your workspace.
+Agent: Assembling blueprint...
+Agent: Blueprint ready! Saved app-blueprint.md to your workspace.
 
 Blueprint Advisor recommends:
   5 agents: LlmAgent (coordinator), SequentialAgent (intake),
@@ -242,7 +244,7 @@ Blueprint Advisor recommends:
   3 FunctionTool implementations: severity_classifier, coverage_calculator, notification_sender
   2 skills: bigquery v1.2.0, fraud-detection v2.0.1
 
-Review the YAML and edit before running /catalyst.generate.
+Review the markdown and edit before running /catalyst.generate.
 ```
 
 **What happens behind the scenes:**
@@ -259,21 +261,21 @@ Review the YAML and edit before running /catalyst.generate.
 
 3. Your coding agent polls `blueprint_status` every 10 seconds. Each poll returns the current stage and a progress message displayed in the Chat pane.
 
-4. When the pipeline completes, your coding agent calls `blueprint_result` to retrieve the YAML and saves it as `app-blueprint.yaml`.
+4. When the pipeline completes, your coding agent calls `blueprint_result` to retrieve the blueprint and saves it as `app-blueprint.md`.
 
 **How the Blueprint Advisor decides which tool goes to which agent:**
 
 It uses **co-occurrence** — which data source is mentioned in the same sentence as which workflow step. Your spec says: *"First, verify coverage **by querying our BigQuery**."* BigQuery is mentioned in the same sentence as "verify" → BigQuery MCP is assigned to the `verify_policy` agent. This is why the language in your spec matters — clear co-occurrence leads to correct assignments.
 
-### 2.6 Review and edit the YAML
+### 2.6 Review and edit the markdown blueprint
 
-Open `app-blueprint.yaml`. The Blueprint Advisor gets it right ~90% of the time. The other 10% is why you review.
+Open `app-blueprint.md`. The Blueprint Advisor gets it right ~90% of the time. The other 10% is why you review.
 
 **What to check — the assignment audit:**
 
-For each tool in the YAML, verify the `assigned_to` agent makes sense:
+For each tool in the blueprint, verify the `assigned_to` agent makes sense:
 
-| In the YAML | Ask yourself | If wrong |
+| In the blueprint | Ask yourself | If wrong |
 |---|---|---|
 | `bigquery-policy → assigned_to: verify_policy` | "Does verify_policy need BigQuery?" Yes — spec says "verify coverage by querying BigQuery" | ✓ Correct |
 | `cloud-sql-claims → assigned_to: extract_details` | "Does extract_details write to Cloud SQL?" No — it extracts from caller input. Cloud SQL writes happen at coordinator level. | ✗ Change to `fnol_coordinator` |
@@ -286,11 +288,11 @@ For each tool in the YAML, verify the `assigned_to` agent makes sense:
 |---|---|---|
 | **Write tool on a leaf agent** | Spec says "extract and save" in one sentence — Blueprint Advisor assigns Cloud SQL to `extract_details` | Move `assigned_to` to the coordinator. Write operations are usually coordinator-level. |
 | **Tool on wrong parallel branch** | Spec mentions "fraud scoring" and "police report" in the same paragraph — Blueprint Advisor mixes up which goes where | Check which branch name matches the tool's purpose. Edit `assigned_to`. |
-| **Missing tool entirely** | Spec mentions a data source the tool registry doesn't have | Add the tool manually to the YAML. Then request it be added to the registry (see `memory/approved-tools.md`). |
+| **Missing tool entirely** | Spec mentions a data source the tool registry doesn't have | Add the tool manually to the blueprint. Then request it be added to the registry (see `memory/approved-tools.md`). |
 | **MCP when it should be A2A (or vice versa)** | Tool registry has the integration registered as the wrong type | This is rare — the registry determines the type. Report to platform engineering. |
 | **Skill on wrong agent** | Skill's `compatible_tools` matched the wrong MCP server | Move the skill's `assigned_to` to match the agent that uses the related tool. |
 
-**Pro tip:** Read the YAML top-to-bottom and mentally trace the FNOL workflow. For each agent, ask: "Does this agent have access to every data source it needs, and ONLY the data sources it needs?" An agent with too many tools has too much scope. An agent missing a tool will fail at runtime.
+**Pro tip:** Read the blueprint top-to-bottom and mentally trace the FNOL workflow. For each agent, ask: "Does this agent have access to every data source it needs, and ONLY the data sources it needs?" An agent with too many tools has too much scope. An agent missing a tool will fail at runtime.
 
 ### 2.7 `/tasks` — See the breakdown
 
@@ -304,7 +306,7 @@ Type `/tasks`. See the 80/20 split:
 
 → *Governance Guardian Architecture Extension covers the full assessment flow, solution package schema, and scorecard format.*
 
-After reviewing and editing the YAML, run the governance assessment before generating code:
+After reviewing and editing the blueprint, run the governance assessment before generating code:
 
 ```
 /catalyst.assess
@@ -323,7 +325,7 @@ Agent: Extracting solution artifacts from workspace...
        ✓ Sequence diagrams (3 mermaid files)
        ✓ NFRs (from plan.md)
        ✓ Architecture Decisions Log (4 entries from adl.md)
-       ✓ Tech stack (from app-blueprint.yaml)
+       ✓ Tech stack (from app-blueprint.md)
        ✓ Patterns used (3 patterns)
 
        Governance assessment started. Checking progress...
@@ -362,7 +364,7 @@ Agent: Checking governance gate...
        Proceeding with code generation...
 ```
 
-The coding agent then reads the YAML and uses installed skills to generate the project:
+The coding agent then reads the blueprint and uses installed skills to generate the project:
 
 ```
 fnol-agent/
@@ -391,9 +393,19 @@ fnol-agent/
 │       ├── bigquery/
 │       └── fraud-detection/
 ├── deployment/terraform/
-│   ├── main.tf                           ← Company TF modules
-│   ├── variables.tf
-│   └── terraform.tfvars
+│   ├── main.tf                           ← Company TF modules (via GitHub URLs)
+│   ├── variables.tf                      ← Descriptions from module repos
+│   ├── terraform.tfvars                  ← Pre-filled from blueprint
+│   ├── versions.tf                       ← Provider versions pinned
+│   ├── backend.tf                        ← GCS backend config
+│   ├── environments/
+│   │   ├── dev.tfvars
+│   │   ├── staging.tfvars
+│   │   └── prod.tfvars                   ← Multi-region for production
+│   └── dr/
+│       ├── failover.tf                   ← From blueprint §13 lifecycle
+│       ├── failback.tf
+│       └── lifecycle.tf
 ├── observability/
 │   ├── dynatrace/
 │   └── otel/
@@ -402,7 +414,7 @@ fnol-agent/
 │   └── harness-pipeline.yaml             ← Canary deployment
 ├── pyproject.toml
 ├── README.md
-└── app-blueprint.yaml
+└── app-blueprint.md
 ```
 
 **What `/catalyst.generate` did NOT do:**
@@ -442,7 +454,7 @@ bigquery_policy = MCPToolset(
 )
 ```
 
-**Terraform module** (guided by `company-terraform-patterns` skill):
+**Terraform module** (guided by `company-terraform` skill):
 
 ```hcl
 # deployment/terraform/main.tf
@@ -453,6 +465,66 @@ module "agent-runtime" {
   agent_name = "fnol-coordinator"
 }
 ```
+
+#### How Terraform generation works behind the scenes
+
+When `/catalyst.generate` runs, the IaC overlay skill (`company-terraform`) reads `app-blueprint.md` §8 (Infrastructure Modules) and generates all the Terraform by following these steps:
+
+1. **Reads the module URLs from your blueprint** — §8 lists GitHub URLs for each company Terraform module needed by your solution (e.g., `github.com/company/tf-agentic-pilot-cold` for the overall pattern, `github.com/company/tf-cloud-sql` for the claims database).
+
+2. **Reads module interfaces via GitHub MCP Server** — Your coding agent calls the GitHub MCP Server to read `variables.tf` and `outputs.tf` from each module repo. This tells it what parameters each module needs. It also reads `examples/` for reference values. Your GitHub authentication is used — no separate credentials needed.
+
+3. **Maps your blueprint to module variables** — The skill deterministically maps blueprint fields to Terraform variables. For example: §10 NFRs says "availability: 99.95%" → `ha_enabled = true`. §1 Metadata says "DR strategy: Pilot Light" → selects the `tf-agentic-pilot-cold` pattern repo. §3 Agent Topology agent names → one Cloud Run service per agent.
+
+4. **Generates the complete Terraform project:**
+
+```
+deployment/terraform/
+├── main.tf             ← Root module: references company modules via GitHub URLs
+├── variables.tf        ← All variables with descriptions from module repos
+├── terraform.tfvars    ← Pre-filled from your blueprint (regions, project, DR)
+├── outputs.tf          ← Values exported for CI/CD pipeline to consume
+├── versions.tf         ← Provider versions pinned from module repos
+├── backend.tf          ← GCS backend for state
+├── environments/
+│   ├── dev.tfvars      ← Single-region, minimal resources
+│   ├── staging.tfvars  ← Single-region, production-like
+│   └── prod.tfvars     ← Multi-region, full DR
+└── dr/
+    ├── failover.tf     ← Failover triggers from blueprint §13
+    ├── failback.tf     ← Failback procedure resources
+    └── lifecycle.tf    ← All 4 lifecycle scenarios
+```
+
+5. **Wires modules together** — The generated `main.tf` references each company module with a pinned version and passes in variables from your blueprint. Module outputs are wired to inputs (e.g., Cloud SQL connection string → agent environment variable):
+
+```hcl
+# deployment/terraform/main.tf — GENERATED, DO NOT EDIT MANUALLY
+module "claims_db" {
+  source         = "github.com/company/tf-cloud-sql?ref=v3.1.0"
+  instance_name  = "${var.project_name}-claims-db"
+  region         = var.primary_region
+  ha_enabled     = true              # From blueprint §10: 99.95% availability
+  replica_region = var.dr_region     # From blueprint §10: RPO < 1 hour
+}
+
+module "agent_stack" {
+  source         = "github.com/company/tf-agentic-pilot-cold?ref=v2.3.0"
+  project_name   = var.project_name
+  primary_region = var.primary_region
+  dr_region      = var.dr_region
+  services = {
+    fnol_coordinator = { cpu = "2", memory = "4Gi", min = 2, max = 10 }
+    extract_details  = { cpu = "1", memory = "2Gi", min = 1, max = 5 }
+    # ... one entry per agent from blueprint §3
+  }
+  db_connection_string = module.claims_db.connection_string  # wired
+}
+```
+
+**The critical rule:** Your coding agent will **never** generate raw `google_*` or `aws_*` Terraform resources. It always references company modules from the GitHub URLs in your blueprint. This is enforced by the `company-terraform` skill. If a module doesn't exist for something your solution needs, the generated code includes a `# TODO: Request tf-{service} module from platform team` comment instead of guessing.
+
+**If you need to customize Terraform:** Edit `terraform.tfvars` to change values (regions, instance sizes). To change the module structure itself, edit `main.tf` — but be aware that `/catalyst.generate` will overwrite it if you re-run. For persistent customizations, request module parameter additions from the platform team.
 
 **Jenkinsfile** (guided by `company-cicd` skill):
 
@@ -648,11 +720,11 @@ Agent: Blueprint generation started. Checking progress...
 Agent: Searching pattern catalog for microservice patterns...
 Agent: Searching tool registry — recognizing EXISTING signals for Oracle, Angular, ECS...
 Agent: Reasoning: brownfield mode — skipping infrastructure generation...
-Agent: Assembling YAML...
-Agent: Blueprint ready! Saved app-blueprint.yaml.
+Agent: Assembling blueprint...
+Agent: Blueprint ready! Saved app-blueprint.md.
 ```
 
-This typically takes 1–3 minutes for a brownfield spec. The returned `app-blueprint.yaml` references existing infrastructure rather than creating new infrastructure:
+This typically takes 1–3 minutes for a brownfield spec. The returned `app-blueprint.md` references existing infrastructure rather than creating new infrastructure:
 
 ```yaml
 metadata:
@@ -717,7 +789,7 @@ infrastructure:
 
 **Notice:** `infrastructure.terraform.action: SKIP` and `infrastructure.cicd.action: SKIP` — the Blueprint Advisor recognized the brownfield signals and excluded infrastructure generation.
 
-#### Step 5: Review the YAML
+#### Step 5: Review the markdown
 
 Verify:
 - `database.config_source` points to the correct `application.yml`
@@ -727,7 +799,7 @@ Verify:
 
 #### Step 6: `/catalyst.generate` — Generate the application code
 
-Type `/catalyst.generate`. The coding agent reads the YAML and uses skills to generate **only the application code** — no infrastructure, no CI/CD, no Docker configs (those already exist):
+Type `/catalyst.generate`. The coding agent reads the blueprint and uses skills to generate **only the application code** — no infrastructure, no CI/CD, no Docker configs (those already exist):
 
 ```
 existing-spa-pattern/
@@ -1129,7 +1201,7 @@ For each decision point in your workflow, write the rules:
 - fraud_score must be between 0.0 and 1.0
 ```
 
-The Blueprint Advisor converts this into a `business_rules:` block in the YAML. The coding agent generates working `classify_severity()` with all conditions, edge cases, and validation — not a stub.
+The Blueprint Advisor converts this into a `business_rules:` block in the blueprint. The coding agent generates working `classify_severity()` with all conditions, edge cases, and validation — not a stub.
 
 ### Transformation Rules
 
@@ -1245,11 +1317,11 @@ This shows you exactly which agent failed, which tool returned bad data, and whe
 
 ---
 
-## 5. Understanding the YAML Blueprint
+## 5. Understanding the app-blueprint.md
 
-> **If the Blueprint Advisor is unavailable:** You can author `app-blueprint.yaml` manually using the YAML schema below and the FNOL example in the Architecture Document (Appendix A.10) as a template. The `/catalyst.generate` command only needs the YAML file — it does not require the MCP Server. You lose the AI-guided recommendation but are not blocked from generating code.
+> **If the Blueprint Advisor is unavailable:** You can author `app-blueprint.md` manually using the template schema below and the FNOL example in the Architecture Document (Appendix A.10) as a template. The `/catalyst.generate` command only needs the `app-blueprint.md` file — it does not require the MCP Server. You lose the AI-guided recommendation but are not blocked from generating code.
 
-> **How the YAML is created:** Your coding agent calls `blueprint_start(spec, plan)` on the Blueprint Advisor MCP Server, which returns a task ID immediately. The background pipeline runs the Blueprint Advisor LlmAgent internally (RAG search + LLM reasoning + company system prompt) and stores the result when complete. Your coding agent polls `blueprint_status(taskId)` for progress and retrieves the result via `blueprint_result(taskId)`. After reviewing and editing, your coding agent calls `validate_composition(pattern_tree)` to check your edits, and `assemble_blueprint(selections, spec, plan)` to finalize the YAML. All calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document for the full MCP Server tool table.
+> **How the blueprint is created:** Your coding agent calls `blueprint_start(spec, plan)` on the Blueprint Advisor MCP Server, which returns a task ID immediately. The background pipeline runs the Blueprint Advisor LlmAgent internally (RAG search + LLM reasoning + company system prompt) and stores the result when complete. Your coding agent polls `blueprint_status(taskId)` for progress and retrieves the result via `blueprint_result(taskId)`. After reviewing and editing, your coding agent calls `validate_composition(pattern_tree)` to check your edits, and `assemble_blueprint(selections, spec, plan)` to finalize the blueprint. All calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document for the full MCP Server tool table.
 
 ### Agentic blueprint — key fields
 
@@ -1281,7 +1353,7 @@ backend:
       table: GREETINGS
 ```
 
-### Brownfield signals in the YAML
+### Brownfield signals in the blueprint
 
 ```yaml
 infrastructure:
@@ -1293,9 +1365,9 @@ database:
   config_source: boilerplate/backend/src/main/resources/application.yml  # Use EXISTING config
 ```
 
-### Diagrams in the YAML
+### Diagrams in the blueprint
 
-The Blueprint Advisor generates three Mermaid diagrams at the bottom of the YAML in a `diagrams:` section. These are not separate files — they're part of the same `app-blueprint.yaml` you already review.
+The Blueprint Advisor generates three Mermaid diagrams inline in the markdown (§14 Sequence Diagrams section). These are not separate files — they're part of the same `app-blueprint.md` you already review.
 
 | Diagram | What you see | What to check |
 |---|---|---|
@@ -1303,7 +1375,7 @@ The Blueprint Advisor generates three Mermaid diagrams at the bottom of the YAML
 | **Sequence** | Step-by-step message flow showing what happens at runtime — Sequential phases in order, Parallel branches side-by-side, Loop iterations, HITL routing | "Does the flow match my spec's Workflow section? Are the parallel branches correct? Does HITL route on the right condition?" |
 | **Infrastructure** | GCP services inside VPC-SC boundary, external partners outside, CI/CD pipeline connections | "Are all the services I need inside the perimeter? Are external partners shown correctly?" |
 
-**How to view them:** Open `app-blueprint.yaml` in VSCode. If you have a Mermaid preview extension installed (most setups do), the diagrams render automatically in the preview pane. You can review the YAML fields on the left and see the architecture visually on the right.
+**How to view them:** Open `app-blueprint.md` in VSCode. If you have a Mermaid preview extension installed (most setups do), the diagrams render automatically in the preview pane. You can review the markdown tables on the left and see the architecture visually on the right.
 
 **How to edit them:** The diagrams are Mermaid text — you can edit agent names, add notes, adjust layout. If you change the `agents:` or `tools:` sections and re-run `/catalyst.blueprint`, the diagrams regenerate to match.
 
@@ -1315,7 +1387,7 @@ The Blueprint Advisor generates three Mermaid diagrams at the bottom of the YAML
 
 ## 6. Re-generating — Iterating on the Design
 
-You can change the YAML and re-run `/catalyst.generate` as many times as needed.
+You can change the blueprint and re-run `/catalyst.generate` as many times as needed.
 
 ### How to re-generate safely
 
@@ -1454,7 +1526,7 @@ The Blueprint Advisor returns each recommendation with a confidence score. Confi
 | Tier | Score range | What it means | What you should do |
 |---|---|---|---|
 | **High** | ≥ 0.85 with clear gap to next result | The catalog has a clear winner — search returned one obvious match | Trust it. Verify `assigned_to` is on the right agent and move on. |
-| **Medium** | 0.65–0.85, or top score is high but next is close | Multiple candidates matched. The Blueprint Advisor picked the best, but alternatives exist. | Check the `alternatives:` field in the YAML. Pick the one that matches your intent. |
+| **Medium** | 0.65–0.85, or top score is high but next is close | Multiple candidates matched. The Blueprint Advisor picked the best, but alternatives exist. | Check the `alternatives:` field in the blueprint. Pick the one that matches your intent. |
 | **Low** | < 0.65 | Search couldn't find a confident match. Either the spec is ambiguous or the catalog doesn't have what you need. | Don't accept the recommendation. Either rewrite the spec to be more specific, or contact platform engineering if you think a tool is missing from the registry. |
 
 ### Example: Medium confidence with alternatives
@@ -1502,22 +1574,22 @@ Even with good specs, the Blueprint Advisor sometimes misses. Here are the most 
 **Why it happened:** Your spec said *"extract details and save to Cloud SQL"* in one sentence. The Blueprint Advisor saw co-occurrence between "extract" and "Cloud SQL" and assigned them together.
 
 **How to fix:**
-1. In the YAML, change `assigned_to: extract_details` to `assigned_to: fnol_coordinator`
+1. In the blueprint, change `assigned_to: extract_details` to `assigned_to: fnol_coordinator`
 2. To prevent this recurring, rewrite the spec to separate the actions: *"Extract incident details from the caller's description. The coordinator records the claim in our Cloud SQL claims database."*
 
 ### Failure mode 2: Search returns alternatives instead of a clear winner
 
-**Symptom:** Multiple `alternatives:` fields in the YAML. The Blueprint Advisor isn't sure which tool you wanted.
+**Symptom:** Multiple `alternatives:` fields in the blueprint. The Blueprint Advisor isn't sure which tool you wanted.
 
 **Why it happened:** Your spec is ambiguous. Either you used generic language ("data warehouse") or your data sources overlap (multiple BigQuery datasets in the registry).
 
 **How to fix:**
-1. Pick the right alternative manually in the YAML, or
+1. Pick the right alternative manually in the blueprint, or
 2. Rewrite the spec to be specific. "Query BigQuery" is ambiguous if there are 3 BigQuery datasets in the registry. "Query the policy data warehouse in BigQuery" is unambiguous.
 
 ### Failure mode 3: A tool you need isn't in the recommendation
 
-**Symptom:** Your spec mentions a system, but no MCP server or A2A agent for it appears in the YAML.
+**Symptom:** Your spec mentions a system, but no MCP server or A2A agent for it appears in the blueprint.
 
 **Why it happened:** Two possibilities:
 - The tool isn't in the registry (catalog gap)
@@ -1525,39 +1597,39 @@ Even with good specs, the Blueprint Advisor sometimes misses. Here are the most 
 
 **How to diagnose:**
 1. Check `memory/approved-tools.md` to see if the tool exists
-2. If it exists but wasn't found, the issue is enrichment metadata. Add the tool manually to the YAML and report the search miss to platform engineering.
+2. If it exists but wasn't found, the issue is enrichment metadata. Add the tool manually to the blueprint and report the search miss to platform engineering.
 3. If it doesn't exist, this is a registry gap. Submit a request via platform engineering JIRA.
 
 ### Failure mode 4: Pattern composition that doesn't make architectural sense
 
-**Symptom:** Generated YAML composes patterns that shouldn't be composed (e.g., LoopAgent with HITL sub-agent).
+**Symptom:** Generated blueprint composes patterns that shouldn't be composed (e.g., LoopAgent with HITL sub-agent).
 
 **Why it happened:** Your spec described both iteration and human approval, and the Blueprint Advisor combined them naively. The pattern composition validator should have caught this — if it didn't, it's a validator gap.
 
 **How to fix:**
-1. Re-architect the YAML so iteration happens before human approval, not within it
+1. Re-architect the blueprint so iteration happens before human approval, not within it
 2. Re-run `/catalyst.generate` — the validator should now pass
 3. Report the missed composition rule to EA
 
 ### Failure mode 5: Brownfield signals ignored
 
-**Symptom:** You wrote "EXISTING database — DO NOT create new" but the YAML still includes Terraform for a new database.
+**Symptom:** You wrote "EXISTING database — DO NOT create new" but the blueprint still includes Terraform for a new database.
 
 **Why it happened:** The brownfield signal was buried or contradicted elsewhere in the spec.
 
 **How to fix:**
-1. Set `infrastructure.terraform.action: SKIP` manually in the YAML
+1. Set `infrastructure.terraform.action: SKIP` manually in the blueprint
 2. Strengthen the spec: put "EXISTING" / "DO NOT create new" in BOTH the Dependencies section AND the Infrastructure Requirements section
 
-### When to fix the YAML vs rewrite the spec
+### When to fix the blueprint vs rewrite the spec
 
 | Situation | Action |
 |---|---|
-| One or two field-level mistakes (wrong `assigned_to`) | Fix the YAML directly. Cheaper than re-running. |
-| Multiple field-level mistakes, but pattern is correct | Fix the YAML. Note the pattern in your team's spec-writing guide. |
+| One or two field-level mistakes (wrong `assigned_to`) | Fix the blueprint directly. Cheaper than re-running. |
+| Multiple field-level mistakes, but pattern is correct | Fix the blueprint. Note the pattern in your team's spec-writing guide. |
 | Wrong pattern selected (Sequential when you meant Parallel) | Rewrite the spec with clearer ordering language, re-run /catalyst.blueprint |
 | Multiple `requires_review: true` fields | Rewrite the spec entirely. The Blueprint Advisor is telling you the spec is too ambiguous. |
-| Tool you need isn't in the registry | Add manually to YAML + submit JIRA request to platform engineering |
+| Tool you need isn't in the registry | Add manually to blueprint + submit JIRA request to platform engineering |
 
 ### When to escalate to platform engineering
 
@@ -1565,7 +1637,7 @@ Even with good specs, the Blueprint Advisor sometimes misses. Here are the most 
 |---|---|
 | Tool missing from registry | Platform engineering JIRA: include tool name, vendor, business case, contact info |
 | Search consistently returns wrong tool for your data source | Platform engineering JIRA: include 3+ examples of spec language → wrong recommendation |
-| Pattern composition that should have been blocked | EA office hours: bring the YAML and explain why the composition is invalid |
+| Pattern composition that should have been blocked | EA office hours: bring the blueprint and explain why the composition is invalid |
 | Acceptance metrics on dashboard show your LOB at < 60% | Schedule spec quality review with EA |
 
 ---
@@ -1846,16 +1918,17 @@ Both are essential. Jenkins ensures the agent's environment is correct. Harness 
 | `/catalyst.assess` returns error | Governance Guardian MCP Server unreachable | Check network connectivity. The Governance Guardian uses the same OAuth as Blueprint Advisor. If persistent, proceed without assessment: `/catalyst.generate` will warn but allow `skip`. |
 | Assessment finds showstoppers you disagree with | EA standards may not match your use case | Contact the EA office to discuss. If the standard doesn't apply, request an exception via the governance exception process. You cannot bypass showstoppers — they must be resolved or exempted by EA. |
 | `/catalyst.generate` blocked by governance gate | Showstopper findings still present | Run `/catalyst.assess` to see current findings. Fix showstoppers and re-assess. Only showstoppers block generation — non-showstoppers are recorded as tech debt. |
-| YAML validation fails | Schema error | Common: missing `assigned_to`, unpinned version, invalid type |
-| Skill provenance check fails | Skill updated since YAML generated | Update `version:` in YAML |
+| MCP Server returns 401 Unauthorized | OAuth token expired or MFA timed out | Close and reopen VSCode to trigger a fresh SSO login (Entra ID). If persistent, check with IT that your Entra ID account is active. The coding agent refreshes tokens automatically; a 401 usually means the refresh token also expired (>24 hours since last login). |
+| Blueprint validation fails | Schema error | Common: missing `assigned_to`, unpinned version, invalid type |
+| Skill provenance check fails | Skill updated since blueprint generated | Update `version:` in blueprint |
 | Skills not visible | Not installed | Run `gemini skills install github.com/company/agentcatalyst-skills --scope user` |
 | Coding agent tries to deploy directly | Default workflow overriding company rules | Verify skills installed, check GEMINI.md has override table |
 | Brownfield generates new infrastructure | Spec missing "EXISTING" / "DO NOT create" signals | Add explicit brownfield language to spec (see Section 4) |
 | Generated code doesn't compile | Skill version mismatch | Check ADK/Spring Boot version matches skill expectations |
 | Oracle connection fails locally | Wrong JDBC URL or missing credentials | Check `application.yml` datasource config, ensure Oracle RDS is accessible from your machine |
 | Blueprint Advisor consistently picks wrong tool for my data source | Tool registry enrichment metadata is incomplete or doesn't match your spec language | Submit feedback via platform engineering JIRA (`AGENTCATALYST-SEARCH` queue) with 3+ examples of your spec language → wrong recommendation. See Section 11. |
-| Search returns alternatives instead of a clear winner (multiple `alternatives:` fields in YAML) | Spec is ambiguous — multiple tools or patterns match equally well | Run the Spec Quality Self-Check (Section 10). Disambiguate the spec or pick the right alternative manually in the YAML. |
-| Generated code fails because tool no longer exists | Tool was deprecated since the blueprint was generated | Check tool deprecation list. Run `catalyst migrate` if available, or update YAML manually to use the replacement tool. Re-run `/catalyst.generate`. |
+| Search returns alternatives instead of a clear winner (multiple `alternatives:` fields in blueprint) | Spec is ambiguous — multiple tools or patterns match equally well | Run the Spec Quality Self-Check (Section 10). Disambiguate the spec or pick the right alternative manually in the blueprint. |
+| Generated code fails because tool no longer exists | Tool was deprecated since the blueprint was generated | Check tool deprecation list. Run `catalyst migrate` if available, or update blueprint manually to use the replacement tool. Re-run `/catalyst.generate`. |
 | Pattern composition validator rejects YAML | YAML composes patterns that aren't compatible (e.g., LoopAgent + HITL sub-agent) | Read the validator error — it specifies which composition rule was violated. Either restructure the YAML or rewrite the spec to use compatible patterns. |
 | YAML has `requires_review: true` fields | Blueprint Advisor returned low-confidence results (< 0.65) | Don't run `/catalyst.generate`. Read the `notes:` field for what's ambiguous. Rewrite the spec to be more specific and re-run `/catalyst.blueprint`. |
 
@@ -1900,7 +1973,7 @@ Every file in the `.specify/` folder serves a specific purpose:
 │   ├── spec-template.md          ← /specify loads this — archetype-specific sections
 │   │                                with coaching prompts and examples
 │   ├── plan-template.md          ← /plan loads this — technical questions
-│   │                                mapping to YAML blueprint fields
+│   │                                mapping to markdown blueprint fields
 │   └── tasks-template.md        ← /tasks loads this — generated vs
 │                                    engineer-implements breakdown
 │

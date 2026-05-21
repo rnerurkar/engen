@@ -17,7 +17,7 @@ Every enterprise team building AI agents (or microservices, or data pipelines) t
 
 AgentCatalyst is a spec-driven development accelerator with three core capabilities:
 
-1. **Blueprint Advisor** — an LlmAgent exposed as an MCP Server that recommends architectures by searching company-curated catalogs via RAG. The developer's coding agent connects via MCP protocol, calls `blueprint_start(spec, plan)` to initiate an async task, polls for progress via `blueprint_status`, and retrieves the YAML blueprint via `blueprint_result` when complete. This async pattern (using MCP Tasks) is necessary because VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls, while the LlmAgent pipeline takes 15–60 seconds. The developer reviews and edits the YAML — the human is always in control.
+1. **Blueprint Advisor** — an LlmAgent exposed as an MCP Server that recommends architectures by searching company-curated catalogs via RAG. The developer's coding agent connects via MCP protocol, calls `blueprint_start(spec, plan)` to initiate an async task, polls for progress via `blueprint_status`, and retrieves the markdown blueprint via `blueprint_result` when complete. This async pattern (using MCP Tasks) is necessary because VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls, while the LlmAgent pipeline takes 15–60 seconds. The developer reviews and edits the blueprint — the human is always in control.
 
 2. **Preset-based archetype adaptation** — each application type (agentic AI, microservice, data pipeline, API-first) is served by a self-contained preset with archetype-specific templates, catalogs, and skills. All presets share company overlay skills (Terraform, observability, CI/CD, security) maintained once by the platform team. New archetype = new preset. Zero platform changes.
 
@@ -34,12 +34,12 @@ AgentCatalyst does NOT deploy agents. It generates code, infrastructure definiti
 | Requirements capture | 3–5 days (meetings + documents) | 2–4 hours (/specify template) | 90% faster |
 | Architecture design | 1–2 weeks (manual research) | 1–5 minutes (Blueprint Advisor) | 99% faster |
 | Code generation | 1–2 weeks (manual project setup) | 5–10 minutes (skill-guided) | 99% faster |
-| Infrastructure as code | 3–5 days (manual Terraform) | Automatic (from YAML) | 90% faster |
+| Infrastructure as code | 3–5 days (manual Terraform) | Automatic (from blueprint) | 90% faster |
 
 ### Key principles
 
 1. **Spec-driven, not prompt-driven.** Structured 10-section templates with business rules — not free-form chat prompts.
-2. **AI-advised, human-decided.** The Blueprint Advisor recommends; the developer reviews and edits the YAML. The human is always in control.
+2. **AI-advised, human-decided.** The Blueprint Advisor recommends; the developer reviews and edits the blueprint. The human is always in control.
 3. **Compliant by construction.** Company overlay skills teach the coding agent non-negotiable standards. Compliance is structural, not retrofitted.
 4. **Archetype-agnostic.** Same platform, same flow, same overlay skills — regardless of whether you're building an AI agent, a microservice, a data pipeline, or an API.
 5. **Generates, never deploys.** Code and pipeline definitions committed to GitHub. The company's CI/CD deploys.
@@ -115,19 +115,19 @@ She types `/plan` and answers a handful of technical questions — GCP region, L
 
 She types `/catalyst.blueprint`. This custom command connects to the **Blueprint Advisor MCP Server** — an LlmAgent running on Cloud Run, exposed as an MCP Server. Her coding agent calls `blueprint_start` via MCP protocol with her `spec.md` and `plan.md` as input. The call returns a task ID in under 2 seconds — the heavy work runs in the background. She doesn't need to know what happens inside the server — but here's what does:
 
-The Blueprint Advisor reads her spec's natural language signals. "First the customer calls, then the system classifies severity" tells it Sequential. "In parallel it enriches from three sources" tells it Parallel. "Loop until quality score exceeds 0.85" tells it Loop. "Route high-severity to a human adjuster" tells it HITL. It searches the company's pattern catalog, skill catalog, and tool registry via Vertex AI Search (single-pass semantic retrieval), applies LLM reasoning guided by a company-curated system prompt, and assembles a recommendation. While this runs (15–60 seconds), her coding agent polls `blueprint_status` every 10 seconds and reports progress in the Chat pane: "Searching pattern catalog...", "Reasoning about architecture...", "Assembling YAML...".
+The Blueprint Advisor reads her spec's natural language signals. "First the customer calls, then the system classifies severity" tells it Sequential. "In parallel it enriches from three sources" tells it Parallel. "Loop until quality score exceeds 0.85" tells it Loop. "Route high-severity to a human adjuster" tells it HITL. It searches the company's pattern catalog, skill catalog, and tool registry via Vertex AI Search (single-pass semantic retrieval), applies LLM reasoning guided by a company-curated system prompt, and assembles a recommendation. While this runs (15–60 seconds), her coding agent polls `blueprint_status` every 10 seconds and reports progress in the Chat pane: "Searching pattern catalog...", "Reasoning about architecture...", "Assembling blueprint...".
 
-When the background pipeline completes, the coding agent calls `blueprint_result` and saves the output as `app-blueprint.yaml` — a human-readable YAML file describing WHAT to build. Not code — just a specification: 5 agents (Coordinator + Sequential + Parallel + Loop + HITL), 3 MCP servers (BigQuery, Cloud SQL, Vertex AI Search), 3 A2A agents (body shop, rental car, police report), 3 FunctionTool implementations (severity classifier, coverage calculator, notification sender — with her IF/THEN business rules included), infrastructure settings, EvalOps configuration, and a golden dataset derived from her acceptance criteria. Each recommendation is tagged with a confidence level (high/medium/low).
+When the background pipeline completes, the coding agent calls `blueprint_result` and receives a JSON response containing the markdown content, base64-encoded diagram PNGs, and drawio XML files. It writes `app-blueprint.md` to the workspace along with component diagram PNGs, HA/DR diagram PNGs, and their editable drawio XML counterparts — all in the same feature directory. The markdown file is a structured document describing WHAT to build: 5 agents (Coordinator + Sequential + Parallel + Loop + HITL), 3 MCP servers (BigQuery, Cloud SQL, Vertex AI Search), 3 A2A agents (body shop, rental car, police report), 3 FunctionTool implementations (severity classifier, coverage calculator, notification sender — with her IF/THEN business rules included), infrastructure settings, EvalOps configuration, and a golden dataset derived from her acceptance criteria. Component diagrams are rendered as inline PNG images with editable drawio XML alongside. Sequence diagrams are inline mermaid code. NFRs, ADL, and tech stack are tables. Each recommendation is tagged with a confidence level (high/medium/low).
 
-She reviews the YAML in her editor. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the YAML directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the YAML.
+She reviews the markdown in her editor — the component diagram renders inline in VSCode's markdown preview, the sequence diagrams render as mermaid, and all tables are readable. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the table directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the markdown. If she needs to edit the component diagram, she opens the drawio XML in draw.io, modifies it, and the updated diagram is assessed on her next `/catalyst.assess` run.
 
-Before generating code, she runs the governance check. She types `/catalyst.assess`. The coding agent extracts solution artifacts from her workspace — the TSA component diagram from her drawio file, HA/DR views, sequence diagrams, NFRs from plan.md, her architecture decisions log, the tech stack from the YAML, and the patterns used — packages them as a JSON document, and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). While the EA assessment engine evaluates her solution (a black box to AgentCatalyst — the EA office owns all the assessment logic), she sees progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...".
+Before generating code, she runs the governance check. She types `/catalyst.assess`. The coding agent reads `app-blueprint.md` and extracts all 7 artifact types directly from it — the component diagram PNG from the `![...]()` reference in §4, HA/DR views from §13, sequence diagrams from the inline mermaid in §14, NFRs from the table in §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as a JSON document, and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). While the EA assessment engine evaluates her solution (a black box to AgentCatalyst — the EA office owns all the assessment logic), she sees progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...".
 
 The assessment returns a scorecard and findings. One showstopper: her Aurora PostgreSQL has no cross-region DR strategy, violating ADR-205. Two non-critical findings: WAF rules not using the enterprise managed rule group, and Angular 17 not yet on the approved tech radar. She fixes the showstopper — adds Aurora Global Database with a us-west-2 read replica to her Terraform and updates the HA/DR view in her drawio. She runs `/catalyst.assess` again. This time: no showstoppers, score 88/100. The two remaining findings are flagged as acceptable tech debt.
 
 She types `/catalyst.generate`. Before the 18-step generation pipeline runs, the coding agent makes one final call to the Governance Guardian — `recordTechDebt`. This tool checks whether any showstopper findings remain from her latest assessment. None do — the two remaining findings are classified as tech debt, recorded in the governance database (TD-2026-0142), and the Governance Guardian returns `{ signal: "resume" }`. The coding agent reports: "Governance gate passed. Tech debt recorded. Generating code..." and proceeds.
 
-The coding agent reads the YAML and generates all the code — but it doesn't guess HOW to write the code. It has **skills** installed that teach it the right way:
+The coding agent reads the blueprint and generates all the code — but it doesn't guess HOW to write the code. It has **skills** installed that teach it the right way:
 
 - **`adk-agents` skill** teaches it how to write correct ADK Python code — the right import paths, the right class constructors, the right way to wire tools to agents.
 - **Company overlay skills** teach it which Terraform modules to use (with pinned versions), how to configure Dynatrace observability, how to generate Jenkins + Harness pipeline definitions (NOT deploy directly), and how to generate Model Armor callbacks.
@@ -185,7 +185,7 @@ The Blueprint Advisor reads phrases like "EXISTING REST API" and "MUST use these
 
 ```
 Layer 1 — SPEC CAPTURE         /specify → spec.md, /plan → plan.md
-Layer 2 — ARCHITECTURE ADVISORY Blueprint Advisor MCP Server → app-blueprint.yaml
+Layer 2 — ARCHITECTURE ADVISORY Blueprint Advisor MCP Server → app-blueprint.md
 Layer 3 — SKILL-GUIDED GEN     /catalyst.generate → complete project
 Layer 4 — COMPANY CI/CD        Jenkins (infra) + Harness (deploy + EvalOps)
 Layer 5 — RUNTIME & OPERATE    Cloud Run + Apigee + Dynatrace + Splunk
@@ -226,11 +226,11 @@ The Blueprint Advisor is an LlmAgent running on Cloud Run, **exposed as an MCP S
 |---|---|---|---|
 | `blueprint_start(spec, plan)` | **ASYNC START** | < 2 seconds | Validates input, creates a background task in the Task Store, enqueues the pipeline via Cloud Tasks, returns `taskId` + `pollInterval` immediately |
 | `blueprint_status(taskId)` | **POLL** | < 1 second | Returns current pipeline stage (searching / reasoning / validating / assembling) and a progress message for display to the developer |
-| `blueprint_result(taskId)` | **RETRIEVE** | < 1 second | Returns the completed YAML blueprint + confidence scores when status is `completed`. Returns error details when status is `failed` |
-| `validate_composition(pattern_tree)` | **DETERMINISTIC** | < 1 second | Checks developer's edited pattern selections against adjacency matrix. Returns valid/invalid + reason. Called after developer edits the YAML |
-| `assemble_blueprint(selections, spec, plan)` | **DETERMINISTIC** | < 1 second | Rebuilds final YAML from validated selections. Template-filling, no LLM involved. Called after validation passes |
+| `blueprint_result(taskId)` | **RETRIEVE** | < 1 second | Returns JSON with: `markdown` (full app-blueprint.md content), `diagrams` (array of base64-encoded PNGs + drawio XMLs), `spec_hash`, `plan_hash`, `blueprint_hash`. The prompt file writes the .md and diagram files to the workspace. |
+| `validate_composition(pattern_tree)` | **DETERMINISTIC** | < 1 second | Checks developer's edited pattern selections against adjacency matrix. Returns valid/invalid + reason. Called after developer edits the blueprint |
+| `assemble_blueprint(selections, spec, plan)` | **DETERMINISTIC** | < 1 second | Rebuilds final markdown from validated selections. Template-filling + diagram rendering (graphviz → PNG + drawio), no LLM involved. Called after validation passes |
 
-The first three tools implement the async MCP Tasks pattern. The last two are called after the developer has reviewed and edited the YAML — they remain synchronous because they are fast and deterministic.
+The first three tools implement the async MCP Tasks pattern. The last two are called after the developer has reviewed and edited the blueprint — they remain synchronous because they are fast and deterministic.
 
 **Task lifecycle:**
 
@@ -238,14 +238,14 @@ The first three tools implement the async MCP Tasks pattern. The last two are ca
 |---|---|
 | `accepted` | Task record created, queued for execution |
 | `working` | Pipeline executing (substage: searching / reasoning / validating / assembling) |
-| `completed` | YAML + confidence scores available for retrieval |
+| `completed` | Blueprint + confidence scores available for retrieval |
 | `failed` | Structured error (LlmAgent failure, RAG timeout, composition invalid) |
 
 Task records are stored in AlloyDB with a 24-hour TTL. This allows the developer to retrieve a result even after closing and reopening VSCode.
 
 **Blueprint Advisor versioning:**
 
-Every YAML blueprint includes version metadata in its header:
+Every markdown blueprint includes version metadata in its header:
 
 ```yaml
 # Generated by: blueprint-advisor/v2.3.1
@@ -287,17 +287,17 @@ The coding agent calls `blueprint_start` ONCE (which kicks off the background pi
 2. Background pipeline starts on Cloud Run Jobs (no timeout constraint):
    - Runs Blueprint Advisor LlmAgent internally (RAG search → LLM reasoning → recommendations)
    - Validates composition against adjacency matrix
-   - Assembles YAML from validated selections
+   - Assembles blueprint from validated selections
    - Stores result in AlloyDB Task Store
 3. Coding agent polls `blueprint_status(taskId)` every 10 seconds via MCP (< 1 second each)
    - Reports progress to developer in Chat pane: "Searching pattern catalog...", "Reasoning about architecture...", etc.
 4. When status returns `completed`, coding agent calls `blueprint_result(taskId)` via MCP
 5. Recommendations with confidence scores returned in < 1 second
-6. Coding agent saves them as `app-blueprint.yaml`
-7. Developer reviews in YAML editor, edits selections
+6. Coding agent saves them as `app-blueprint.md`
+7. Developer reviews in markdown editor, edits selections
 8. Coding agent calls `validate_composition(edited_pattern_tree)` — deterministic pass/fail (< 1 second)
-9. Coding agent calls `assemble_blueprint(validated_selections, spec, plan)` — deterministic YAML (< 1 second)
-10. Result: final `app-blueprint.yaml` written to workspace
+9. Coding agent calls `assemble_blueprint(validated_selections, spec, plan)` — deterministic blueprint assembly (< 1 second)
+10. Result: final `app-blueprint.md` written to workspace
 
 **Prompt-file orchestration:** The `/catalyst.blueprint` prompt file drives the start → poll → result loop without custom client code. The LLM naturally handles the polling — each tool call is a fast round-trip within any coding agent's timeout window. The developer sees progress messages in the Chat pane throughout.
 
@@ -305,13 +305,13 @@ The coding agent calls `blueprint_start` ONCE (which kicks off the background pi
 
 If the Blueprint Advisor MCP Server is unreachable (VPN down, server maintenance, network issue), the developer is NOT blocked. Two fallback paths exist:
 
-1. **Manual YAML authoring:** The developer writes `app-blueprint.yaml` manually using the YAML schema reference (see Appendix A.10 for a complete example). The coding agent can still run `/catalyst.generate` against a hand-written YAML — it only needs the blueprint file, not the MCP Server.
+1. **Manual YAML authoring:** The developer writes `app-blueprint.md` manually using the schema reference (see Appendix A.10 for a complete example). The coding agent can still run `/catalyst.generate` against a hand-written blueprint — it only needs `app-blueprint.md`, not the MCP Server.
 
 2. **Cached recommendation:** If the developer previously received a recommendation for a similar spec, they can copy and modify that YAML. The `validate_composition` and `assemble_blueprint` MCP tools are lightweight, synchronous, and may still be available even when the background pipeline is down (they don't depend on Vertex AI Search or LLM reasoning).
 
 3. **Stale task retrieval:** If a `blueprint_start` succeeded but the developer lost connectivity before calling `blueprint_result`, the result remains in the Task Store for 24 hours. Reconnecting and calling `blueprint_result(taskId)` retrieves the completed blueprint.
 
-The Developer Guide (Section 5) includes the complete YAML schema and an annotated example that developers can use as a starting template for manual authoring
+The Developer Guide (Section 5) includes the complete schema and an annotated example that developers can use as a starting template for manual authoring
 
 **The 11 agentic patterns (Phase 1 catalog):**
 
@@ -333,11 +333,96 @@ The Developer Guide (Section 5) includes the complete YAML schema and an annotat
 
 The Blueprint Advisor MCP Server receives spec.md content that may contain proprietary business rules, competitive intelligence, partner names, and regulatory details. The following security controls are required:
 
-**Authentication:**
-- Coding agent authenticates to the MCP Server via **OAuth 2.0** using the developer's company SSO credentials
-- The MCP Server validates the OAuth token against the company's identity provider (Workload Identity Federation)
-- Authentication is **per-user** — each developer's MCP calls are tied to their identity for audit trail
-- OAuth token lifetime: 1 hour with silent refresh. The preset's MCP endpoint configuration includes the OAuth client ID and token endpoint
+**Authentication — OAuth 2.1 with Entra ID:**
+
+Both the Blueprint Advisor and Governance Guardian MCP Servers require OAuth 2.1 authentication via the company's **Microsoft Entra ID** (formerly Azure AD) identity provider. The coding agent authenticates the developer once, then attaches the access token to every MCP tool call. The token is validated by both MCP Servers — a developer authenticated for the Blueprint Advisor does NOT need to re-authenticate for the Governance Guardian (same token, same IdP, same audience scope).
+
+The following sequence diagram shows the complete authentication flow from the developer's first `/catalyst.blueprint` command through token acquisition to authenticated MCP tool calls on both servers:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Dev as Developer<br>(VSCode)
+    participant CA as Coding Agent<br>(Copilot / Claude Code)
+    participant Entra as Microsoft Entra ID<br>(OAuth 2.1 Authorization Server)
+    participant BA as Blueprint Advisor<br>MCP Server
+    participant GG as Governance Guardian<br>MCP Server
+    participant TS as Task Store<br>(AlloyDB)
+
+    Note over Dev,Entra: Phase 1 — First-time authentication (one-time browser flow)
+
+    Dev->>CA: /catalyst.blueprint
+    CA->>CA: Read MCP endpoint config from preset.yml<br>(client_id, token_endpoint, scopes)
+    CA->>CA: Check token cache — no valid token found
+
+    CA->>Dev: Opens browser for company SSO login
+    Dev->>Entra: Browser redirect to /authorize<br>response_type=code, client_id, scope=agentcatalyst.mcp<br>code_challenge (PKCE S256)
+    Entra->>Dev: Company SSO login page (Entra ID)
+    Dev->>Entra: Enter credentials + MFA
+    Entra->>CA: Authorization code (via redirect URI)
+
+    CA->>Entra: POST /token<br>grant_type=authorization_code<br>code + code_verifier (PKCE)
+    Entra-->>CA: access_token (JWT, 1hr) + refresh_token
+
+    CA->>CA: Cache tokens locally<br>(secure OS keychain)
+
+    Note over CA,BA: Phase 2 — Authenticated MCP tool calls (Blueprint Advisor)
+
+    CA->>BA: blueprint_start(spec, plan)<br>Authorization: Bearer {access_token}
+    BA->>BA: Validate JWT signature (Entra ID JWKS endpoint)<br>Verify audience = agentcatalyst.mcp<br>Extract user identity (sub claim = sarah@company.com)
+    BA->>TS: INSERT task (owner_id = sarah@company.com)
+    BA-->>CA: { taskId, pollInterval }
+
+    loop Polling (each call carries same token)
+        CA->>BA: blueprint_status(taskId)<br>Authorization: Bearer {access_token}
+        BA->>BA: Validate JWT (cached JWKS, ~1ms)
+        BA-->>CA: { status, stage, message }
+    end
+
+    CA->>BA: blueprint_result(taskId)<br>Authorization: Bearer {access_token}
+    BA->>TS: SELECT result WHERE owner_id = sarah@company.com
+    BA-->>CA: { markdown, diagrams, hashes }
+
+    Note over CA,GG: Phase 3 — Same token, different MCP Server (Governance Guardian)
+
+    Dev->>CA: /catalyst.assess
+    CA->>CA: Token still valid (< 1 hour old)
+
+    CA->>GG: assess_start(solution_package)<br>Authorization: Bearer {access_token}
+    GG->>GG: Validate same JWT (same Entra ID JWKS)<br>Same audience scope, same user identity
+    GG->>TS: INSERT task (owner_id = sarah@company.com)
+    GG-->>CA: { taskId, pollInterval }
+
+    Note over CA,GG: Polling + result use same token pattern
+
+    Note over CA,Entra: Phase 4 — Silent token refresh (automatic, no user interaction)
+
+    CA->>CA: Token expires in 5 minutes
+    CA->>Entra: POST /token<br>grant_type=refresh_token<br>refresh_token={cached}
+    Entra-->>CA: New access_token (1hr) + new refresh_token
+    CA->>CA: Update token cache
+
+    CA->>BA: Next MCP call uses new token seamlessly
+```
+
+**Key authentication design decisions:**
+
+| Decision | Rationale |
+|---|---|
+| **OAuth 2.1** (not 2.0) | OAuth 2.1 mandates PKCE for all clients and prohibits the implicit grant — both required for a desktop IDE context where a client secret cannot be securely stored |
+| **Entra ID as IdP** | Company standard. All developers have Entra ID accounts via company SSO. No separate credentials to manage. |
+| **Single audience scope** (`agentcatalyst.mcp`) | Both Blueprint Advisor and Governance Guardian share the same scope — one token works for both servers. The developer authenticates once. |
+| **PKCE (S256)** | Required by OAuth 2.1 for public clients (the IDE cannot securely store a client secret). The code_verifier/code_challenge exchange prevents authorization code interception. |
+| **JWT validation at each MCP Server** | Each server independently validates the JWT signature against Entra ID's JWKS endpoint (cached, ~1ms). No shared session state between servers. |
+| **1-hour token with silent refresh** | Developer authenticates once per day (or when the refresh token expires, typically 24 hours). All subsequent calls use silent refresh — no browser popup. |
+| **`owner_id` from JWT `sub` claim** | The Task Store's tenant isolation uses the `sub` claim (e.g., `sarah@company.com`) from the validated JWT as the `owner_id`. This is set at `blueprint_start` / `assess_start` time and enforced on every subsequent status/result call. |
+| **Token cached in OS keychain** | The coding agent stores tokens in the OS-native secure store (macOS Keychain, Windows Credential Manager, Linux Secret Service). NOT in plain text, NOT in the workspace. |
+
+**Credential provisioning (zero manual config):**
+- The MCP endpoint URL, OAuth client ID, Entra ID token endpoint, and required scopes are configured in the preset's `preset.yml` under an `mcp_servers` section
+- When the developer installs the preset (`specify preset add agentcatalyst-enterprise`), the connection configuration is installed automatically
+- First-time `/catalyst.blueprint` or `/catalyst.assess` triggers the browser-based SSO flow
+- Subsequent commands use the cached token with silent refresh
 
 **Transport security:**
 - All MCP protocol connections use **TLS 1.3** minimum (enforced by Cloud Run's default TLS termination)
@@ -350,11 +435,6 @@ The Blueprint Advisor MCP Server receives spec.md content that may contain propr
 - Spec content is **NOT persisted** beyond the task TTL
 - Telemetry captures the spec hash (SHA-256) for traceability, NOT the spec content itself
 - Spec content does not leave the configured GCP region (Cloud Run regional deployment; AlloyDB co-located)
-
-**Credential provisioning:**
-- The MCP endpoint URL and OAuth client ID are configured in the preset's  under a  section
-- Developers do not manually configure credentials — the preset installs the connection configuration
-- First-time connection triggers an OAuth browser flow (company SSO login)
 
 **Task Store tenant isolation:**
 - Every task record in AlloyDB carries an `owner_id` field set to the authenticated user's identity from the OAuth token at `blueprint_start` time
@@ -402,7 +482,8 @@ When a rate limit is hit, `blueprint_start` returns a clear error: "Rate limit e
 | Component | Monthly cost (Year 1) |
 |---|---|
 | Blueprint Advisor (API layer + pipeline + AlloyDB + Gemini + Vertex AI Search) | $15–30 |
-| Cloud Tasks queue | <$1 |
+| Governance Guardian (API layer + AlloyDB tables + Cloud Tasks queue) | $10–25 |
+| Cloud Tasks queues (blueprint-tasks + governance-assess) | <$2 |
 | Arize Phoenix SaaS (tracing for deployed agents) | $200–400 |
 | Dynatrace APM (platform + deployed agents) | $100–300 |
 | Cloud Run for deployed agents (runtime, not Blueprint Advisor) | $100–400 |
@@ -419,11 +500,11 @@ The $500–1,500/month estimate in the exec summary is accurate for the full pla
 
 > For the complete code generation walkthrough with generated directory trees, see Developer Guide, Section 2 (greenfield) and Section 3 (brownfield). For writing tests for generated code, see Developer Guide, Section 7.
 
-The coding agent reads the YAML blueprint and generates the complete project. It is constrained by three layers:
+The coding agent reads the markdown blueprint and generates the complete project. It is constrained by three layers:
 
 | Layer | Source | Role |
 |---|---|---|
-| **Blueprint** (WHAT) | `app-blueprint.yaml` from Blueprint Advisor | Defines topology, tool assignments, infrastructure config |
+| **Blueprint** (WHAT) | `app-blueprint.md` from Blueprint Advisor | Defines topology, tool assignments, infrastructure config |
 | **Archetype skill** (HOW) | e.g., `adk-agents` SKILL.md | Teaches correct framework-specific patterns, imports, constructors |
 | **Overlay skills** (MUST) | Company overlay SKILL.md files | Teaches non-negotiable company standards (Terraform, Dynatrace, CI/CD, security) |
 | **Constitution.md** | In the preset | Non-negotiable rules the coding agent MUST follow (e.g., never deploy directly) |
@@ -432,7 +513,7 @@ The coding agent reads the YAML blueprint and generates the complete project. It
 
 **What code generation produces (80-95% depending on business rules in spec):**
 
-| Generated component | Source (YAML section) |
+| Generated component | Source (blueprint section) |
 |---|---|
 | ADK agent class hierarchy | `agents:` |
 | MCP server connections | `tools.mcp_servers:` |
@@ -446,6 +527,78 @@ The coding agent reads the YAML blueprint and generates the complete project. It
 | Arize Phoenix tracing config | `evalops:` |
 | Golden dataset (starter from acceptance criteria) | `golden_dataset:` |
 | 3-phase Harness evaluation pipeline | `evalops:` |
+
+#### IaC generation — how the Terraform overlay skill uses GitHub URLs
+
+The Terraform generation flow is the most infrastructure-critical step in the pipeline. The coding agent **never writes raw Terraform resources** (`google_cloud_run_v2_service`, `aws_rds_instance`, etc.) — it always references **company modules** from the GitHub URLs in `app-blueprint.md` §8. This ensures every resource is tagged, compliant, DR-aware, and version-pinned.
+
+**Two types of GitHub URLs in §8:**
+
+| Type | Example | Purpose |
+|---|---|---|
+| **Pattern repo** | `github.com/company/tf-agentic-pilot-cold` | Complete IaC scaffold for an entire architectural pattern + DR strategy combination. Wires together multiple service modules. |
+| **Service module** | `github.com/company/tf-cloud-sql` | Individual Terraform module for one cloud service. Enforces company standards (naming, tagging, encryption, HA). |
+
+The pattern repo is selected by the Blueprint Advisor based on two fields: the archetype (agentic, microservice, pipeline, API) and the DR strategy from plan.md (backup-restore, pilot-cold, pilot-ondemand, warm-standby). The service modules are selected based on the tech stack in §12.
+
+**Step-by-step generation flow:**
+
+1. **Read §8** — The IaC overlay skill (`company-terraform` SKILL.md) reads the Infrastructure Modules table from `app-blueprint.md` and builds a dependency graph: which pattern repo to scaffold from, and which service modules to compose.
+
+2. **Read module interfaces via GitHub MCP Server** — For each GitHub URL, the coding agent calls the GitHub MCP Server (`read_file` tool) to read three files: `variables.tf` (what parameters the module needs), `outputs.tf` (what it exports for wiring), and `examples/{archetype}/terraform.tfvars` (reference values for this use case type). The coding agent does NOT clone repos — it reads files through MCP, respecting the developer's GitHub authentication and access controls.
+
+3. **Map blueprint fields to module variables** — The skill contains a deterministic mapping table (no LLM guessing) that maps blueprint sections to Terraform variables:
+
+   | Blueprint source | Terraform variable | Example value |
+   |---|---|---|
+   | §1 Metadata: `solution_id` | `project_name` | `fnol-claims-agent` |
+   | §1 Metadata: `region_primary` | `primary_region` | `us-east1` |
+   | §1 Metadata: `region_dr` | `dr_region` | `us-west1` |
+   | §1 Metadata: `dr_strategy` | Pattern repo selection | `pilot-cold` → `tf-agentic-pilot-cold` |
+   | §3 Agent Topology: agent names | `services{}` map | One Cloud Run service per agent with CPU/memory |
+   | §5 Tool Bindings: MCP endpoints | `mcp_server_endpoints{}` | Connection strings per tool |
+   | §7 MCP Server Configs: auth methods | `auth_configs{}` | mTLS / OAuth / API Key per server |
+   | §10 NFRs: availability target | HA configuration | 99.95% → `ha_enabled = true` |
+   | §10 NFRs: RPO | Cross-region replica | RPO < 1 hour → `replica_region = var.dr_region` |
+   | §12 Tech Stack: data layer | Service module selection | Cloud SQL → `tf-cloud-sql` |
+
+4. **Generate the Terraform project** — The skill generates a complete directory structure:
+
+   ```
+   terraform/
+   ├── main.tf             ← Root module: composes pattern repo + service modules
+   ├── variables.tf        ← All variables with descriptions
+   ├── terraform.tfvars    ← Pre-filled values from blueprint
+   ├── outputs.tf          ← Exported values for CI/CD pipeline
+   ├── versions.tf         ← Provider versions (pinned from module repos)
+   ├── backend.tf          ← GCS/S3 backend for state
+   ├── environments/
+   │   ├── dev.tfvars
+   │   ├── staging.tfvars
+   │   └── prod.tfvars     ← Multi-region values for production
+   └── dr/
+       ├── failover.tf     ← Failover triggers and health checks
+       ├── failback.tf     ← Failback procedure resources
+       └── lifecycle.tf    ← All 4 lifecycle scenarios from blueprint §13
+   ```
+
+5. **Wire modules together** — The root `main.tf` references each company module via its GitHub URL with a pinned version (`?ref=v2.3.0`), passes in variables resolved from the blueprint, and wires module outputs to inputs (e.g., Cloud SQL connection string → agent environment variable). Example:
+
+   ```hcl
+   module "claims_db" {
+     source  = "github.com/company/tf-cloud-sql?ref=v3.1.0"
+     instance_name  = "${var.project_name}-claims-db"
+     region         = var.primary_region
+     ha_enabled     = true              # From §10 NFRs: 99.95% availability
+     replica_region = var.dr_region     # From §10 NFRs: RPO < 1 hour
+   }
+   ```
+
+**Critical skill rule:** The `company-terraform` SKILL.md contains: *"NEVER use raw `google_*` or `aws_*` Terraform resources. ALWAYS reference a company module from app-blueprint.md §8. If no module exists for a required service, add `# TODO: Request tf-{service} module from platform team` and skip the resource."* This ensures the coding agent cannot generate non-compliant infrastructure even if it "knows" the raw Terraform syntax.
+
+**GitHub MCP Server role in the flow:** The architecture diagram shows a dashed arrow from Step 4 (code generation) to the GitHub MCP Server. This represents the coding agent reading module repos during generation — it's the only step where the coding agent accesses GitHub directly. The Blueprint Advisor accessed GitHub earlier (Step 2) to discover which repos exist; the coding agent accesses the same repos (Step 4) to read the actual module interfaces and generate compliant Terraform.
+
+**OPA policy validation (Plan Gate):** The generated Terraform is validated by OPA policies at the Plan Gate before the CI/CD pipeline provisions infrastructure (see Layer 4). OPA checks include: no public IPs, CMEK encryption on all data stores, VPC-SC perimeter membership, DR strategy matches plan.md, and all modules are from approved company repos. If OPA validation fails, the developer must fix the Terraform before the pipeline proceeds.
 
 **What the developer implements (5-20%):**
 
@@ -507,6 +660,97 @@ All runtime services are GA with SLA backing:
 
 ---
 
+## app-blueprint.md — Template and Delivery
+
+→ *Developer Guide §5 contains the full FNOL reference example with all 18 sections populated.*
+
+### Why markdown over YAML
+
+The previous `app-blueprint.yaml` was a machine-readable data file. The new `app-blueprint.md` is a **structured markdown document** that serves three roles simultaneously: (1) human-readable review artifact that renders natively in GitHub and VSCode with inline diagrams, (2) single input to Governance Guardian (`/catalyst.assess` extracts all 7 artifact types from one file), and (3) machine-readable input to code generation (`/catalyst.generate` parses sections deterministically).
+
+### Workspace file layout
+
+When `blueprint_result` delivers the blueprint, the coding agent writes:
+
+```
+features/fnol-claims-agent/
+├── app-blueprint.md                    ← The blueprint (structured markdown, 18 sections)
+├── fnol-component-diagram.png          ← Component diagram (rendered PNG, inline in markdown)
+├── fnol-component-diagram.drawio.xml   ← Component diagram (editable in draw.io)
+├── fnol-hadr-diagram.png               ← HA/DR lifecycle diagram (rendered PNG, inline in markdown)
+├── fnol-hadr-diagram.drawio.xml        ← HA/DR diagram (editable in draw.io)
+├── spec.md                             ← (already in workspace)
+└── plan.md                             ← (already in workspace)
+```
+
+The `.md` file references PNGs with relative paths (`![Component Diagram](fnol-component-diagram.png)`) so they render inline in VSCode markdown preview and GitHub. The `.drawio.xml` files allow the SA to edit diagrams in draw.io — updated diagrams are picked up automatically on the next `/catalyst.assess` run.
+
+### How `blueprint_result` delivers binary files
+
+The MCP tool returns a JSON response with three fields:
+
+```json
+{
+  "markdown": "<full content of app-blueprint.md>",
+  "diagrams": [
+    { "filename": "fnol-component-diagram.png", "format": "png", "content_base64": "..." },
+    { "filename": "fnol-component-diagram.drawio.xml", "format": "drawio", "content_base64": "..." },
+    { "filename": "fnol-hadr-diagram.png", "format": "png", "content_base64": "..." },
+    { "filename": "fnol-hadr-diagram.drawio.xml", "format": "drawio", "content_base64": "..." }
+  ],
+  "spec_hash": "sha256:...", "plan_hash": "sha256:...", "blueprint_hash": "sha256:..."
+}
+```
+
+The `/catalyst.blueprint` prompt file instructs the coding agent to write `app-blueprint.md` from the `markdown` field, and base64-decode each `diagrams` entry to the same directory.
+
+> The `blueprint_result` MCP call is authenticated via OAuth 2.1 (see Layer 2 Security above) — the blueprint content is protected by Entra ID authentication and TLS 1.3 transport encryption.
+
+### Diagram generation (inside the pipeline)
+
+- **Component diagram (PNG + drawio):** Stage 4 (`assemble_blueprint`) assembles a graphviz DOT description from the agent topology, MCP connections, A2A boundaries, and infrastructure components. Renders to PNG via graphviz. Converts to drawio XML via DOT-to-drawio transform.
+- **HA/DR diagram (PNG + drawio):** Stage 4 reads the DR strategy from plan.md and generates lifecycle views (Initial Provisioning → Component Failure / HA → DR Failover → DR Failback). Rendered to PNG and drawio.
+- **Sequence diagrams (mermaid):** Generated as mermaid `sequenceDiagram` code and embedded inline in the markdown (§14). No separate file — mermaid renders natively in GitHub and VSCode.
+
+### The 18 sections
+
+| # | Section | Format | Consumers |
+|---|---|---|---|
+| 1 | Metadata | Key-value table | All |
+| 2 | Pattern Composition | Table + validation notes | Code gen, Governance |
+| 3 | Agent Topology | Table | Code gen, Governance |
+| 4 | Component Diagrams | Inline PNG + drawio ref | SA review, Governance |
+| 5 | Tool Bindings | Table | Code gen, Governance |
+| 6 | Skill References | Table | Code gen |
+| 7 | MCP Server Configs | Table | Code gen |
+| 8 | Infrastructure Modules | Table | Code gen, Governance |
+| 9 | Business Rules | Structured IF/THEN per FunctionTool | Code gen |
+| 10 | NFRs | Table | Governance |
+| 11 | Architecture Decisions Log | Table | Governance |
+| 12 | Tech Stack | Table | Governance |
+| 13 | HA/DR Views | Inline PNG + drawio ref + lifecycle table | SA review, Governance |
+| 14 | Sequence Diagrams | Inline mermaid code | SA review, Governance |
+| 15 | Evaluation Config | Table | Code gen |
+| 16 | Screening Config | Table | Code gen |
+| 17 | Pipeline Configs | Table | Code gen |
+| 18 | Confidence Scores | Table | SA review |
+
+### Governance Guardian extraction (simplified)
+
+Because all artifacts are assembled in `app-blueprint.md`, the `/catalyst.assess` prompt file reads one file instead of searching the workspace:
+
+| Artifact | Extracted from |
+|---|---|
+| TSA component diagram | §4 PNG reference |
+| HA/DR views | §13 PNG reference + lifecycle table |
+| Sequence diagrams | §14 inline mermaid |
+| NFRs | §10 table |
+| Architecture Decisions Log | §11 table |
+| Tech stack | §12 table |
+| Patterns used | §2 table |
+
+---
+
 ## Governance Model
 
 ### Who owns what
@@ -523,7 +767,7 @@ All runtime services are GA with SLA backing:
 
 ### How to request changes
 
-To request new patterns, skills, or tools: submit a PR to the AgentCatalyst catalog repo. The platform team reviews weekly. To report Blueprint Advisor quality issues: file a ticket with the spec.md and the generated YAML. To report Governance Guardian assessment issues: file a ticket with the solution_package JSON and the findings — the EA office reviews assessment logic. See the Operations Runbook for telemetry-driven quality improvement procedures and the Governance Guardian Architecture Extension for assessment procedures.
+To request new patterns, skills, or tools: submit a PR to the AgentCatalyst catalog repo. The platform team reviews weekly. To report Blueprint Advisor quality issues: file a ticket with the spec.md and the generated blueprint. To report Governance Guardian assessment issues: file a ticket with the solution_package JSON and the findings — the EA office reviews assessment logic. See the Operations Runbook for telemetry-driven quality improvement procedures and the Governance Guardian Architecture Extension for assessment procedures.
 
 ---
 
@@ -542,7 +786,7 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 | # | Check | Status |
 |---|---|---|
 | 1 | All overlay skills pinned to specific versions | ⬜ |
-| 2 | Blueprint Advisor MCP Server deployed with OAuth 2.0 | ⬜ |
+| 2 | Blueprint Advisor MCP Server deployed with OAuth 2.1 | ⬜ |
 | 3 | Vertex AI Search data stores populated and search quality validated (≥80% precision) | ⬜ |
 | 4 | Company system prompt reviewed by EA + Security | ⬜ |
 | 5 | Constitution.md reviewed and approved | ⬜ |
@@ -551,7 +795,7 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 | 8 | Golden dataset baseline established | ⬜ |
 | 9 | FNOL reference implementation passing all evaluation gates | ⬜ |
 | 10 | 3 additional use cases validated beyond FNOL | ⬜ |
-| 11 | Governance Guardian MCP Server deployed with OAuth 2.0 | ⬜ |
+| 11 | Governance Guardian MCP Server deployed with OAuth 2.1 | ⬜ |
 | 12 | EA assessment engine connected and returning valid findings for FNOL reference case | ⬜ |
 | 13 | Tech Debt Registry table created and accessible | ⬜ |
 | 14 | `/catalyst.assess` → `/catalyst.generate` flow tested end-to-end (including showstopper block + tech debt resume) | ⬜ |
@@ -564,7 +808,7 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| 1 | Blueprint Advisor recommends wrong pattern | Medium | Medium | Confidence scores visible in YAML. Developer reviews. `validate_composition` catches invalid nesting. Acceptance telemetry tracks accuracy. |
+| 1 | Blueprint Advisor recommends wrong pattern | Medium | Medium | Confidence scores visible in blueprint. Developer reviews. `validate_composition` catches invalid nesting. Acceptance telemetry tracks accuracy. |
 | 2 | Coding agent ignores constitution.md | Low | High | Test with each supported coding agent. Constitution rules are absolute — skills cannot override. |
 | 3 | Stale catalogs produce outdated recommendations | Medium | Medium | Weekly catalog health checks. Embedding freshness pipeline. Search quality regression suite. See Operations Runbook. |
 | 4 | Business rules too complex for IF/THEN format | Medium | Low | Spec template coaching prompts help developers decompose complex rules. Proprietary algorithms handled as manual P1 tasks (5-20%). |
@@ -603,7 +847,7 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 │   ├── catalyst.blueprint.md               ← Custom command: sends spec+plan to Blueprint Advisor
 │   ├── catalyst.assess.md                  ← Custom command: sends solution artifacts to Governance Guardian
 │   └── catalyst.generate.md                ← Custom command: generates code (with governance gate)
-│   └── catalyst.generate.md                ← Custom command: reads YAML, triggers skill-guided generation
+│   └── catalyst.generate.md                ← Custom command: reads blueprint, triggers skill-guided generation (with governance gate)
 ├── memory/
 │   ├── adk-reference.md                    ← ADK framework patterns, imports, constructors
 │   ├── company-patterns.md                 ← Company coding standards, naming, error handling
@@ -880,7 +1124,7 @@ usage: Run /tasks after receiving blueprint to see the breakdown
 
 ## Generated by coding agent (developer reviews)
 
-| Component | Source (YAML section) | Status |
+| Component | Source (blueprint section) | Status |
 |---|---|---|
 | ADK agent class hierarchy | agents: | ⬜ Generated |
 | MCP server connections | tools.mcp_servers: | ⬜ Generated |
@@ -923,7 +1167,7 @@ Read `spec.md` and `plan.md` from the current workspace.
 
 Connect to the Blueprint Advisor MCP Server:
   endpoint: mcp://blueprint-advisor.[company-domain].run.app
-  auth: OAuth 2.0 (company SSO)
+  auth: OAuth 2.1 (company SSO)
 
 Call the `submit_spec_and_plan` MCP tool with:
   - spec: contents of spec.md
@@ -933,7 +1177,7 @@ Call the `submit_spec_and_plan` MCP tool with:
 The MCP server internally runs the Blueprint Advisor LlmAgent:
   1. Queries Vertex AI Search catalogs (patterns, skills, tools)
   2. Applies LLM reasoning guided by company system prompt
-  3. Assembles the blueprint YAML
+  3. Assembles the blueprint markdown
   4. Returns the result via MCP protocol
 
 The coding agent CANNOT access Vertex AI Search directly.
@@ -946,7 +1190,7 @@ Connect to the Blueprint Advisor MCP Server:
 Call the `submit_spec_and_plan` MCP tool with the spec and plan contents.
 The MCP server handles all internal processing (RAG search, LLM reasoning, blueprint assembly) and returns the result.
 
-Save the response as `app-blueprint.yaml` in the workspace root.
+Save the response as `app-blueprint.md` in the workspace root.
 
 Display a summary showing:
 - Number and types of agents recommended
@@ -964,13 +1208,13 @@ Remind the developer: "Review the YAML and edit any field before running /cataly
 ```markdown
 ---
 name: catalyst.generate
-description: Read the YAML blueprint and generate the complete project using skills
+description: Read the markdown blueprint and generate the complete project using skills
 usage: /catalyst.generate
 ---
 
 # /catalyst.generate
 
-Read `app-blueprint.yaml` from the workspace root.
+Read `app-blueprint.md` from the workspace root.
 
 Validate the YAML schema:
 - All required fields present (archetype, agents[], tools, infrastructure)
@@ -1155,7 +1399,7 @@ THEN claim_rejected = true AND reason = "no active policy" AND redirect_to_sales
 
 ---
 
-### A.10 FNOL Example: Generated app-blueprint.yaml
+### A.10 FNOL Example: Generated app-blueprint.md
 
 ```yaml
 # Generated by Blueprint Advisor
@@ -1614,7 +1858,7 @@ usage: Run /tasks after receiving blueprint
 
 ## Generated by coding agent (developer reviews)
 
-| Component | Source (YAML section) | Status |
+| Component | Source (blueprint section) | Status |
 |---|---|---|
 | Controller / route handlers | backend.endpoints: | ⬜ Generated |
 | Service layer (business logic first draft) | backend.endpoints: + business_rules: | ⬜ Generated — REVIEW REQUIRED |
@@ -1743,7 +1987,7 @@ THEN return 503 Service Unavailable with {"status": "DOWN", "database": "unreach
 
 ---
 
-### B.7 Hello World Brownfield Example: Generated app-blueprint.yaml
+### B.7 Hello World Brownfield Example: Generated app-blueprint.md
 
 ```yaml
 # Generated by Blueprint Advisor

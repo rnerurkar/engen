@@ -3,6 +3,15 @@
 *Extends: AgentCatalyst Brownfield Architecture Document (csa-tsa-speckit-architecture.md)*
 *New commands: `/catalyst.assess` and governance gate in `/catalyst.generate`*
 
+### Related Documents
+
+| Document | Filename | Consult for |
+|---|---|---|
+| Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Layer 2 async MCP Tasks pattern (same pattern used here), Layer 2 Security (OAuth 2.1 + Entra ID authentication — shared by both MCP Servers), Layer 3 IaC generation flow, Task Store tenant isolation |
+| Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | §2.7a `/catalyst.assess` (developer-facing experience), §2.8 governance gate in `/catalyst.generate`, troubleshooting |
+| Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | §10 Governance Guardian Operations (health checks, deployment, Cloud Tasks queue, AlloyDB maintenance, EA assessment engine SLA), §10a wire format, authentication troubleshooting |
+| app-blueprint.md Template | `app-blueprint-md-template-and-fnol-example.md` | Template structure (18 sections), FNOL example, how `/catalyst.assess` extracts artifacts from each section |
+
 ---
 
 ## 1. Overview
@@ -14,7 +23,7 @@ The Governance Guardian is a **black box** to the AgentCatalyst platform — the
 ### Where it fits in the workflow
 
 ```
-/catalyst.blueprint  →  app-blueprint.yaml (from Blueprint Advisor)
+/catalyst.blueprint  →  app-blueprint.md (from Blueprint Advisor)
                               ↓
                      SA reviews + edits YAML
                               ↓
@@ -79,67 +88,39 @@ The `/catalyst.assess` command extracts the following artifacts from the workspa
   "timestamp": "2026-05-19T14:30:00Z",
 
   "tsa_component_diagram": {
-    "format": "drawio_xml",
-    "content": "<extracted from .drawio.xml — TSA component diagram node>"
+    "format": "png",
+    "content": "<read from PNG referenced in app-blueprint.md §4>"
   },
 
   "ha_dr_views": {
-    "format": "drawio_xml",
-    "content": "<extracted from .drawio.xml — HA/DR view nodes>"
+    "format": "png_and_table",
+    "content": "<read from PNG referenced in app-blueprint.md §13>",
+    "lifecycle_table": "<parsed from app-blueprint.md §13 lifecycle table>"
   },
 
   "sequence_diagrams": {
     "format": "mermaid",
-    "content": ["<mermaid sequence diagram 1>", "<mermaid sequence diagram 2>"]
+    "content": ["<extracted from app-blueprint.md §14 inline mermaid blocks>"]
   },
 
   "nfrs": {
     "format": "structured",
-    "content": {
-      "availability": "99.95%",
-      "rto": "4 hours",
-      "rpo": "1 hour",
-      "peak_tps": 500,
-      "p95_latency_ms": 200,
-      "data_classification": "Confidential PII",
-      "compliance_regimes": ["SOC2", "PCI-DSS"],
-      "additional": ["<extracted from NFR node in workspace>"]
-    }
+    "content": "<parsed from app-blueprint.md §10 table>"
   },
 
   "architecture_decisions_log": {
     "format": "structured",
-    "content": [
-      {
-        "adl_id": "ADL-001",
-        "title": "Use ECS Fargate over EKS for BFF",
-        "status": "accepted",
-        "rationale": "Simpler ops model, no cluster management",
-        "consequences": "Limited to 4 vCPU per task"
-      }
-    ]
+    "content": "<parsed from app-blueprint.md §11 table>"
   },
 
   "tech_stack": {
     "format": "structured",
-    "content": {
-      "frontend": ["Angular 17", "CloudFront", "S3"],
-      "backend": ["Spring Boot 3.2", "ECS Fargate", "ALB"],
-      "data": ["Aurora PostgreSQL", "ElastiCache Redis"],
-      "integration": ["Apigee", "SQS", "EventBridge"],
-      "security": ["Cognito", "WAF", "KMS"],
-      "observability": ["CloudWatch", "X-Ray", "Splunk"],
-      "cicd": ["Jenkins", "Harness", "Terraform"]
-    }
+    "content": "<parsed from app-blueprint.md §12 table>"
   },
 
   "patterns_used": {
     "format": "structured",
-    "content": [
-      { "pattern_id": "PAT-042", "name": "BFF-SPA", "source": "pattern_catalog" },
-      { "pattern_id": "PAT-018", "name": "Strangler-Fig Migration", "source": "pattern_catalog" },
-      { "pattern_id": "PAT-091", "name": "Cross-Cloud API Gateway", "source": "pattern_catalog" }
-    ]
+    "content": "<parsed from app-blueprint.md §2 table>"
   },
 
   "app_blueprint_yaml_hash": "sha256:abc123...",
@@ -150,19 +131,21 @@ The `/catalyst.assess` command extracts the following artifacts from the workspa
 
 ### Extraction rules
 
-The `/catalyst.assess` prompt file instructs the coding agent to extract each artifact:
+The `/catalyst.assess` prompt file instructs the coding agent to read `app-blueprint.md` and extract each artifact by section header:
 
-| Artifact | Source in workspace | Extraction method |
-|---|---|---|
-| TSA component diagram | `*.drawio.xml` or `*.drawio` | Parse XML, find the node/tab labeled "TSA" or "Target State" or "Component" |
-| HA/DR views | `*.drawio.xml` or `*.drawio` | Parse XML, find nodes/tabs labeled "HA", "DR", "High Availability", "Disaster Recovery" |
-| Sequence diagrams | `*.mmd` files or mermaid blocks in `*.md` | Extract all `sequenceDiagram` blocks |
-| NFRs | `nfr.md` or NFR section in `spec.md` or `plan.md` | Parse structured NFR fields |
-| Architecture Decisions Log | `adl.md` or `adr/` directory | Parse ADL/ADR entries |
-| Tech stack | `app-blueprint.yaml` + `terraform/` | Extract from YAML `tech_stack` section + TF provider/module declarations |
-| Patterns used | `app-blueprint.yaml` | Extract from YAML `patterns[]` section |
+| Artifact | Extracted from section in app-blueprint.md |
+|---|---|
+| TSA component diagram | §4 — reads the PNG file referenced in `![...](filename.png)` |
+| HA/DR views | §13 — reads the PNG file referenced in `![...](filename.png)` + parses lifecycle table |
+| Sequence diagrams | §14 — extracts inline mermaid code blocks |
+| NFRs | §10 — parses the structured table |
+| Architecture Decisions Log | §11 — parses the structured table |
+| Tech stack | §12 — parses the structured table |
+| Patterns used | §2 — parses the structured table |
 
-If an artifact is missing, the coding agent includes `"content": null` with `"missing_reason": "No .drawio.xml found in workspace"` — the Governance Guardian handles missing artifacts in its assessment (likely flagging them as findings).
+Because everything is assembled in one markdown file (or referenced from it via relative paths), the coding agent no longer needs to hunt for separate drawio files, NFR documents, or ADL directories across the workspace.
+
+If a section is missing (e.g., the SA deleted §11), the coding agent includes the artifact as `null` with `"missing_reason": "Section 11 (Architecture Decisions Log) not found in app-blueprint.md"` — the Governance Guardian will flag missing sections as findings.
 
 ---
 
@@ -245,16 +228,16 @@ tools: ['assess_start', 'assess_status', 'assess_result', 'getAssessmentHistory'
 
 You are a governance assessment assistant. When the developer runs /catalyst.assess:
 
-Step 1: Extract solution artifacts from the workspace:
-        - TSA component diagram from *.drawio.xml (find the "TSA" or "Target State" node)
-        - HA/DR views from *.drawio.xml (find "HA", "DR" nodes)
-        - Sequence diagrams from *.mmd files or mermaid blocks in *.md files
-        - NFRs from nfr.md or the NFR section in spec.md/plan.md
-        - Architecture Decisions Log from adl.md or adr/ directory
-        - Tech stack from app-blueprint.yaml tech_stack section + terraform/ declarations
-        - Patterns used from app-blueprint.yaml patterns[] section
+Step 1: Read app-blueprint.md from the workspace and extract solution artifacts by section:
+        - §4: TSA component diagram (read the PNG file referenced in the ![...]() image link)
+        - §13: HA/DR views (read the PNG file + parse the lifecycle table)
+        - §14: Sequence diagrams (extract inline mermaid code blocks)
+        - §10: NFRs (parse the table)
+        - §11: Architecture Decisions Log (parse the table)
+        - §12: Tech stack (parse the table)
+        - §2: Patterns used (parse the table)
         
-        If any artifact is missing, include it as null with a missing_reason.
+        If any section is missing, include it as null with a missing_reason.
 
 Step 2: Package all artifacts as a JSON solution_package.
         Include the app_blueprint_yaml_hash, spec_hash, and plan_hash for traceability.
@@ -334,7 +317,7 @@ sequenceDiagram
     participant CA as Coding Agent
     participant GOV as Governance Guardian<br/>MCP Server
     participant EA as EA Assessment Engine<br/>(black box)
-    participant TS as Task Store<br/>(CloudSQL / AlloyDB)
+    participant TS as Task Store<br/>(AlloyDB)
     participant TD as Tech Debt Registry
 
     Note over SA,GOV: Phase A — /catalyst.assess (iterative)
@@ -420,14 +403,14 @@ sequenceDiagram
 ```
 SA: /catalyst.assess
 
-Agent: Extracting solution artifacts from workspace...
-       ✓ TSA component diagram (claims-portal-tsa.drawio.xml)
-       ✓ HA/DR views (2 views found)
-       ✓ Sequence diagrams (3 mermaid files)
-       ✓ NFRs (from plan.md)
-       ✓ Architecture Decisions Log (4 entries from adl.md)
-       ✓ Tech stack (from app-blueprint.yaml)
-       ✓ Patterns used (3 patterns)
+Agent: Extracting solution artifacts from app-blueprint.md...
+       ✓ Component diagram (fnol-component-diagram.png from §4)
+       ✓ HA/DR views (fnol-hadr-diagram.png from §13 + lifecycle table)
+       ✓ Sequence diagrams (2 mermaid blocks from §14)
+       ✓ NFRs (10 entries from §10)
+       ✓ Architecture Decisions Log (5 entries from §11)
+       ✓ Tech stack (from §12)
+       ✓ Patterns used (4 patterns from §2)
 
        Governance assessment started (task gov-456). Checking progress...
        Evaluating architecture compliance...
@@ -544,8 +527,8 @@ Agent: Checking governance gate...
 |---|---|---|
 | Governance Guardian MCP Server (API layer) | Cloud Run Service | Handles assess_start/status/result + recordTechDebt + getAssessmentHistory |
 | EA Assessment Engine | Black box (EA-operated) | Assessment logic, standards, scoring — NOT part of AgentCatalyst |
-| Task Store | CloudSQL / AlloyDB (shared with Blueprint Advisor, separate table `governance_tasks`) | Async task state for assess_start/status/result |
-| Tech Debt Registry | CloudSQL / AlloyDB (table `tech_debt`) | Persistent record of accepted tech debt per solution |
+| Task Store | AlloyDB (shared with Blueprint Advisor, separate table `governance_tasks`) | Async task state for assess_start/status/result |
+| Tech Debt Registry | AlloyDB (table `tech_debt`) | Persistent record of accepted tech debt per solution |
 | Cloud Tasks queue | `governance-assess` queue | Enqueues assessment jobs |
 
 ### Task Store schema (governance_tasks)
@@ -592,10 +575,10 @@ CREATE TABLE tech_debt (
 
 | Concern | Control |
 |---|---|
-| Authentication | OAuth 2.0 via developer SSO (same as Blueprint Advisor) |
+| Authentication | OAuth 2.1 via developer SSO (same as Blueprint Advisor) |
 | Transport | TLS 1.3 (Cloud Run default) |
 | Task Store isolation | `owner_id` + RLS (same pattern as Blueprint Advisor Task Store) |
-| Solution package content | Contains architecture diagrams and NFRs — classified as Confidential. Encrypted at rest in CloudSQL. 24-hour retention enforced by cleanup job. |
+| Solution package content | Contains architecture diagrams and NFRs — classified as Confidential. Encrypted at rest in AlloyDB. 24-hour retention enforced by cleanup job. |
 | Tech Debt Registry | Persistent (not subject to 24h cleanup). Access controlled by solution_id ownership. |
 | Assessment engine | Black box — AgentCatalyst transmits the solution_package over TLS to the EA assessment endpoint. No AgentCatalyst code runs inside the assessment engine. |
 
@@ -610,7 +593,7 @@ The addition of the Governance Guardian extends the brownfield workflow from 9 s
 | ⓪ | (CSA Agent) | Produce validated CSA diagram (upstream) |
 | ① | `/speckit.specify` | Extract integrations from diagram → spec.md |
 | ② | `/speckit.plan.draft` + `/speckit.plan.review` | Plan with async EA review |
-| ③ | `/catalyst.blueprint` | Async Blueprint Advisor → app-blueprint.yaml |
+| ③ | `/catalyst.blueprint` | Async Blueprint Advisor → app-blueprint.md |
 | ④ | (SA review) | SA reviews + edits the YAML |
 | ⑤ | **`/catalyst.assess`** | **NEW: Async Governance Guardian → findings + scorecard** |
 | ⑤a | (SA fix loop) | **NEW: SA fixes issues → re-runs /catalyst.assess** |
@@ -626,7 +609,7 @@ The addition of the Governance Guardian extends the brownfield workflow from 9 s
 |---|---|
 | Async MCP Tasks pattern | Architecture §9.3 (Blueprint Advisor async call sequence) — identical pattern |
 | Task Store tenant isolation | Architecture §9.3.3 (Task Store tenant isolation) — same RLS approach |
-| CloudSQL/AlloyDB choice | Architecture §9 (ADR-AF-001 for AgentForge; brownfield uses AlloyDB) |
+| AlloyDB Task Store | Architecture §9 (AlloyDB Task Store design; brownfield uses AlloyDB) |
 | Prompt-file orchestration | Architecture §9.3.1 (how the LLM drives the polling loop) |
 | Design Gate attestation | Architecture §11 (Design Contract lifecycle) — Governance Guardian runs AFTER Design Gate, BEFORE Plan Gate |
 | `/catalyst.generate` existing steps | Developer Guide §13 (18-step generation pipeline) — Step 0 (governance gate) is prepended |
