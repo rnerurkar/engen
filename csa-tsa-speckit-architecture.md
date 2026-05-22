@@ -13,6 +13,7 @@
 | **This document** | `csa-tsa-speckit-architecture.md` | Architects, tech leads | **WHY** — design decisions, internal designs, peripheral systems |
 | Developer Guide | `csa-tsa-speckit-developerguide.md` | Developers | **HOW** — step-by-step workflow, templates, worked examples |
 | Operating Playbook | `csa-tsa-speckit-operating-playbook.md` | Platform engineering, EA office | **PROCEDURES** — operate, maintain, govern, onboard |
+| Governance Guardian | `governance-guardian-architecture.md` | Architects, EA office | **GOVERNANCE** — `/catalyst.assess` design, EA assessment flow, `recordTechDebt` gate, tech debt registry |
 
 ### Related core AgentCatalyst documents
 
@@ -21,7 +22,7 @@ The brownfield document set extends (does not replace) the core AgentCatalyst pl
 | Core document | Filename | Consult for |
 |---|---|---|
 | Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Blueprint Advisor MCP wire format (Layer 2), MCP Tasks async protocol design, base overlay skill architecture (Layer 3), EvalOps three-layer lifecycle (Layer 4) |
-| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield agentic/microservice workflows (§2–§3), spec signal words (§4), YAML schema reference (§5), confidence scores (§8) |
+| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield agentic/microservice workflows (§2–§3), spec signal words (§4), app-blueprint.md schema (§5), confidence scores (§8) |
 | Core Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | Vertex AI Search wire-level API calls (§1), MCP tool wire format (§1a), search quality regression suite (§2), acceptance telemetry (§3), catalog backup/DR (§4a), shared MCP Server operations (§9) |
 
 ---
@@ -91,7 +92,8 @@ AgentCatalyst Brownfield (Spec Kit preset — this document)
 ├── overrides: /speckit.specify with diagram extraction (csa-extractor agent) + CSA-inventory template
 ├── overrides: /speckit.plan with /speckit.plan.draft + /speckit.plan.review
 ├── adds: /catalyst.blueprint (4-tool brownfield Blueprint Advisor)
-├── adds: /catalyst.generate (brownfield-aware, updated skills — see §14)
+├── adds: /catalyst.assess (Governance Guardian assessment — see Governance Guardian Architecture Extension)
+├── adds: /catalyst.generate (brownfield-aware, updated skills + governance gate — see §14)
 ├── adds: /catalyst.refresh (design-contract lifecycle refresh — see §11)
 └── reuses: Spec Kit CLI, helper scripts, constitution mechanism (versioned — see §13)
 ```
@@ -105,7 +107,8 @@ AgentCatalyst Brownfield (Spec Kit preset — this document)
 | `/speckit.plan.draft` | AgentCatalyst Brownfield custom | Developer's first-pass r-factor + cutover decisions |
 | `/speckit.plan.review` | AgentCatalyst Brownfield custom | Async EA/architect review with structured comments |
 | `/catalyst.blueprint` | AgentCatalyst custom | 4-tool brownfield Blueprint Advisor (§9) |
-| `/catalyst.generate` | AgentCatalyst custom, brownfield-updated | Skill-guided generation with migration-phase awareness (§14) |
+| `/catalyst.assess` | AgentCatalyst custom | Governance Guardian assessment — extracts artifacts from app-blueprint.md, returns scorecard + findings (see Governance Guardian Architecture Extension) |
+| `/catalyst.generate` | AgentCatalyst custom, brownfield-updated | Governance gate (recordTechDebt → stop/resume) + skill-guided generation with migration-phase awareness (§14) |
 | `/catalyst.refresh` | AgentCatalyst Brownfield custom | Re-runs Blueprint Advisor, diffs design contract (§11) |
 | `/speckit.clarify` | Spec Kit built-in | Reused unchanged |
 | `/speckit.analyze` | Spec Kit built-in | Reused unchanged |
@@ -155,9 +158,11 @@ The transformation problem — moving an existing on-prem application onto AWS �
 
 ## 5. High-Level Component Architecture
 
-![AgentCatalyst Brownfield — End-to-End Component Architecture](diagrams/agentcatalyst-brownfield-architecture.png)
+![AgentCatalyst Brownfield — End-to-End Component Architecture](agentcatalyst-brownfield-architecture.png)
 
-**Read this diagram top-down.** The CSA Agent (⓪, upstream, separate system) produces a validated CSA diagram and places it in the workspace. The coding agent's `csa-extractor` parses the diagram and pre-fills `spec.md` (①). The developer completes a two-stage plan (②), then invokes the Blueprint Advisor (③). Inside the MCP server, four tools run in a fixed order: ④ deterministic context-filtered substitution, ⑤ semantic pattern retrieval and LLM composition (the only LLM stage), ⑥ deterministic ADR compliance enforcement, and ⑦ deterministic blueprint assembly. The output (⑧) is a YAML blueprint plus a design contract with attestations and four Mermaid diagrams. The developer then generates brownfield-aware code (⑨), and can refresh the contract (🔄) at any time if peripherals have changed. Runtime compliance closes the loop between deployment and attestation. The peripheral systems band is maintained by Platform Engineering and consumed read-only at runtime.
+The diagram above shows the complete flow from CSA Agent through Blueprint Advisor (OAuth 2.1 + Entra ID), Governance Guardian (assess-fix-reassess loop), governance gate (recordTechDebt → stop/resume), to brownfield-aware code generation via GitHub MCP Server, Harness CI/CD, and runtime compliance.
+
+**Read this diagram top-down.** The CSA Agent (⓪, upstream, separate system) produces a validated CSA diagram and places it in the workspace. The coding agent's `csa-extractor` parses the diagram and pre-fills `spec.md` (①). The developer completes a two-stage plan (②), then invokes the Blueprint Advisor (③). Inside the MCP server, four tools run in a fixed order: ④ deterministic context-filtered substitution, ⑤ semantic pattern retrieval and LLM composition (the only LLM stage), ⑥ deterministic ADR compliance enforcement, and ⑦ deterministic blueprint assembly (markdown + PNG diagrams + drawio XML + mermaid). The output (⑧) is an `app-blueprint.md` plus a design contract with attestations and inline diagrams. The developer reviews (⑧), runs `/catalyst.assess` for governance assessment (⑧a — iterative until no showstoppers), then generates brownfield-aware code with a governance gate (⑨ — recordTechDebt → stop/resume), and can refresh the contract (🔄) at any time if peripherals have changed. The IaC generation reads company Terraform module repos via the GitHub MCP Server. Runtime compliance closes the loop between deployment and attestation. The peripheral systems band is maintained by Platform Engineering and consumed read-only at runtime.
 
 ---
 
@@ -197,19 +202,29 @@ With substitutions locked in, the LlmAgent inside the Blueprint Advisor uses hyb
 
 The composed pattern tree from ⑤ is checked against the ADR Constraint Store. Each ADR is a structured rule with a machine-readable predicate; the check is a query, not an LLM judgment. Output per integration: `pass` (with attested ADRs), `flag` (requires developer review), or `reject` (violated ADR, blocks pipeline). → *§9.4 details the predicate evaluation.*
 
-### ⑦ assemble_blueprint — Deterministic YAML and diagram generation
+### ⑦ assemble_blueprint — Deterministic blueprint and diagram generation
 
-The final tool takes the substitutions, composed patterns, compliance attestations, and matched IaC modules, and assembles `app-blueprint.yaml` plus `design_contract.json` with full provenance. It generates four Mermaid diagrams: component (end-state), sequence (end-state), sequence (transition), and infrastructure. When cross-cloud topology is selected, it injects a Phase-0 entry with an external-team coordination checklist. All assembly is deterministic — no LLM. → *§9.5 details the assembly logic and diagram generation.*
+The final tool takes the substitutions, composed patterns, compliance attestations, and matched IaC modules, and assembles `app-blueprint.md` (structured markdown with inline PNG references and mermaid code), base64-encoded component and HA/DR diagram PNGs, editable drawio XML files, and `design_contract.json` with full provenance. Component and HA/DR diagrams are rendered via graphviz. Sequence diagrams (end-state, transition) are inline mermaid. When cross-cloud topology is selected, it injects a Phase-0 entry with an external-team coordination checklist. All assembly is deterministic — no LLM. → *§9.5 details the assembly logic and diagram generation. See `app-blueprint-md-template-and-fnol-example.md` for the complete 18-section template structure and FNOL reference example.*
 
-### ⑧ Developer reviews `app-blueprint.yaml` + `design_contract.json`
+### ⑧ Developer reviews `app-blueprint.md` + `design_contract.json`
 
-The developer reviews the YAML and the design contract in VSCode. The Mermaid preview renders the four diagrams inline. Confidence scores, alternatives, and `requires_review` flags are visible per integration. The developer edits the YAML if needed and may re-invoke `/catalyst.blueprint` to regenerate after spec or plan edits. The design contract is emitted with `lifecycle: "LIVE"`. → *Developer Guide §13 covers the review checklist.*
+The developer reviews the blueprint and the design contract in VSCode. Mermaid diagrams render inline in VSCode markdown preview. Component diagrams are inline PNGs with editable drawio XML alongside. Confidence scores, alternatives, and `requires_review` flags are visible per integration. The developer edits the blueprint if needed and may re-invoke `/catalyst.blueprint` to regenerate after spec or plan edits. The design contract is emitted with `lifecycle: "LIVE"`. → *Developer Guide §13 covers the review checklist.*
 
-### ⑨ /catalyst.generate — Brownfield-aware skill-guided generation
+### ⑧a /catalyst.assess — Governance assessment (iterative)
+
+After reviewing the blueprint, the developer runs `/catalyst.assess`. The coding agent reads `app-blueprint.md` and extracts all 7 artifact types directly from it — the TSA component diagram PNG from §4, HA/DR views from §13, sequence diagrams from §14 (inline mermaid), NFRs from §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as a JSON solution_package, and sends to the **Governance Guardian MCP Server** via the same async MCP Tasks pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). The EA assessment engine evaluates the solution against enterprise standards (black box to AgentCatalyst). The developer sees progress in the Chat pane and receives a scorecard (7 categories) + findings (showstopper / high / medium / low).
+
+If showstoppers exist, the developer fixes them (e.g., adds cross-region DR for Aurora PostgreSQL per ADR-205) and re-runs `/catalyst.assess`. This assess-fix-reassess loop continues until no showstoppers remain. Non-showstopper findings are acceptable and will be recorded as tech debt at the next step.
+
+→ *Governance Guardian Architecture Extension covers the full assessment flow, solution package schema, scorecard format, and MCP tool definitions.*
+
+### ⑨ /catalyst.generate — Brownfield-aware skill-guided generation (with governance gate)
 
 → *§14 lists every skill updated and every greenfield asset modified for brownfield.*
 
-Skills now consume `migration_phases[]` and `coexistence_constraints[]` from the design contract. Generated code includes feature-flag scaffolding for strangler-fig and dual-publish patterns, Phase-0 cross-cloud plumbing checklists when PrivateLink+PSC is selected, and AWS Config rules derived from ADR attestations for runtime compliance verification.
+**Governance gate (Step 0):** Before the generation pipeline runs, the coding agent calls `recordTechDebt` on the Governance Guardian MCP Server. This tool looks up the latest assessment findings and classifies each as showstopper or tech_debt. If any showstoppers remain → `{ signal: "stop" }` — generation is blocked, the developer must fix and re-assess. If no showstoppers → `{ signal: "resume", tech_debt_id: "TD-2026-0142" }` — remaining findings are recorded as tech debt and generation proceeds. If no assessment exists, the developer is warned but can skip.
+
+**Generation (Steps 1–18):** Skills now consume `migration_phases[]` and `coexistence_constraints[]` from the design contract. Generated code includes feature-flag scaffolding for strangler-fig and dual-publish patterns, Phase-0 cross-cloud plumbing checklists when PrivateLink+PSC is selected, and AWS Config rules derived from ADR attestations for runtime compliance verification. The IaC generation skill reads company Terraform module interfaces from GitHub repos via the **GitHub MCP Server**, maps blueprint fields to module variables deterministically, and generates compliant Terraform that references company modules (never raw `aws_*` resources). → *See greenfield Architecture Document, Layer 3 for the full IaC generation flow via GitHub MCP Server.*
 
 ### 🔄 /catalyst.refresh — Keep the contract alive
 
@@ -281,11 +296,11 @@ A legacy multi-page application runs on vSphere (Java + JSP on Tomcat), with two
 
 ### 8.2 Current State Architecture
 
-![Reference Case — Current State Architecture (CSA)](diagrams/reference-case-csa.png)
+![Reference Case — Current State Architecture (CSA)](reference-case-csa.png)
 
 ### 8.3 Target State Architecture
 
-![Reference Case — Target State Architecture (TSA)](diagrams/reference-case-tsa.png)
+![Reference Case — Target State Architecture (TSA)](reference-case-tsa.png)
 
 ### 8.4 Transformation per integration
 
@@ -310,7 +325,7 @@ A legacy multi-page application runs on vSphere (Java + JSP on Tomcat), with two
 
 ### 9.1 Overview
 
-The Blueprint Advisor is an ADK-based agent exposed as an MCP Server, deployed on Cloud Run in the company's GCP project. It is OAuth 2.0 protected and does not persist the inbound spec or plan beyond the task boundary. Audit logs (caller, timestamp, integrations summary, output blueprint hash) are written to Splunk.
+The Blueprint Advisor is an ADK-based agent exposed as an MCP Server, deployed on Cloud Run in the company's GCP project. It is OAuth 2.1 protected and does not persist the inbound spec or plan beyond the task boundary. Audit logs (caller, timestamp, integrations summary, output blueprint hash) are written to Splunk.
 
 The MCP interface exposes **three async tools** using the MCP Tasks primitive (spec revision 2025-11-25). This is necessary because VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls, while the internal 4-stage pipeline (map → recommend → check → assemble) can take 1–30 minutes depending on integration count and pattern-catalog query volume.
 
@@ -318,7 +333,7 @@ The MCP interface exposes **three async tools** using the MCP Tasks primitive (s
 |---|---|---|
 | `blueprint_start` | Validates input, creates a background task, returns `taskId` | < 2 seconds |
 | `blueprint_status` | Returns current pipeline stage and progress message | < 1 second |
-| `blueprint_result` | Returns the completed YAML + design contract + diagrams | < 1 second |
+| `blueprint_result` | Returns JSON: `markdown` (app-blueprint.md), `diagrams` (base64 PNGs + drawio XMLs), `design_contract`, hashes | < 1 second |
 
 Internally, the background task runs the 4-stage pipeline described in §9.4–§9.7. The background work executes on **Cloud Run Jobs** (no request-timeout constraint), triggered by `blueprint_start` via Cloud Tasks. Task state (taskId, status, progress, result) is stored in AlloyDB with a 24-hour retention enforced by a scheduled Cloud Scheduler cleanup job (hourly: `DELETE FROM blueprint_tasks WHERE created_at < NOW() - INTERVAL '24 hours'`).
 
@@ -326,11 +341,11 @@ Rate limiting applies to `blueprint_start` (10 starts/hour per user, 200/hour pe
 
 ### 9.2 Component view
 
-![Blueprint Advisor — Internal Component Architecture](diagrams/blueprint-advisor-components.png)
+![Blueprint Advisor — Async Internal Architecture (MCP Tasks)](blueprint-advisor-components.png)
 
 ### 9.3 Call sequence (async MCP Tasks)
 
-→ *Standalone Mermaid file: [`diagrams/blueprint-advisor-sequence.mmd`](diagrams/blueprint-advisor-sequence.mmd)*
+→ *Standalone Mermaid file: [`blueprint-advisor-sequence.mmd`](blueprint-advisor-sequence.mmd)*
 
 ```mermaid
 sequenceDiagram
@@ -373,7 +388,7 @@ sequenceDiagram
     BG->>FS: status → "assembling"
     BG->>IAC: resolve_modules
     IAC-->>BG: module_refs[]
-    BG->>BG: generate YAML + contract + 4 Mermaid diagrams
+    BG->>BG: generate blueprint + contract + PNG diagrams + drawio + mermaid
     BG->>FS: store result, status → "completed"
 
     Note over Agent,MCP: Phase 3 — Retrieve (< 1s)
@@ -382,7 +397,7 @@ sequenceDiagram
     Agent->>MCP: blueprint_result(taskId)
     MCP->>FS: read result
     FS-->>MCP: { yaml, contract, diagrams }
-    MCP-->>Agent: app-blueprint.yaml + design_contract.json
+    MCP-->>Agent: app-blueprint.md + design_contract.json
 ```
 
 ### 9.3.1 Prompt-file orchestration
@@ -403,7 +418,7 @@ Step 3: If "working", report stage + message to user. Wait. Repeat Step 2.
         If "failed", report error with reason. Stop.
 
 Step 4: When "completed", call blueprint_result(taskId).
-        Write YAML and contract to workspace.
+        Write app-blueprint.md + base64-decode diagrams to workspace.
 ```
 
 Each tool call completes in under 2 seconds. The LLM naturally handles the polling loop. The user sees progress in the Chat pane ("Stage ⑤: pattern retrieval for INT-003...").
@@ -529,7 +544,7 @@ Output per integration: `pass` (with `attested_adrs[]`), `flag` (with `requires_
 
 **Inputs:** all prior outputs plus IaC Module Registry query.
 
-**Logic:** Deterministically construct `app-blueprint.yaml` with one block per integration containing the target pattern, tech substitution, IaC module references, and attested ADRs. Generate four diagrams:
+**Logic:** Deterministically construct `app-blueprint.md` with one block per integration containing the target pattern, tech substitution, IaC module references, and attested ADRs. Generate four diagrams:
 
 | Diagram | What it shows | Generated from |
 |---|---|---|
@@ -738,7 +753,7 @@ The EA office authors and maintains rules through a browser-based **Rule Authori
 
 → *Operating Playbook §5 covers the authoring UI, quarterly review, and dimension-ceiling governance.*
 
-A context-filtered decision table backing `map_current_to_target`. Implemented as a Postgres table in Cloud SQL `tech-substitution-prod` with 12 bounded context columns plus a priority field.
+A context-filtered decision table backing `map_current_to_target`. Implemented as a Postgres table in AlloyDB `tech-substitution-prod` with 12 bounded context columns plus a priority field.
 
 **Representative entries:**
 
@@ -887,7 +902,7 @@ The following greenfield assets require modification for brownfield. This is an 
 | `ecs-fargate-task` | Reads `migration_phases[]` to generate feature-flag config for strangler-fig routing |
 | `sqs-producer` | Reads `coexistence_constraints[]` to generate dual-publish scaffolding with config-flag toggle |
 | `apigee-client` | Reads `migration_phases[phase:0]` to generate PrivateLink+PSC verification tests |
-| `company-terraform` | Reads `iac_modules[]` with version pinning from design contract |
+| `company-terraform` | Reads `iac_modules[]` with version pinning from design contract. Accesses company Terraform module repos via **GitHub MCP Server** — reads `variables.tf` and `outputs.tf` to understand module interfaces, maps blueprint fields to variables deterministically, generates compliant Terraform referencing company modules (never raw `aws_*` resources). Pattern repos (e.g., `tf-microservice-pilot-cold`) provide the scaffold; service modules (e.g., `tf-aurora-postgresql`) provide building blocks. See greenfield Architecture Document, Layer 3 for the full 5-step IaC generation flow. |
 | `company-cicd` | Harness pipeline template extended with `/catalyst.refresh` gate before deploy |
 | `company-observability` | OTel Collector config extended with transition-phase metric labels |
 | `company-security` | Generates AWS Config rules from `adr_attestations[]` for runtime compliance (§12) |
@@ -955,6 +970,28 @@ When `recommend_architecture` selects PAT-XCLOUD-001, `assemble_blueprint` autom
 
 ---
 
+## 15a. Production Readiness Checklist
+
+| # | Item | Status |
+|---|---|---|
+| 1 | CSA Agent producing validated diagrams for at least 2 reference cases | ⬜ |
+| 2 | Blueprint Advisor MCP Server deployed on Cloud Run with OAuth 2.1 + Entra ID | ⬜ |
+| 3 | AlloyDB Task Store provisioned with RLS policies | ⬜ |
+| 4 | All 5 peripheral systems connected (ADR Store, Tech Substitution Table, Pattern Catalog, Tool Registry, IaC Module Registry) | ⬜ |
+| 5 | Governance Guardian MCP Server deployed with OAuth 2.1 (same Entra ID app registration) | ⬜ |
+| 6 | EA assessment engine connected and returning valid findings for reference case | ⬜ |
+| 7 | Tech Debt Registry table created in AlloyDB | ⬜ |
+| 8 | `/catalyst.assess` → `/catalyst.generate` flow tested end-to-end (showstopper block + tech debt resume) | ⬜ |
+| 9 | Reference case (vSphere MPA → AWS SPA) generating compliant IaC via GitHub MCP Server | ⬜ |
+| 10 | Cross-cloud egress pattern (PrivateLink + PSC) tested with Phase-0 checklist | ⬜ |
+| 11 | Runtime compliance (AWS Config rules from ADR attestations) verified | ⬜ |
+| 12 | `/catalyst.refresh` lifecycle tested (LIVE → STALE → refresh → LIVE) | ⬜ |
+| 13 | Harness CI/CD pipeline generating and deploying successfully | ⬜ |
+| 14 | Developer documentation (dev guide) published | ⬜ |
+| 15 | Operations playbook published | ⬜ |
+
+---
+
 ## 16. Framework Dependency Risk
 
 → *Operating Playbook §2.3 covers Spec Kit version pinning and upgrade governance.*
@@ -984,7 +1021,46 @@ Every MCP call emits structured logs to Splunk with: caller identity, spec hash,
 
 ### 17.2 Security
 
-OAuth 2.0 enforced at the MCP server boundary. Specs and plans are not persisted past the call. All peripheral stores are read-only from the Blueprint Advisor's perspective. Service-account-to-service-account auth uses Workload Identity Federation between Cloud Run and the data stores. All data stores are inside the GCP VPC-SC perimeter; the only egress is the MCP response.
+**Authentication — OAuth 2.1 with Entra ID:**
+
+Both the Blueprint Advisor and Governance Guardian MCP Servers require OAuth 2.1 authentication via Microsoft Entra ID. The coding agent authenticates the developer once (browser-based SSO + MFA), caches tokens in the OS keychain, and attaches the access token to every MCP tool call. Both MCP Servers share the same `agentcatalyst.mcp` audience scope — one authentication for both servers. Tokens last 1 hour with automatic silent refresh.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Dev as Developer (VSCode)
+    participant CA as Coding Agent
+    participant Entra as Microsoft Entra ID
+    participant BA as Blueprint Advisor MCP Server
+    participant GG as Governance Guardian MCP Server
+
+    Note over Dev,Entra: First-time authentication (one-time browser flow)
+    Dev->>CA: /catalyst.blueprint
+    CA->>CA: Check token cache — empty
+    CA->>Dev: Opens browser for company SSO
+    Dev->>Entra: Login + MFA (PKCE S256)
+    Entra->>CA: Authorization code
+    CA->>Entra: Exchange code for tokens
+    Entra-->>CA: access_token (JWT, 1hr) + refresh_token
+    CA->>CA: Cache in OS keychain
+
+    Note over CA,BA: Authenticated MCP calls (Blueprint Advisor)
+    CA->>BA: blueprint_start(spec, plan) + Bearer token
+    BA->>BA: Validate JWT (Entra JWKS)
+    BA-->>CA: { taskId }
+
+    Note over CA,GG: Same token (Governance Guardian)
+    CA->>GG: assess_start(solution_package) + Bearer token
+    GG->>GG: Validate same JWT
+    GG-->>CA: { taskId }
+
+    Note over CA,Entra: Silent refresh (automatic)
+    CA->>Entra: refresh_token → new access_token
+```
+
+→ *See greenfield Architecture Document, Layer 2 Security for the full 4-phase sequence diagram with PKCE details and design decision rationale.*
+
+**Transport:** All MCP protocol connections use TLS 1.3 (Cloud Run default). Specs and plans are not persisted past the call. Blueprint task state stored in AlloyDB (encrypted at rest, 24-hour retention). All peripheral stores are read-only from the Blueprint Advisor's perspective. Service-account-to-service-account auth uses Workload Identity Federation. All data stores are inside the GCP VPC-SC perimeter; the only egress is the MCP response.
 
 ### 17.3 Governance and feedback loop
 
@@ -992,7 +1068,7 @@ The acceptance telemetry pipeline tracks whether developers accept generated blu
 
 ### 17.4 Total Cost of Ownership
 
-The per-call compute cost (~$0.11/blueprint) represents ~2% of total platform TCO. The full annual cost at 210-use-case enterprise scale is ~$669K, including EA office curation time, platform engineering operations, authoring UIs, and developer training. The revised ROI is ~11.2× (vs. 48× based on compute-only cost). → *Operating Playbook §9 provides the full TCO model.*
+The per-call compute cost (~$0.11/blueprint) represents ~2% of total platform TCO. The full annual cost at 210-use-case enterprise scale is ~$669K, including EA office curation time, platform engineering operations, authoring UIs, developer training, and Governance Guardian operations (Cloud Run + AlloyDB tables + Cloud Tasks queue, ~$10–25/month — EA assessment engine operated by EA office, not AgentCatalyst cost). The revised ROI is ~11.2× (vs. 48× based on compute-only cost). → *Operating Playbook §9 provides the full TCO model.*
 
 ---
 

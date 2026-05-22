@@ -18,8 +18,11 @@
 
 | Core document | Filename | Consult for |
 |---|---|---|
-| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield workflows (§2–§3), spec signal words (§4), YAML schema reference (§5), confidence scores (§8), troubleshooting (§14) |
-| Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Base Blueprint Advisor MCP design (Layer 2), EvalOps three-layer lifecycle (Layer 4) |
+| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield workflows (§2–§3), spec signal words (§4), app-blueprint.md schema (§5), confidence scores (§8), troubleshooting (§14) |
+| Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Base Blueprint Advisor MCP design (Layer 2), OAuth 2.1 + Entra ID authentication (Layer 2 Security), IaC generation via GitHub MCP Server (Layer 3), EvalOps three-layer lifecycle (Layer 4) |
+| Core Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | OAuth 2.1 / Entra ID troubleshooting (§9), Governance Guardian operations (§10), Governance Guardian wire format (§10a), MCP tool wire format (§1a) |
+| Governance Guardian Extension | `governance-guardian-architecture.md` | `/catalyst.assess` design, assessment flow, scorecard format, `recordTechDebt` gate, tech debt registry |
+| app-blueprint.md Template | `app-blueprint-md-template-and-fnol-example.md` | 18-section template structure, FNOL reference example, workspace file layout |
 
 ---
 
@@ -37,7 +40,7 @@
 10. [Plan Template (full)](#10-plan-template-full)
 11. [Worked Example: `plan.md`](#11-worked-example-planmd)
 12. [`/catalyst.blueprint`](#12-catalystblueprint)
-13. [Reviewing the YAML and Design Contract](#13-reviewing-the-yaml-and-design-contract)
+13. [Reviewing the Blueprint and Design Contract](#13-reviewing-the-blueprint-and-design-contract)
 14. [`/catalyst.generate`](#14-catalystgenerate)
 15. [`/catalyst.refresh` — Keeping Contracts Alive](#15-catalystrefresh--keeping-contracts-alive)
 16. [Custom Agent & Prompt Files](#16-custom-agent--prompt-files)
@@ -62,9 +65,10 @@ specify init --here --preset agentcatalyst-brownfield --integration copilot
 /speckit.specify            # diagram extraction → spec.md pre-fill → elicitation
 /speckit.plan.draft         # first-pass r-factor + cutover per integration
 /speckit.plan.review        # async EA/architect review of the plan
-/catalyst.blueprint         # async: start → poll (progress in chat) → retrieve YAML + contract
-# review the YAML, contract, 4 Mermaid diagrams
-/catalyst.generate          # brownfield-aware code + IaC + pipelines
+/catalyst.blueprint         # async: start → poll (progress in chat) → retrieve blueprint + contract
+# review blueprint, contract, diagrams
+/catalyst.assess            # governance assessment → scorecard + findings (fix showstoppers → re-assess)
+/catalyst.generate          # governance gate (recordTechDebt → stop/resume) + brownfield-aware code + IaC
 
 # Later (before every PR if contract is stale):
 /catalyst.refresh           # re-run advisor, diff contract, return to LIVE
@@ -136,6 +140,7 @@ This drops the following into your repo:
 │   ├── speckit.plan.draft.prompt.md     ← developer first-pass
 │   ├── speckit.plan.review.prompt.md    ← async EA/architect review
 │   ├── catalyst.blueprint.prompt.md
+│   ├── catalyst.assess.prompt.md
 │   ├── catalyst.generate.prompt.md
 │   └── catalyst.refresh.prompt.md
 ├── agents/
@@ -149,7 +154,7 @@ memory/
 └── constitution-project.md              ← editable, validated against enterprise
 ```
 
-Verify: in Copilot Chat, Agent mode, type `/` and confirm `speckit.constitution`, `speckit.specify`, `speckit.plan.draft`, `speckit.plan.review`, `catalyst.blueprint`, `catalyst.generate`, `catalyst.refresh` all appear.
+Verify: in Copilot Chat, Agent mode, type `/` and confirm `speckit.constitution`, `speckit.specify`, `speckit.plan.draft`, `speckit.plan.review`, `catalyst.blueprint`, `catalyst.assess`, `catalyst.generate`, `catalyst.refresh` all appear.
 
 ---
 
@@ -162,8 +167,9 @@ Verify: in Copilot Chat, Agent mode, type `/` and confirm `speckit.constitution`
 | 3 | `/speckit.plan.draft` | Developer first-pass: r-factor + cutover per integration | 30 min |
 | 4 | `/speckit.plan.review` | Async EA/architect review with structured comments | 1–3 days |
 | 5 | `/catalyst.blueprint` | Async: start → poll (progress in chat) → retrieve | 1–30 min |
-| 6 | Review | Review YAML, contract, 4 Mermaid diagrams | 30 min |
-| 7 | `/catalyst.generate` | Brownfield-aware skills generate code + IaC + pipelines | 5–10 min |
+| 6 | Review | Review blueprint, contract, diagrams | 30 min |
+| 6a | `/catalyst.assess` | Governance assessment → scorecard + findings (iterative) | 1–5 min |
+| 7 | `/catalyst.generate` | Governance gate + brownfield-aware skills generate code + IaC + pipelines | 5–10 min |
 | 8 | Developer work | Review, refine, business logic, tests, commit | 2–4 hours |
 | 9 | `/catalyst.refresh` (if needed) | Re-verify contract freshness before PR/deploy | 2 min |
 
@@ -652,6 +658,8 @@ The developer resolves comments, updates `plan.md`, and the agent marks the plan
 
 → *Architecture §9 covers the async MCP Tasks design and the 4-stage internal pipeline.*
 
+> **First-time authentication:** The first time you run `/catalyst.blueprint` or `/catalyst.assess`, your coding agent opens a browser for company SSO login (Microsoft Entra ID, OAuth 2.1). After authenticating once (including MFA), tokens are cached securely in your OS keychain. Subsequent commands use silent token refresh — no browser popup. Both the Blueprint Advisor and Governance Guardian share the same authentication. See Architecture Document §17.2 for the full OAuth 2.1 flow.
+
 ```
 /catalyst.blueprint
 ```
@@ -669,8 +677,8 @@ Agent: Stage ⑤: pattern retrieval for INT-001...
 Agent: Stage ⑤: pattern retrieval for INT-003 (cross-cloud)...
 Agent: Stage ⑤: composition validation ✓ (14 rules checked)
 Agent: Stage ⑥: ADR compliance — 4 integrations passed ✓
-Agent: Stage ⑦: assembling YAML + design contract...
-Agent: Blueprint ready. Writing app-blueprint.yaml and design_contract.json
+Agent: Stage ⑦: assembling blueprint + contract + diagrams...
+Agent: Blueprint ready. Writing app-blueprint.md and design_contract.json
        to your workspace. Review the 4 Mermaid diagrams inline.
 ```
 
@@ -678,8 +686,8 @@ Agent: Blueprint ready. Writing app-blueprint.yaml and design_contract.json
 
 1. The prompt file calls `blueprint_start` with your spec + plan as JSON. The MCP server validates the input, creates a background task, and returns a `taskId` — all within 2 seconds.
 2. The prompt file polls `blueprint_status(taskId)` every 10 seconds. Each poll returns the current pipeline stage and a progress message. The agent reports these to you in the Chat pane.
-3. The background job (Cloud Run Jobs, no timeout constraint) runs the 4-stage pipeline: ④ context-filtered substitution → ⑤ semantic pattern retrieval + LLM composition → ⑥ ADR compliance check → ⑦ YAML + contract assembly.
-4. When the poll returns `status: "completed"`, the prompt file calls `blueprint_result(taskId)` to retrieve the output and writes `app-blueprint.yaml` and `design_contract.json` to your workspace.
+3. The background job (Cloud Run Jobs, no timeout constraint) runs the 4-stage pipeline: ④ context-filtered substitution → ⑤ semantic pattern retrieval + LLM composition → ⑥ ADR compliance check → ⑦ blueprint + contract + diagram assembly.
+4. When the poll returns `status: "completed"`, the prompt file calls `blueprint_result(taskId)` to retrieve the output and writes `app-blueprint.md` and `design_contract.json` to your workspace.
 
 If anything fails — substitution unresolved, ADR rejected, composition invalid — the poll returns `status: "failed"` with a structured error. You get the same actionable error messages as before; they just arrive via the polling mechanism.
 
@@ -689,7 +697,7 @@ If anything fails — substitution unresolved, ADR rejected, composition invalid
 
 ---
 
-## 13. Reviewing the YAML and Design Contract
+## 13. Reviewing the Blueprint and Design Contract
 
 → *Architecture §9.6 provides the full design contract schema.*
 
@@ -706,6 +714,26 @@ Check in this order:
 
 ---
 
+## 13a. `/catalyst.assess` — Governance assessment
+
+→ *Governance Guardian Architecture Extension covers the full assessment flow, solution package schema, scorecard format, and MCP tool definitions.*
+
+After reviewing the blueprint and design contract, run the governance assessment before generating code:
+
+```
+/catalyst.assess
+```
+
+The coding agent reads `app-blueprint.md` and extracts all 7 artifact types by section header — the TSA component diagram PNG from §4, HA/DR views from §13, sequence diagrams from §14 (inline mermaid), NFRs from §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as JSON, and sends to the Governance Guardian MCP Server via async MCP Tasks (same pattern as Blueprint Advisor).
+
+You see progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...". When complete, you receive a scorecard (7 categories, 0–100 each) and findings (showstopper / high / medium / low).
+
+**If showstoppers:** Fix them (e.g., add cross-region DR per ADR-205), then re-run `/catalyst.assess`. Repeat until no showstoppers.
+
+**If no showstoppers:** Proceed to `/catalyst.generate`. Remaining findings will be recorded as tech debt.
+
+---
+
 ## 14. `/catalyst.generate`
 
 → *Architecture §14 lists every brownfield-specific skill update.*
@@ -714,10 +742,12 @@ Check in this order:
 /catalyst.generate
 ```
 
-Brownfield-aware generation produces:
+**Governance gate (Step 0):** Before generation runs, the coding agent calls `recordTechDebt` on the Governance Guardian MCP Server. If showstoppers remain → BLOCKED. If no showstoppers → remaining findings recorded as tech debt, generation proceeds. If no assessment exists → warning with skip option.
+
+**Brownfield-aware generation (Steps 1–18)** produces:
 
 - **Application code** — BFF with feature-flag scaffolding for strangler-fig, dual-publish config for MQ→SQS, Apigee client with circuit breaker
-- **IaC** — Terraform referencing company `tf-modules` with versions pinned from design contract
+- **IaC** — Terraform generated via `company-terraform` skill: reads company module repos via **GitHub MCP Server** (`variables.tf`, `outputs.tf`), maps blueprint fields to module variables deterministically, generates compliant Terraform referencing company modules (never raw `aws_*` resources). Pattern repos provide the scaffold; service modules provide building blocks.
 - **CI/CD** — Harness pipeline with `/catalyst.refresh` gate before deploy
 - **Runtime compliance** — AWS Config rules generated from `adr_attestations[]`
 - **Transition artifacts** — feature-flag configs, dual-publish toggle, Phase-0 checklist
@@ -874,8 +904,8 @@ A: Yes. Write your own `spec.md` conforming to the template and proceed to `/spe
 **Q: What if my plan review takes too long?**
 A: The review is async — work on other things while waiting. If your reviewer is unresponsive, escalate in `#agentcatalyst`. Solo-drafted plans are permitted but the design contract records the review status, and acceptance telemetry shows solo plans have ~20% higher revision rates at PR.
 
-**Q: Can I edit the YAML and skip `/catalyst.blueprint`?**
-A: Yes. The coding agent only needs the YAML and design contract. You lose AI-guided recommendation and ADR attestation.
+**Q: Can I edit the blueprint and skip `/catalyst.blueprint`?**
+A: Yes. The coding agent only needs `app-blueprint.md` and `design_contract.json`. You lose AI-guided recommendation and ADR attestation.
 
 **Q: How do I handle a multi-app modernization?**
 A: One `spec.md` and `plan.md` per target service. Each gets its own blueprint and generate invocation.

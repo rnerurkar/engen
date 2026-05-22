@@ -13,14 +13,15 @@
 | Architecture | `csa-tsa-speckit-architecture.md` | **WHY** — design decisions, Blueprint Advisor internals |
 | Developer Guide | `csa-tsa-speckit-developerguide.md` | **HOW** — step-by-step workflow, templates, examples |
 | **This document** | `csa-tsa-speckit-operating-playbook.md` | **PROCEDURES** — operations, governance, onboarding |
+| Governance Guardian | `governance-guardian-architecture.md` | **GOVERNANCE** — `/catalyst.assess` design, EA assessment flow, `recordTechDebt` gate, tech debt registry |
 
 ### Related core AgentCatalyst documents
 
 | Core document | Filename | Consult for |
 |---|---|---|
-| Core Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | Vertex AI Search wire-level API (§1), MCP tool wire format (§1a), search quality regression suite (§2), shared MCP Server operations (§9) |
-| Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Base Blueprint Advisor design (Layer 2), overlay skill architecture (Layer 3), EvalOps (Layer 4) |
-| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield workflows (§2–§3), spec signal words (§4), YAML schema (§5) |
+| Core Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | Vertex AI Search wire-level API (§1), MCP tool wire format (§1a), search quality regression suite (§2), shared MCP Server operations (§9), authentication troubleshooting (§9 OAuth 2.1 / Entra ID), Governance Guardian operations (§10), Governance Guardian wire format (§10a) |
+| Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Base Blueprint Advisor design (Layer 2), OAuth 2.1 + Entra ID authentication (Layer 2 Security), IaC generation via GitHub MCP Server (Layer 3), overlay skill architecture (Layer 3), EvalOps (Layer 4) |
+| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield workflows (§2–§3), spec signal words (§4), app-blueprint.md schema (§5), `/catalyst.assess` (§2.7a), governance gate (§2.8) |
 
 ---
 
@@ -503,7 +504,7 @@ The AlloyDB Task Store holds transient async task records with a 24-hour retenti
 1. AlloyDB with cross-region replication fails over automatically to the read replica
 2. If single-region: API layer returns errors on all task operations
 3. Recovery: wait for AlloyDB auto-failover, or promote cross-region read replica
-4. Notify developers: "Blueprint Advisor temporarily unavailable. Author YAML manually (Developer Guide, §7) or wait for recovery."
+4. Notify developers: "Blueprint Advisor temporarily unavailable. Author blueprint manually (Developer Guide, §7) or wait for recovery."
 5. Estimated RTO: 0 (auto-failover) or 15–30 minutes (manual promotion)
 
 **Scenario: Task records corrupted**
@@ -592,7 +593,7 @@ If Opus 4.6 is removed from tenant: advisory in `#agentcatalyst` within 1 hour. 
 |---|---|
 | Blueprint generated | MCP server logs |
 | Plan review status (solo vs. reviewed) | plan.md `review_status` field |
-| Developer modified YAML | Git diff at generate time |
+| Developer modified blueprint | Git diff at generate time |
 | **Modification reason** (per field) | **PR-template dropdown** |
 | `requires_review` flags addressed | Edit count |
 | ADR attestation overridden at PR | PR comment |
@@ -601,7 +602,7 @@ If Opus 4.6 is removed from tenant: advisory in `#agentcatalyst` within 1 hour. 
 
 ### 11.2 Structured modification reasons
 
-The PR template includes a mandatory dropdown per YAML field edit:
+The PR template includes a mandatory dropdown per blueprint field edit:
 
 | Reason | What it means for quality |
 |---|---|
@@ -617,7 +618,7 @@ Without this categorization, quality metrics conflate advisor errors with develo
 
 | Metric | Target |
 |---|---|
-| Acceptance rate (YAML unchanged) | > 70% |
+| Acceptance rate (Blueprint unchanged) | > 70% |
 | Major modification rate (>30% fields) | < 10% |
 | `requires_review` rate | < 15% |
 | ADR override rate | < 5% |
@@ -679,12 +680,58 @@ Office hours: EA office Tuesdays 2–3 PM ET. Platform engineering Thursdays 10�
 | All pipelines stuck in "working" | Cloud Run Jobs quota exhausted or Cloud Tasks queue jammed | Check Cloud Tasks queue depth; flush stuck tasks; scale Jobs quota |
 | Task store unavailable | AlloyDB health check failure | AlloyDB has automated cross-region failover; verify instance status; if global outage, engage GCP support |
 | All ADR checks reject everything | Bad rule pushed | Roll back latest ADR-content PR |
-| All substitutions NOT_FOUND | Postgres issue or schema drift | Verify Cloud SQL; manual failover |
+| All substitutions NOT_FOUND | Postgres issue or schema drift | Verify AlloyDB; automated cross-region failover |
 | Confidence collapsed to ~0.5 | Corpus re-indexing or model change | Wait for re-index; verify model |
 | Slash commands vanished | Preset registry corruption | Republish last-known-good version |
 | Runtime compliance false positives | Config rule Lambda bug | Disable rule; hotfix Lambda |
+| Governance Guardian unreachable | Cloud Run health check | Same deployment as Blueprint Advisor API layer; check Cloud Run, OAuth, VPC-SC |
+| Governance assessment stuck | Cloud Tasks `governance-assess` queue jammed | Flush queue; mark orphaned AlloyDB records as failed |
+| recordTechDebt returns unexpected "stop" | Stale assessment with resolved showstoppers | Developer re-runs `/catalyst.assess` to get fresh assessment |
 
 Postmortem: every Sev-1/2 within 5 business days.
+
+---
+
+## 13a. Governance Guardian Operations
+
+→ *Governance Guardian Architecture Extension covers the full design. Core Operations Runbook §10 covers shared operational procedures. Core Operations Runbook §10a covers the MCP wire format for governance tools.*
+
+The Governance Guardian uses the same async MCP Tasks pattern as the Blueprint Advisor. It shares the same AlloyDB instance (separate table `governance_tasks`), the same OAuth 2.1 / Entra ID authentication (`agentcatalyst.mcp` audience scope), and the same Cloud Run deployment model. See Core Operations Runbook §9 for authentication troubleshooting (Entra ID).
+
+> **Quick OAuth troubleshooting:** If developers report 401 errors on `/catalyst.assess`, the most common cause is expired refresh tokens (>24 hours since SSO login). Resolution: developer closes and reopens VSCode to trigger fresh Entra ID SSO. For JWKS validation failures or 403 Forbidden, see Core Operations Runbook §9 for the comprehensive troubleshooting table.
+
+### Health checks
+
+| Check | Method | Frequency |
+|---|---|---|
+| API layer reachable | MCP protocol handshake | 60s |
+| `assess_start` functional | Golden FNOL solution package → task created | 3 min |
+| Assessment completion | Golden solution package → poll until completed | 3 min |
+| `recordTechDebt` functional | Known assessment ID → resume/stop signal | 5 min |
+| `getAssessmentHistory` functional | Known solution_id → returns history | 5 min |
+| EA assessment engine reachable | Health endpoint on EA service | 60s |
+
+### Cloud Tasks queue
+
+| Setting | Value |
+|---|---|
+| Queue name | `governance-assess` |
+| Max dispatches/sec | 10 |
+| Max concurrent | 10 |
+| Max retries | 3 |
+| Dead-letter topic | `governance-assess-dlq` |
+
+### Task Store + Tech Debt Registry
+
+The `governance_tasks` table follows the same 24-hour TTL cleanup as `blueprint_tasks`. The `tech_debt` table is **persistent** — tech debt records are NOT subject to TTL cleanup. They remain until manually resolved.
+
+### EA assessment engine SLA
+
+| Metric | Target | Alert |
+|---|---|---|
+| Assessment completion p95 | < 60 seconds | > 120 seconds |
+| Availability | 99.5% | < 99% |
+| False positive rate | < 5% | > 10% |
 
 ---
 
