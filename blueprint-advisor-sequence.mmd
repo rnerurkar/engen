@@ -12,6 +12,7 @@ sequenceDiagram
     participant TR as Tool Registry<br/>(Apigee API Hub)
     participant ADR as ADR Constraint Store<br/>(AlloyDB)
     participant IAC as IaC Module Registry<br/>(GitHub)
+    participant ER as Eraser.io API<br/>(diagram rendering)
     participant FS as Task Store<br/>(AlloyDB)
 
     rect rgb(214, 234, 248)
@@ -40,8 +41,10 @@ sequenceDiagram
     BG->>FS: status → "recommending"
     BG->>PC: hybrid_search (per integration)
     PC-->>BG: candidate_patterns[]
-    BG->>TR: discover_tools
+    BG->>TR: discover_tools (MCP servers, REST APIs)
     TR-->>BG: applicable_tools[]
+    BG->>TR: search_a2a_agents (deployed agents for A2A delegation)
+    TR-->>BG: available_a2a_agents[] (name, version, capabilities, Agent Card URL)
     BG->>BG: validate_composition
     BG->>FS: status → "checking"
     BG->>ADR: adr_compliance_check
@@ -49,7 +52,13 @@ sequenceDiagram
     BG->>FS: status → "assembling"
     BG->>IAC: resolve_modules
     IAC-->>BG: module_refs[]
-    BG->>BG: generate YAML + contract + diagrams
+    BG->>ER: render component topology (Eraser.io DSL → .eraser + .png)
+    ER-->>BG: component-diagram.eraser + .png
+    BG->>ER: render HA/DR lifecycle views (4 scenarios)
+    ER-->>BG: hadr-*.eraser + .png
+    BG->>BG: generate .drawio.xml + .svg from Eraser.io DSL
+    BG->>BG: assemble app-blueprint.md (18 sections) + generate app-blueprint.json (derived, machine-readable)
+    BG->>BG: bundle: .md + .json + diagrams (.eraser + .drawio + .svg + .png)
     BG->>FS: store result, status → "completed"
     end
 
@@ -59,5 +68,5 @@ sequenceDiagram
     MCP-->>Agent: { status: "completed" }
     Agent->>MCP: blueprint_result(taskId)
     MCP->>FS: read result
-    MCP-->>Agent: YAML + contract + diagrams
+    MCP-->>Agent: app-blueprint.md + app-blueprint.json + diagrams (.eraser + .drawio + .svg + .png)
     end

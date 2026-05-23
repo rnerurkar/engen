@@ -48,7 +48,7 @@ They've already set up everything you need. You don't configure any of this:
 | Domain skills (per archetype) | `github.com/company/agentcatalyst-skills` | Teach the coding agent how to write correct code for ADK, Spring Boot, etc. |
 | Company overlay skills (shared) | Same repo | Teach Terraform patterns, Dynatrace config, Jenkins/Harness pipelines, security standards |
 | Blueprint Advisor MCP Server | Cloud Run + Cloud Run Jobs (GCP) | LlmAgent exposed as MCP Server (async via MCP Tasks). Your coding agent calls `blueprint_start`, `blueprint_status`, `blueprint_result`, `validate_composition`, `assemble_blueprint` via MCP protocol. |
-| Approved tools registry | Apigee API Hub + `memory/approved-tools.md` | What MCP servers, APIs, and A2A agents you can connect to |
+| Approved tools registry | Apigee API Hub + `memory/approved-tools.md` | Unified catalog: MCP servers, REST APIs, and **deployed A2A agents** (registered with `type=a2a_agent`). Blueprint Advisor queries API Hub for A2A agents — reusing deployed agents instead of rebuilding. |
 | Company Terraform modules | `github.com/company/tf-modules` | Pre-approved infrastructure modules |
 
 ### What you (the developer) do
@@ -218,7 +218,30 @@ Saved as `plan.md`. (~5 min)
 
 Type `/catalyst.blueprint`. The coding agent connects to the **Blueprint Advisor MCP Server** and starts a background task.
 
-> **First-time authentication:** The first time you run `/catalyst.blueprint` or `/catalyst.assess`, your coding agent opens a browser for company SSO login (Microsoft Entra ID). After authenticating once (including MFA), tokens are cached securely in your OS keychain. Subsequent commands use silent token refresh — no browser popup. Both the Blueprint Advisor and Governance Guardian share the same OAuth 2.1 authentication, so you authenticate once for both. Tokens last 1 hour with automatic refresh. See Architecture Document, Layer 2 Security for the full OAuth 2.1 flow with Entra ID. You see progress in the Chat pane as the pipeline runs (typically 1–5 minutes). When complete, the coding agent writes several files to your workspace: `app-blueprint.md` (the structured markdown blueprint), component diagram PNGs, HA/DR diagram PNGs, and their editable `.drawio.xml` counterparts — all in your feature directory. The diagrams render inline when you preview the markdown in VSCode.
+> **First-time authentication:** The first time you run `/catalyst.blueprint` or `/catalyst.assess`, your coding agent opens a browser for company SSO login (Microsoft Entra ID). After authenticating once (including MFA), tokens are cached securely in your OS keychain. Subsequent commands use silent token refresh — no browser popup. Both the Blueprint Advisor and Governance Guardian share the same OAuth 2.1 authentication, so you authenticate once for both. Tokens last 1 hour with automatic refresh. See Architecture Document, Layer 2 Security for the full OAuth 2.1 flow with Entra ID. You see progress in the Chat pane as the pipeline runs (typically 1–5 minutes). When complete, the coding agent writes several files to your workspace:
+
+- **`app-blueprint.md`** — the PRIMARY artifact. Human-readable structured markdown (18 sections). You edit THIS file.
+- **`app-blueprint.json`** — the DERIVED artifact. Machine-readable JSON generated from the `.md`. Consumed by `/catalyst.generate` for code generation. **Never edit this file directly** — it's regenerated from `.md` automatically.
+- **Diagram files** — `.eraser` (Eraser.io VSCode extension), `.drawio.xml` (Draw.io extension), `.svg` (Canva import), `.png` (auto-rendered, inline in markdown)
+
+Edit the `.md` and diagrams with whichever tool you prefer. When you run `/catalyst.assess`, the Governance Guardian reads your `.md` + diagram PNGs (NOT `app-blueprint.json` — governance assesses the human-readable architecture). The coding agent packages 7 artifacts extracted from `.md` sections into an ephemeral solution_package sent over MCP — this is a transport payload, not the `.json` file. The `app-blueprint.json` file is untouched during governance. When you run `/catalyst.generate`, the coding agent auto-regenerates `app-blueprint.json` from your edited `.md` if it's changed, then reads the JSON for code generation.
+
+### Editing diagrams — choose your tool
+
+Your workspace contains 4 formats per diagram. You only need to edit ONE — the others are re-rendered when you call `assemble_blueprint` or when `/catalyst.generate` auto-regenerates.
+
+| Tool | VSCode Extension | File to open | How to edit |
+|---|---|---|---|
+| **Eraser.io** | `eraser.io` extension | `*.eraser` | Live visual editor in VSCode. Drag agents, connections, boundaries. Save and the `.eraser` file updates in your workspace. |
+| **Draw.io** | `hediet.vscode-drawio` extension | `*.drawio.xml` | Full draw.io editor in a VSCode tab. Standard diagramming UI. |
+| **Canva** | Browser / desktop app | Import `*.svg` | Import the SVG into Canva, edit visually, export SVG back to workspace. |
+| **Mermaid** | Built-in VSCode preview | Edit inline in `.md` §14 | Edit the mermaid code blocks directly in `app-blueprint.md`. Renders natively in markdown preview. |
+
+**After editing a diagram:** Call `validate_composition` (checks your pattern tree is valid) → `assemble_blueprint` (regenerates `app-blueprint.json` + re-renders all diagram formats via Eraser.io API). Or just run `/catalyst.generate` — it auto-calls `assemble_blueprint` if your `.md` changed.
+
+> **Tip:** If Eraser.io is temporarily unavailable, use Draw.io (`.drawio.xml`) — it's a local VSCode extension with no cloud dependency. Your diagrams still work; only the `.eraser` source and `.svg` export won't be refreshed until Eraser.io recovers.
+
+→ *See `app-blueprint-md-template-and-fnol-example.md` for the complete 18-section template structure and FNOL reference example.*
 
 **Why async?** VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls. The Blueprint Advisor's internal pipeline (3 RAG searches + LLM reasoning + validation + assembly) takes 15–60 seconds. A single blocking call would be killed before it completes. Instead, the coding agent uses three fast MCP tools — `blueprint_start` (< 2s), `blueprint_status` (< 1s), `blueprint_result` (< 1s) — to drive an async loop. You don't need to think about this; the prompt file handles it automatically.
 
@@ -255,7 +278,7 @@ Review the markdown and edit before running /catalyst.generate.
 
    - **Pattern search** — reads your Workflow section's ordering words ("First," "Simultaneously," "Refine until") and searches the pattern catalog. "First... then..." → Sequential. "Simultaneously" → Parallel. "Refine until" → Loop.
 
-   - **Tool search** — reads your Data Sources and External Integrations sections and searches the tool registry for the specific tools your agent needs. The tool registry is chunked at the **individual tool level**, not the server level — so when you write "BigQuery analytical queries," the search matches the specific `execute_query` tool on the BigQuery MCP server, not just "BigQuery" generically. MCP tools and A2A agent tasks are in the same registry, so one search finds both.
+   - **Tool search** — reads your Data Sources and External Integrations sections and searches the tool registry for the specific tools your agent needs. The tool registry is chunked at the **individual tool level**, not the server level — so when you write "BigQuery analytical queries," the search matches the specific `execute_query` tool on the BigQuery MCP server, not just "BigQuery" generically. MCP tools are searched in Vertex AI Search; **A2A agents are searched in Apigee API Hub** (`type=a2a_agent`) — deployed agents with matching capabilities are discovered and recommended for A2A delegation instead of building new agents.
 
    - **Skill search** — finds skills that match the tools and capabilities your agent needs. Skills are automatically paired with their corresponding tools.
 
@@ -298,7 +321,13 @@ For each tool in the blueprint, verify the `assigned_to` agent makes sense:
 
 Type `/tasks`. See the 80/20 split:
 
-**Auto-generated:** Agent classes, MCP connections, A2A clients, Model Armor callbacks, Terraform, Dynatrace, CI/CD pipelines
+**Auto-generated:** Agent classes, MCP connections, A2A clients, Model Armor callbacks, Terraform, **Apigee proxy routes** (one per tool binding), **per-agent Workload Identity** IAM bindings (least-privilege from topology), **API Hub registration entry** (agent card for future A2A discovery), Dynatrace, CI/CD pipelines
+
+> **What the new generated artifacts do for you:**
+> - **Apigee proxy routes** — each tool binding in your blueprint (§5) generates one Apigee proxy route with the correct authentication (mTLS, OAuth, API Key from §7). A2A agent connections discovered via API Hub generate A2A-specific proxy routes. You don't configure Apigee manually.
+> - **Per-agent Workload Identity** — each agent in your topology (§3) gets its own GCP service account with IAM bindings ONLY for the tools assigned to it in §5. If `extract_details` is assigned to `claims-db-mcp`, it gets `roles/cloudsql.client` but cannot access `policy-api-mcp`. Least-privilege by default.
+> - **API Hub registration** — after deployment, the CI/CD pipeline registers your agent in Apigee API Hub with capabilities and an Agent Card URL. Future Blueprint Advisor runs discover your agent and can recommend A2A delegation to it — reusing your agent instead of rebuilding.
+> See Architecture Document Layer 3 for Terraform examples and derivation logic. See Operations Runbook §11 for health checks and failure modes.
 
 **You implement:** System prompts, `severity_classifier()`, `coverage_calculator()`, `notification_sender()`, test data
 
@@ -312,7 +341,7 @@ After reviewing and editing the blueprint, run the governance assessment before 
 /catalyst.assess
 ```
 
-The coding agent extracts solution artifacts from your workspace — TSA component diagram from your drawio file, HA/DR views, sequence diagrams (mermaid), NFRs, architecture decisions log, tech stack, and patterns used — packages them as JSON, and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll → `assess_result`).
+The coding agent extracts solution artifacts from your workspace — TSA component diagram from your `.eraser` or `.drawio.xml` file (whichever was edited most recently), HA/DR views, sequence diagrams (mermaid), NFRs, architecture decisions log, tech stack, and patterns used — packages them as JSON, and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll → `assess_result`).
 
 **What you see in the Chat pane:**
 

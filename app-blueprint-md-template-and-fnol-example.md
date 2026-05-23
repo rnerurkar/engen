@@ -18,15 +18,20 @@ When `blueprint_result` delivers the blueprint, the coding agent writes the foll
 
 ```
 features/fnol-claims-agent/
-├── app-blueprint.md                    ← The blueprint (markdown)
-├── fnol-component-diagram.png          ← Component diagram (rendered PNG)
-├── fnol-component-diagram.drawio.xml   ← Component diagram (editable drawio)
+├── app-blueprint.md                    ← PRIMARY: human-readable structured markdown (18 sections)
+├── app-blueprint.json                  ← DERIVED: machine-readable JSON (regenerated from .md by assemble_blueprint)
+├── fnol-component-diagram.png          ← Component diagram (rendered PNG, inline in markdown)
+├── fnol-component-diagram.eraser       ← Editable in Eraser.io VSCode extension
+├── fnol-component-diagram.drawio.xml   ← Editable in Draw.io VSCode extension
+├── fnol-component-diagram.svg          ← Importable into Canva
 ├── fnol-hadr-diagram.png               ← HA/DR views (rendered PNG)
-├── fnol-hadr-diagram.drawio.xml        ← HA/DR views (editable drawio)
+├── fnol-hadr-diagram.eraser            ← Editable in Eraser.io VSCode extension
+├── fnol-hadr-diagram.drawio.xml        ← Editable in Draw.io VSCode extension
+├── fnol-hadr-diagram.svg               ← Importable into Canva
 └── ... (spec.md, plan.md already here)
 ```
 
-The `.md` file references the PNGs with relative paths (`![Component Diagram](fnol-component-diagram.png)`) so they render inline when viewed in VSCode or GitHub. The `.drawio.xml` files are for editing in draw.io — the SA can modify the architecture, then re-run `/catalyst.assess` with the updated diagrams.
+The `.md` file references the PNGs with relative paths (`![Component Diagram](fnol-component-diagram.png)`) so they render inline when viewed in VSCode or GitHub. Diagrams are editable in three tools: `.eraser` files in the Eraser.io VSCode extension, `.drawio.xml` in the Draw.io extension, or `.svg` imported into Canva. The SA can modify the architecture in any tool, then re-run `/catalyst.assess` with the updated diagrams.
 
 ### How the MCP Server delivers binary files
 
@@ -72,8 +77,8 @@ The `/catalyst.blueprint` prompt file instructs the coding agent to:
 
 The Blueprint Advisor's background pipeline (Stage 4: `assemble_blueprint`) generates diagrams as follows:
 
-- **Component diagram (PNG + drawio):** The pipeline assembles a graphviz DOT description from the agent topology, MCP connections, A2A boundaries, and infrastructure components. It renders the DOT to PNG (via graphviz) and converts to drawio XML (via a DOT-to-drawio transform). Both are included in the `diagrams` array.
-- **HA/DR diagram (PNG + drawio):** The pipeline reads the DR strategy from `plan.md` and generates lifecycle scenario views (Initial Provisioning → Component Failure / HA → DR Failover → DR Failback) as a graphviz diagram. Rendered to PNG and converted to drawio XML.
+- **Component diagram:** The pipeline assembles an Eraser.io DSL description from the agent topology, MCP connections, A2A boundaries, and infrastructure components. It renders the DSL to PNG via the **Eraser.io API** and converts to `.drawio.xml` and `.svg` for alternative editing tools. The `.eraser` source file is included for editing in the Eraser.io VSCode extension.
+- **HA/DR diagram:** The pipeline reads the DR strategy from `plan.md` and generates lifecycle scenario views (Initial Provisioning → Component Failure / HA → DR Failover → DR Failback) as Eraser.io DSL. Rendered to PNG, `.drawio.xml`, and `.svg` via the same pipeline.
 - **Sequence diagrams (mermaid):** Generated as mermaid `sequenceDiagram` code and embedded inline in the markdown. No separate file needed — mermaid renders natively in GitHub and VSCode.
 
 ---
@@ -208,7 +213,7 @@ This diagram shows the agent topology with MCP connections, A2A boundaries, and 
 | vehicle-api-mcp | MCP Server | mcp://vehicle-api.internal:8080 | enrich_vehicle | Vertex AI Search (tool registry) | 0.88 |
 | weather-api-mcp | MCP Server | https://api.weather.gov/points | enrich_weather | Vertex AI Search (tool registry) | 0.90 |
 | review-queue-mcp | MCP Server | mcp://review-queue.internal:8080 | human_review | Vertex AI Search (tool registry) | 0.85 |
-| body-shop-a2a | A2A Agent | https://bodyshop.partner.com/a2a | severity_classifier | spec §6 "They operate their own" | 0.80 |
+| body-shop-a2a | A2A Agent | https://bodyshop.partner.com/a2a | severity_classifier | Apigee API Hub (type=a2a_agent, v2.3, active) | 0.80 |
 
 ---
 
@@ -234,6 +239,8 @@ This diagram shows the agent topology with MCP connections, A2A boundaries, and 
 | vehicle-api-mcp | API Key | mcp://vehicle-api.internal:8080 | 15s | 2 |
 | weather-api-mcp | None (public) | https://api.weather.gov/points | 10s | 1 |
 | review-queue-mcp | mTLS | mcp://review-queue.internal:8080 | 60s | 1 |
+
+> **Note:** Auth methods in this table refer to the **target service's** authentication protocol — how the MCP Server authenticates to the external API (e.g., policy-api uses OAuth 2.0 for its upstream connection). This is separate from the developer's authentication to the Blueprint Advisor MCP Server, which is always OAuth 2.1 + Entra ID (see Architecture Document, Layer 2 Security).
 
 ---
 
@@ -456,6 +463,9 @@ sequenceDiagram
 | Infrastructure (Jenkins) | agent-infra-plan-apply-v3 | project=fnol-claims, regions=[us-east1, us-west1], dr_strategy=pilot-cold |
 | Deployment (Harness) | agent-deploy-canary-v2 | service=fnol-coordinator, canary_percent=10, rollback_threshold=1% |
 | EvalOps (Harness) | agent-evalops-3phase-v1 | golden_dataset=fnol-golden.json, hitl_reviewers=3 |
+| Post-deployment (Jenkins) | agent-api-hub-register-v1 | type=a2a_agent, capabilities=[claim-submission, claim-lookup, severity-classification], agent_card_url=https://fnol.internal/.well-known/agent.json |
+
+> **Post-deployment registration:** After successful deployment, the pipeline registers the agent in Apigee API Hub with `type=a2a_agent`, capabilities derived from §3 topology, and an Agent Card URL. This makes the agent discoverable for A2A delegation by future Blueprint Advisor runs — enabling the flywheel where every deployed agent enriches the platform for future projects.
 
 ---
 
@@ -485,6 +495,8 @@ sequenceDiagram
 > - The blueprint is delivered via `blueprint_result` over OAuth 2.1-authenticated MCP — see Architecture Document, Layer 2 Security for the full Entra ID authentication sequence diagram.
 > - Blueprint generation task state is stored in AlloyDB — see Architecture Document, Layer 2 (Task Store tenant isolation).
 > - The Governance Guardian reads all 7 artifact types from this file — see Governance Guardian Architecture Extension for the assessment flow and scorecard format.
+> - The same blueprint sections that the Governance Guardian assesses (§3 topology, §5 tool bindings, §7 MCP configs) also drive the generation of **Apigee proxy routes**, **per-agent Workload Identity** IAM bindings, and **API Hub registration entries** during `/catalyst.generate`. Changes to these sections trigger both governance re-assessment and infrastructure regeneration.
+> - Diagrams (§4 component, §13 HA/DR) are rendered via the **Eraser.io API** during `assemble_blueprint` — see Architecture Document, Diagram Generation section for the rendering pipeline (Eraser.io DSL → `.eraser` + `.png` + `.drawio.xml` + `.svg`).
 
 With `app-blueprint.md` as the single source of truth, the `/catalyst.assess` prompt file simplifies dramatically:
 

@@ -115,13 +115,19 @@ She types `/plan` and answers a handful of technical questions — GCP region, L
 
 She types `/catalyst.blueprint`. This custom command connects to the **Blueprint Advisor MCP Server** — an LlmAgent running on Cloud Run, exposed as an MCP Server. Her coding agent calls `blueprint_start` via MCP protocol with her `spec.md` and `plan.md` as input. The call returns a task ID in under 2 seconds — the heavy work runs in the background. She doesn't need to know what happens inside the server — but here's what does:
 
-The Blueprint Advisor reads her spec's natural language signals. "First the customer calls, then the system classifies severity" tells it Sequential. "In parallel it enriches from three sources" tells it Parallel. "Loop until quality score exceeds 0.85" tells it Loop. "Route high-severity to a human adjuster" tells it HITL. It searches the company's pattern catalog, skill catalog, and tool registry via Vertex AI Search (single-pass semantic retrieval), applies LLM reasoning guided by a company-curated system prompt, and assembles a recommendation. While this runs (15–60 seconds), her coding agent polls `blueprint_status` every 10 seconds and reports progress in the Chat pane: "Searching pattern catalog...", "Reasoning about architecture...", "Assembling blueprint...".
+The Blueprint Advisor reads her spec's natural language signals. "First the customer calls, then the system classifies severity" tells it Sequential. "In parallel it enriches from three sources" tells it Parallel. "Loop until quality score exceeds 0.85" tells it Loop. "Route high-severity to a human adjuster" tells it HITL. It searches the company's pattern catalog, skill catalog, and tool registry via Vertex AI Search (single-pass semantic retrieval), then queries **Apigee API Hub** for deployed agents available for A2A delegation — "body shop — they operate their own" triggers an API Hub query for `type=a2a_agent, capabilities CONTAINS 'body-shop-estimate'`, finding the deployed body-shop-agent (v2.3, active). It applies LLM reasoning guided by a company-curated system prompt and assembles a recommendation. While this runs (15–60 seconds), her coding agent polls `blueprint_status` every 10 seconds and reports progress in the Chat pane: "Searching pattern catalog...", "Discovering A2A agents...", "Reasoning about architecture...", "Assembling blueprint...".
 
-When the background pipeline completes, the coding agent calls `blueprint_result` and receives a JSON response containing the markdown content, base64-encoded diagram PNGs, and drawio XML files. It writes `app-blueprint.md` to the workspace along with component diagram PNGs, HA/DR diagram PNGs, and their editable drawio XML counterparts — all in the same feature directory. The markdown file is a structured document describing WHAT to build: 5 agents (Coordinator + Sequential + Parallel + Loop + HITL), 3 MCP servers (BigQuery, Cloud SQL, Vertex AI Search), 3 A2A agents (body shop, rental car, police report), 3 FunctionTool implementations (severity classifier, coverage calculator, notification sender — with her IF/THEN business rules included), infrastructure settings, EvalOps configuration, and a golden dataset derived from her acceptance criteria. Component diagrams are rendered as inline PNG images with editable drawio XML alongside. Sequence diagrams are inline mermaid code. NFRs, ADL, and tech stack are tables. Each recommendation is tagged with a confidence level (high/medium/low).
+When the background pipeline completes, the coding agent calls `blueprint_result` and receives a JSON response containing the markdown content, a machine-readable `app-blueprint.json`, base64-encoded diagram PNGs, Eraser.io source files (`.eraser`), drawio XML files, and SVG exports. It writes all files to the workspace:
 
-She reviews the markdown in her editor — the component diagram renders inline in VSCode's markdown preview, the sequence diagrams render as mermaid, and all tables are readable. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the table directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the markdown. If she needs to edit the component diagram, she opens the drawio XML in draw.io, modifies it, and the updated diagram is assessed on her next `/catalyst.assess` run.
+- **`app-blueprint.md`** — the PRIMARY artifact. Human-readable structured markdown with 18 sections, inline diagram PNGs, and mermaid sequence diagrams. The developer edits THIS file.
+- **`app-blueprint.json`** — the DERIVED artifact. Machine-readable JSON generated from the `.md` sections by `assemble_blueprint`. Consumed by `/catalyst.generate` for deterministic code generation. **Never edit this file directly** — it is regenerated from `.md` every time `assemble_blueprint` runs.
+- **Diagram files** — `.eraser` (Eraser.io VSCode extension), `.drawio.xml` (Draw.io extension), `.svg` (Canva import), `.png` (auto-rendered, inline in markdown)
 
-Before generating code, she runs the governance check. She types `/catalyst.assess`. The coding agent reads `app-blueprint.md` and extracts all 7 artifact types directly from it — the component diagram PNG from the `![...]()` reference in §4, HA/DR views from §13, sequence diagrams from the inline mermaid in §14, NFRs from the table in §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as a JSON document, and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). While the EA assessment engine evaluates her solution (a black box to AgentCatalyst — the EA office owns all the assessment logic), she sees progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...".
+The markdown file describes WHAT to build: 5 agents (Coordinator + Sequential + Parallel + Loop + HITL), 3 MCP servers (BigQuery, Cloud SQL, Vertex AI Search), 3 A2A agents (body shop, rental car, police report), 3 FunctionTool implementations (severity classifier, coverage calculator, notification sender — with her IF/THEN business rules included), infrastructure settings, EvalOps configuration, and a golden dataset derived from her acceptance criteria. Component diagrams are rendered as inline PNG images with editable `.eraser` / `.drawio.xml` / `.svg` alongside. Sequence diagrams are inline mermaid code. NFRs, ADL, and tech stack are tables. Each recommendation is tagged with a confidence level (high/medium/low).
+
+She reviews the markdown in her editor — the component diagram renders inline in VSCode's markdown preview, the sequence diagrams render as mermaid, and all tables are readable. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the table directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the markdown **and regenerates `app-blueprint.json`** from the edited sections (the JSON is always derived from the `.md` — never edited directly). If she needs to edit the component diagram, she can open the `.eraser` file in the Eraser.io VSCode extension, the `.drawio.xml` in the Draw.io extension, or import the `.svg` into Canva — whichever tool she prefers. Updated diagrams are picked up automatically on her next `/catalyst.assess` run.
+
+Before generating code, she runs the governance check. She types `/catalyst.assess`. The coding agent reads `app-blueprint.md` (NOT `app-blueprint.json` — the Governance Guardian assesses the human-readable architecture, not the machine-readable JSON) and extracts all 7 artifact types directly from it — the component diagram PNG from the `![...]()` reference in §4, HA/DR views from §13, sequence diagrams from the inline mermaid in §14, NFRs from the table in §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as a **solution_package** (an ephemeral JSON transport payload sent over MCP — this is NOT the same as the persisted `app-blueprint.json` file), and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). The `app-blueprint.json` file in the workspace is not read, not sent, and not modified during governance assessment — it exists solely for `/catalyst.generate` to consume later. While the EA assessment engine evaluates her solution (a black box to AgentCatalyst — the EA office owns all the assessment logic), she sees progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...".
 
 The assessment returns a scorecard and findings. One showstopper: her Aurora PostgreSQL has no cross-region DR strategy, violating ADR-205. Two non-critical findings: WAF rules not using the enterprise managed rule group, and Angular 17 not yet on the approved tech radar. She fixes the showstopper — adds Aurora Global Database with a us-west-2 read replica to her Terraform and updates the HA/DR view in her drawio. She runs `/catalyst.assess` again. This time: no showstoppers, score 88/100. The two remaining findings are flagged as acceptable tech debt.
 
@@ -170,7 +176,7 @@ The Blueprint Advisor reads phrases like "EXISTING REST API" and "MUST use these
 | Task Queue | Cloud Tasks (GA) — enqueues pipeline jobs from `blueprint_start` |
 | Spec Workflow | GitHub Spec Kit with AgentCatalyst preset (archetype-specific) |
 | Blueprint Advisor | LlmAgent exposed as MCP Server. API layer on Cloud Run Service (async via MCP Tasks). Pipeline on Cloud Run Jobs. Task state in AlloyDB. Enqueue via Cloud Tasks. |
-| Discovery | Vertex AI Search (archetype-specific catalogs: patterns, skills, tools) |
+| Discovery | Vertex AI Search (archetype-specific catalogs: patterns, skills, MCP tools) + **Apigee API Hub** (unified catalog: REST APIs + MCP servers + A2A agents) |
 | IaC | Terraform + company TF modules via GitHub MCP Server |
 | Security | Model Armor (standard), DLP, Secret Manager, SPIFFE, VPC-SC, CMEK |
 | Gateway | Apigee Runtime Gateway (GA) |
@@ -226,9 +232,9 @@ The Blueprint Advisor is an LlmAgent running on Cloud Run, **exposed as an MCP S
 |---|---|---|---|
 | `blueprint_start(spec, plan)` | **ASYNC START** | < 2 seconds | Validates input, creates a background task in the Task Store, enqueues the pipeline via Cloud Tasks, returns `taskId` + `pollInterval` immediately |
 | `blueprint_status(taskId)` | **POLL** | < 1 second | Returns current pipeline stage (searching / reasoning / validating / assembling) and a progress message for display to the developer |
-| `blueprint_result(taskId)` | **RETRIEVE** | < 1 second | Returns JSON with: `markdown` (full app-blueprint.md content), `diagrams` (array of base64-encoded PNGs + drawio XMLs), `spec_hash`, `plan_hash`, `blueprint_hash`. The prompt file writes the .md and diagram files to the workspace. |
+| `blueprint_result(taskId)` | **RETRIEVE** | < 1 second | Returns JSON with: `markdown` (full app-blueprint.md content), `diagrams` (array of base64-encoded PNGs + `.eraser` source + `.drawio.xml` + `.svg`), `spec_hash`, `plan_hash`, `blueprint_hash`. The prompt file writes the .md and all diagram files to the workspace. |
 | `validate_composition(pattern_tree)` | **DETERMINISTIC** | < 1 second | Checks developer's edited pattern selections against adjacency matrix. Returns valid/invalid + reason. Called after developer edits the blueprint |
-| `assemble_blueprint(selections, spec, plan)` | **DETERMINISTIC** | < 1 second | Rebuilds final markdown from validated selections. Template-filling + diagram rendering (graphviz → PNG + drawio), no LLM involved. Called after validation passes |
+| `assemble_blueprint(selections, spec, plan)` | **DETERMINISTIC** | < 1 second | Rebuilds final `app-blueprint.md` from validated selections + **regenerates `app-blueprint.json`** from the `.md` sections (machine-readable derived artifact). Diagram rendering via **Eraser.io API** (→ `.eraser` source + PNG + `.drawio.xml` + `.svg`). No LLM involved. Called after validation passes, and auto-called by `/catalyst.generate` if `.md` was edited since last assembly. |
 
 The first three tools implement the async MCP Tasks pattern. The last two are called after the developer has reviewed and edited the blueprint — they remain synchronous because they are fast and deterministic.
 
@@ -263,9 +269,11 @@ This enables reproducibility: if a developer needs to understand why a recommend
 | Blueprint Advisor LlmAgent | RAG + LLM reasoning guided by company system prompt |
 | `search_patterns()` | RAG tool — queries Pattern Catalog in Vertex AI Search |
 | `search_skills()` | RAG tool — queries Skill Catalog in Vertex AI Search |
-| `search_tools()` | RAG tool — queries Tool Registry in Vertex AI Search |
+| `search_tools()` | RAG tool — queries Tool Registry in Vertex AI Search (MCP servers, REST APIs) |
+| `search_a2a_agents()` | Queries **Apigee API Hub** for deployed agents available for A2A delegation (`type=a2a_agent`). Returns agent name, version, capabilities, Agent Card URL, lifecycle status. Priority: A2A (reuse deployed agent) > MCP (use tool) > Build (create new). |
 | Company system prompt | Curated best practices, constraints, preferences |
 | Vertex AI Search connections | 3 archetype-specific data stores |
+| **Apigee API Hub connection** | **Unified catalog: REST APIs + MCP servers + A2A agents. Single pane for all integration types.** |
 
 **MCP protocol version:** The Blueprint Advisor MCP Server implements **MCP protocol version 2025-11-25** (which introduced the Tasks primitive for async operations). Coding agent compatibility:
 
@@ -504,10 +512,12 @@ The coding agent reads the markdown blueprint and generates the complete project
 
 | Layer | Source | Role |
 |---|---|---|
-| **Blueprint** (WHAT) | `app-blueprint.md` from Blueprint Advisor | Defines topology, tool assignments, infrastructure config |
+| **Blueprint** (WHAT) | `app-blueprint.json` (machine-readable, derived from `.md` by `assemble_blueprint`) | Defines topology, tool assignments, infrastructure config |
 | **Archetype skill** (HOW) | e.g., `adk-agents` SKILL.md | Teaches correct framework-specific patterns, imports, constructors |
 | **Overlay skills** (MUST) | Company overlay SKILL.md files | Teaches non-negotiable company standards (Terraform, Dynatrace, CI/CD, security) |
 | **Constitution.md** | In the preset | Non-negotiable rules the coding agent MUST follow (e.g., never deploy directly) |
+
+**Auto-regeneration:** When `/catalyst.generate` runs, the coding agent first checks whether `app-blueprint.md` was modified since the last `assemble_blueprint` call (by comparing the `.md` file's hash against `blueprint_hash` stored in `app-blueprint.json`). If the hashes differ, the coding agent calls `assemble_blueprint` first to regenerate `app-blueprint.json` from the edited `.md` + re-render diagrams via Eraser.io. This ensures the JSON always reflects the latest `.md` edits. The developer never needs to manually call `assemble_blueprint` before `/catalyst.generate`.
 
 **Important: Constitution.md contains coding agent rules — NOT meta-skills or decision frameworks.** The 4 meta-skills (pattern-composition, data-platform-selection, agent-boundary, skill-tool-discovery) exist only in AgentForge and are loaded into the Design Agent via ADK SkillToolset. AgentCatalyst's constitution.md is a different file with a different purpose: it constrains the coding agent during code generation.
 
@@ -527,6 +537,63 @@ The coding agent reads the markdown blueprint and generates the complete project
 | Arize Phoenix tracing config | `evalops:` |
 | Golden dataset (starter from acceptance criteria) | `golden_dataset:` |
 | 3-phase Harness evaluation pipeline | `evalops:` |
+| **Apigee proxy routes** (one per tool binding) | `tools.mcp_servers:` + `tools.a2a_agents:` |
+| **Per-agent Workload Identity** (IAM bindings with least-privilege) | `agents:` + `tools:` |
+| **API Hub registration entry** (agent card for A2A discovery) | `metadata:` + `agents:` |
+
+#### Apigee proxy generation — per-connection routing from app-blueprint.md
+
+Each tool binding in §5 generates one Apigee proxy route with authentication settings from §7 (MCP server configs). A2A agent connections discovered via API Hub generate A2A-specific proxy routes.
+
+| Source | What's generated | Purpose |
+|---|---|---|
+| Each `tools.mcp_servers[]` entry | Apigee proxy with target endpoint, mTLS/OAuth config, timeout, retry | Routes agent-to-tool calls through Apigee with IAM enforcement |
+| Each `tools.a2a_agents[]` entry | Apigee proxy with A2A Agent Card URL, mTLS, delegation scope | Routes agent-to-agent handoffs through Apigee with identity verification |
+| Agent topology (parent-child) | Delegation policy per proxy | Enforces that only authorized agents can call specific tools |
+
+#### Per-agent Workload Identity — least-privilege from app-blueprint.md
+
+For each agent in the topology (§3), the IaC generation derives a per-agent IAM configuration from the tool bindings (§5): the agent gets IAM bindings ONLY for the tools assigned to it. All other tools are implicitly denied.
+
+```hcl
+# Generated from app-blueprint.md §3 (topology) + §5 (tool bindings)
+resource "google_service_account" "extract_details" {
+  account_id   = "fnol-extract-details"
+  display_name = "FNOL - extract_details agent"
+}
+
+resource "google_project_iam_member" "extract_details_claims_db" {
+  role    = "roles/cloudsql.client"    # ONLY claims-db access
+  member  = "serviceAccount:${google_service_account.extract_details.email}"
+}
+# extract_details CANNOT access policy-api, vehicle-api, weather-api, or review-queue
+```
+
+Orchestrator agents (e.g., `fnol_coordinator`) get delegation permissions but no direct data access.
+
+#### API Hub registration — making the agent discoverable for future projects
+
+After deployment, the CI/CD pipeline registers the agent in Apigee API Hub as a new entry (`type=a2a_agent`):
+
+```yaml
+# In Jenkins/Harness pipeline — post-deployment step
+- step:
+    name: register-in-api-hub
+    command: |
+      apihub register \
+        --name=fnol-claims-agent \
+        --version=1.0.0 \
+        --type=a2a_agent \
+        --capabilities=claim-submission,claim-lookup,severity-classification \
+        --endpoint=https://fnol.internal/a2a \
+        --agent-card=https://fnol.internal/.well-known/agent.json \
+        --lifecycle=active \
+        --labels=lob:insurance,domain:claims
+```
+
+Once registered, future Blueprint Advisor runs discover this agent via `search_a2a_agents()` and can recommend A2A delegation to it — reusing the deployed agent instead of rebuilding duplicate capability. This creates a flywheel: the more agents deployed via AgentCatalyst, the more agents available for A2A delegation in future projects.
+
+→ *See Operations Runbook §11 for Apigee proxy, per-agent Workload Identity, and API Hub A2A operational procedures, health checks, and failure modes.*
 
 #### IaC generation — how the Terraform overlay skill uses GitHub URLs
 
@@ -616,8 +683,9 @@ AgentCatalyst generates code and pipeline definitions. The company's existing CI
 
 | Pipeline | Tool | Purpose |
 |---|---|---|
-| Infrastructure plane | Jenkins | `terraform plan` → `terraform apply` → provisions Cloud Run, Apigee, Cloud SQL, Model Armor, VPC-SC |
+| Infrastructure plane | Jenkins | `terraform plan` → `terraform apply` → provisions Cloud Run, Apigee proxy routes, Workload Identity SAs, Cloud SQL, Model Armor, VPC-SC |
 | Application plane | Harness | Deploys agent → runs 3-phase EvalOps → promotes Non-Prod → Pre-Prod (canary) → Production |
+| Post-deployment | Jenkins/Harness | Registers agent in Apigee API Hub (`type=a2a_agent`, capabilities, Agent Card URL) → enables A2A discovery by future Blueprint Advisor runs |
 
 **EvalOps — three-layer evaluation lifecycle:**
 
@@ -658,10 +726,13 @@ All runtime services are GA with SLA backing:
 | Content screening | Model Armor (standard) | Google's default single-pass screening. Segmented Model Armor (per-source attribution with source-specific remediation) is a future roadmap item — it requires custom implementation beyond the Model Armor API. Standard Model Armor provides adequate content screening for GA. |
 | Security | VPC-SC + CMEK + Secret Manager + Workload Identity | Data protection, key management, identity |
 
+> **Zero manual configuration:** Apigee proxy routes (one per tool binding), per-agent Workload Identity IAM bindings (least-privilege from blueprint topology + tool assignments), and API Hub registration entries (agent card for A2A discovery) are all generated by `/catalyst.generate` from `app-blueprint.md` — see Layer 3 for the generation flow, and Operations Runbook §11 for health checks and failure modes. No DevOps engineer manually configures proxy routes, IAM policies, or API Hub entries.
+
 ---
 
 ## app-blueprint.md — Template and Delivery
 
+→ *See `app-blueprint-md-template-and-fnol-example.md` for the complete 18-section template structure, FNOL reference example, and workspace file layout.*
 → *Developer Guide §5 contains the full FNOL reference example with all 18 sections populated.*
 
 ### Why markdown over YAML
@@ -674,16 +745,29 @@ When `blueprint_result` delivers the blueprint, the coding agent writes:
 
 ```
 features/fnol-claims-agent/
-├── app-blueprint.md                    ← The blueprint (structured markdown, 18 sections)
+├── app-blueprint.md                    ← PRIMARY: human-readable structured markdown (18 sections)
+├── app-blueprint.json                  ← DERIVED: machine-readable JSON (regenerated from .md by assemble_blueprint)
 ├── fnol-component-diagram.png          ← Component diagram (rendered PNG, inline in markdown)
-├── fnol-component-diagram.drawio.xml   ← Component diagram (editable in draw.io)
-├── fnol-hadr-diagram.png               ← HA/DR lifecycle diagram (rendered PNG, inline in markdown)
-├── fnol-hadr-diagram.drawio.xml        ← HA/DR diagram (editable in draw.io)
+├── fnol-component-diagram.eraser      ← Editable in Eraser.io VSCode extension
+├── fnol-component-diagram.drawio.xml  ← Editable in Draw.io VSCode extension
+├── fnol-component-diagram.svg         ← Importable into Canva or any vector editor
+├── fnol-hadr-diagram.png              ← HA/DR lifecycle diagram (rendered PNG, inline in markdown)
+├── fnol-hadr-diagram.eraser           ← Editable in Eraser.io VSCode extension
+├── fnol-hadr-diagram.drawio.xml       ← Editable in Draw.io VSCode extension
+├── fnol-hadr-diagram.svg              ← Importable into Canva
 ├── spec.md                             ← (already in workspace)
 └── plan.md                             ← (already in workspace)
 ```
 
-The `.md` file references PNGs with relative paths (`![Component Diagram](fnol-component-diagram.png)`) so they render inline in VSCode markdown preview and GitHub. The `.drawio.xml` files allow the SA to edit diagrams in draw.io — updated diagrams are picked up automatically on the next `/catalyst.assess` run.
+The `.md` file references PNGs with relative paths (`![Component Diagram](fnol-component-diagram.png)`) so they render inline in VSCode markdown preview and GitHub. Diagrams are editable in three tools:
+
+| Tool | VSCode Extension | File to open | How to edit |
+|---|---|---|---|
+| **Eraser.io** | `eraser.io` extension | `*.eraser` | Live visual editor in VSCode. Drag agents, connections, boundaries. |
+| **Draw.io** | `hediet.vscode-drawio` extension | `*.drawio.xml` | Full draw.io editor in a VSCode tab. |
+| **Canva** | Browser / desktop app | Import `*.svg` | Import SVG, edit visually, export SVG back to workspace. |
+
+Updated diagrams are picked up automatically on the next `/catalyst.assess` run.
 
 ### How `blueprint_result` delivers binary files
 
@@ -692,24 +776,29 @@ The MCP tool returns a JSON response with three fields:
 ```json
 {
   "markdown": "<full content of app-blueprint.md>",
+  "blueprint_json": "<full content of app-blueprint.json — machine-readable, derived from .md>",
   "diagrams": [
     { "filename": "fnol-component-diagram.png", "format": "png", "content_base64": "..." },
+    { "filename": "fnol-component-diagram.eraser", "format": "eraser", "content_base64": "..." },
     { "filename": "fnol-component-diagram.drawio.xml", "format": "drawio", "content_base64": "..." },
+    { "filename": "fnol-component-diagram.svg", "format": "svg", "content_base64": "..." },
     { "filename": "fnol-hadr-diagram.png", "format": "png", "content_base64": "..." },
-    { "filename": "fnol-hadr-diagram.drawio.xml", "format": "drawio", "content_base64": "..." }
+    { "filename": "fnol-hadr-diagram.eraser", "format": "eraser", "content_base64": "..." },
+    { "filename": "fnol-hadr-diagram.drawio.xml", "format": "drawio", "content_base64": "..." },
+    { "filename": "fnol-hadr-diagram.svg", "format": "svg", "content_base64": "..." }
   ],
   "spec_hash": "sha256:...", "plan_hash": "sha256:...", "blueprint_hash": "sha256:..."
 }
 ```
 
-The `/catalyst.blueprint` prompt file instructs the coding agent to write `app-blueprint.md` from the `markdown` field, and base64-decode each `diagrams` entry to the same directory.
+The `/catalyst.blueprint` prompt file instructs the coding agent to write `app-blueprint.md` from the `markdown` field, `app-blueprint.json` from the `blueprint_json` field, and base64-decode each `diagrams` entry to the same directory.
 
 > The `blueprint_result` MCP call is authenticated via OAuth 2.1 (see Layer 2 Security above) — the blueprint content is protected by Entra ID authentication and TLS 1.3 transport encryption.
 
 ### Diagram generation (inside the pipeline)
 
-- **Component diagram (PNG + drawio):** Stage 4 (`assemble_blueprint`) assembles a graphviz DOT description from the agent topology, MCP connections, A2A boundaries, and infrastructure components. Renders to PNG via graphviz. Converts to drawio XML via DOT-to-drawio transform.
-- **HA/DR diagram (PNG + drawio):** Stage 4 reads the DR strategy from plan.md and generates lifecycle views (Initial Provisioning → Component Failure / HA → DR Failover → DR Failback). Rendered to PNG and drawio.
+- **Component diagram:** Stage 4 (`assemble_blueprint`) assembles an Eraser.io DSL description from the agent topology, MCP connections, A2A boundaries, and infrastructure components. Renders to PNG via **Eraser.io API**. Converts to `.drawio.xml` and `.svg` for alternative editing tools. The `.eraser` source file is delivered alongside for editing in the Eraser.io VSCode extension.
+- **HA/DR diagram:** Stage 4 reads the DR strategy from plan.md and generates lifecycle views (Initial Provisioning → Component Failure / HA → DR Failover → DR Failback) as Eraser.io DSL. Rendered to PNG, `.drawio.xml`, and `.svg` via the same pipeline.
 - **Sequence diagrams (mermaid):** Generated as mermaid `sequenceDiagram` code and embedded inline in the markdown (§14). No separate file — mermaid renders natively in GitHub and VSCode.
 
 ### The 18 sections
@@ -736,6 +825,8 @@ The `/catalyst.blueprint` prompt file instructs the coding agent to write `app-b
 | 18 | Confidence Scores | Table | SA review |
 
 ### Governance Guardian extraction (simplified)
+
+→ *See `app-blueprint-md-template-and-fnol-example.md` §4 for the full section-to-artifact extraction mapping.*
 
 Because all artifacts are assembled in `app-blueprint.md`, the `/catalyst.assess` prompt file reads one file instead of searching the workspace:
 
@@ -799,7 +890,10 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 | 12 | EA assessment engine connected and returning valid findings for FNOL reference case | ⬜ |
 | 13 | Tech Debt Registry table created and accessible | ⬜ |
 | 14 | `/catalyst.assess` → `/catalyst.generate` flow tested end-to-end (including showstopper block + tech debt resume) | ⬜ |
-| 15 | Developer documentation (dev guide) published | ⬜ |
+| 15 | Apigee proxy routes generated from app-blueprint.md §5 tool bindings and verified (one route per MCP + A2A binding) | ⬜ |
+| 16 | Per-agent Workload Identity IAM bindings generated with least-privilege (no `roles/owner` or `roles/editor` on any agent SA) | ⬜ |
+| 17 | API Hub registration entry created post-deployment with Agent Card URL accessible and capabilities matching topology | ⬜ |
+| 18 | Developer documentation (dev guide) published | ⬜ |
 | 16 | Operations runbook (ops procedures) published | ⬜ |
 
 ---
