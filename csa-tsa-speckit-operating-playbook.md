@@ -455,8 +455,20 @@ Platform engineering maintains the Lambda functions that back the Config rules i
 | `assemble_blueprint` | Known selections | 5 min |
 | Task Store | AlloyDB `SELECT 1` connection check | 60s |
 | Cross-user access blocked | `blueprint_result` with wrong `owner_id` → 403 | 15 min |
+| Eraser.io API reachable | HTTP health check to Eraser.io API endpoint | 5 min |
+| Diagram rendering | Golden spec → verify `.eraser` + `.drawio.xml` + `.svg` + `.png` all generated | 4 hours |
 
 The pipeline completion check uses a lightweight golden spec (1 integration, minimal RAG) that completes in <30 seconds, so a 3-minute interval adds negligible load while ensuring failures are detected within 3 minutes.
+
+**Eraser.io failure mode:** If the Eraser.io API is unreachable, `assemble_blueprint` falls back to generating `.drawio.xml` and `.png` only (via internal drawio-to-PNG rendering). The `.eraser` source and `.svg` export will be missing — **Eraser.io users** should use Draw.io (`.drawio.xml`) as a temporary alternative, and **Canva users** should also use Draw.io until Eraser.io recovers. The blueprint and `app-blueprint.json` are still valid. Alert the ops team.
+
+**`app-blueprint.json` failure modes:**
+
+| Failure | Detection | Resolution |
+|---|---|---|
+| `.json` out of sync with `.md` | `/catalyst.generate` hash check detects mismatch | Auto-resolved: coding agent calls `assemble_blueprint` to regenerate `.json` from `.md` |
+| `.json` corrupted or missing | `/catalyst.generate` fails to parse | Delete `.json`, run `assemble_blueprint` manually — `.md` is always the source of truth |
+| `.json` edited directly by developer | Hash mismatch on next `/catalyst.generate` | Auto-resolved: regenerates from `.md` (overwriting manual edits). Warn: never edit `.json` directly |
 
 ### 8.10 Cloud Tasks queue configuration
 

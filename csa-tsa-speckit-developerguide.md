@@ -687,7 +687,11 @@ Agent: Blueprint ready. Writing app-blueprint.md and design_contract.json
 1. The prompt file calls `blueprint_start` with your spec + plan as JSON. The MCP server validates the input, creates a background task, and returns a `taskId` — all within 2 seconds.
 2. The prompt file polls `blueprint_status(taskId)` every 10 seconds. Each poll returns the current pipeline stage and a progress message. The agent reports these to you in the Chat pane.
 3. The background job (Cloud Run Jobs, no timeout constraint) runs the 4-stage pipeline: ④ context-filtered substitution → ⑤ semantic pattern retrieval + LLM composition → ⑥ ADR compliance check → ⑦ blueprint + contract + diagram assembly.
-4. When the poll returns `status: "completed"`, the prompt file calls `blueprint_result(taskId)` to retrieve the output and writes `app-blueprint.md` and `design_contract.json` to your workspace.
+4. When the poll returns `status: "completed"`, the prompt file calls `blueprint_result(taskId)` to retrieve the output and writes all files to your workspace:
+   - **`app-blueprint.md`** — PRIMARY artifact. Human-readable structured markdown (18 sections). You edit THIS file.
+   - **`app-blueprint.json`** — DERIVED artifact. Machine-readable JSON generated from `.md` by `assemble_blueprint`. Consumed by `/catalyst.generate`. **Never edit this file directly** — it's regenerated from `.md` automatically.
+   - **`design_contract.json`** — Design contract with provenance, attestations, migration phases.
+   - **Diagram files** — `.eraser` (Eraser.io VSCode extension), `.drawio.xml` (Draw.io extension), `.svg` (Canva import), `.png` (auto-rendered, inline in markdown).
 
 If anything fails — substitution unresolved, ADR rejected, composition invalid — the poll returns `status: "failed"` with a structured error. You get the same actionable error messages as before; they just arrive via the polling mechanism.
 
@@ -700,6 +704,15 @@ If anything fails — substitution unresolved, ADR rejected, composition invalid
 ## 13. Reviewing the Blueprint and Design Contract
 
 → *Architecture §9.6 provides the full design contract schema.*
+
+**Editing diagrams — choose your tool:** Your workspace contains 4 formats per diagram. Edit whichever you prefer — the others are re-rendered when `assemble_blueprint` runs (auto-called by `/catalyst.generate` if `.md` changed):
+
+| Tool | VSCode Extension | File to open |
+|---|---|---|
+| **Eraser.io** | `eraser.io` extension | `*.eraser` — live visual editor |
+| **Draw.io** | `hediet.vscode-drawio` extension | `*.drawio.xml` — full draw.io editor |
+| **Canva** | Browser / desktop app | Import `*.svg` — edit visually, export back |
+| **Mermaid** | Built-in VSCode preview | Edit inline in `.md` §14 |
 
 Check in this order:
 
@@ -724,7 +737,7 @@ After reviewing the blueprint and design contract, run the governance assessment
 /catalyst.assess
 ```
 
-The coding agent reads `app-blueprint.md` and extracts all 7 artifact types by section header — the TSA component diagram PNG from §4, HA/DR views from §13, sequence diagrams from §14 (inline mermaid), NFRs from §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as JSON, and sends to the Governance Guardian MCP Server via async MCP Tasks (same pattern as Blueprint Advisor).
+The coding agent reads `app-blueprint.md` (NOT `app-blueprint.json` — governance assesses the human-readable architecture, not the machine-readable JSON) and extracts all 7 artifact types by section header — the TSA component diagram PNG from §4, HA/DR views from §13, sequence diagrams from §14 (inline mermaid), NFRs from §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as an ephemeral solution_package (transport JSON, not the `.json` file), and sends to the Governance Guardian MCP Server via async MCP Tasks (same pattern as Blueprint Advisor). The `app-blueprint.json` file is untouched during governance.
 
 You see progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...". When complete, you receive a scorecard (7 categories, 0–100 each) and findings (showstopper / high / medium / low).
 

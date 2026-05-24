@@ -924,41 +924,46 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 
 ---
 
-## Appendix A — FNOL Agentic Application: Complete Preset & Example Files
 
-*This appendix contains all files used in the FNOL (First Notice of Loss) agentic application example referenced throughout this document. These files constitute the AgentCatalyst preset for the agentic archetype.*
+## Appendix — Greenfield Agentic SpecKit Preset: Complete Template Files
 
-### Directory structure
+This appendix contains every template file in the `agentcatalyst-enterprise` preset. FNOL-specific samples (filled examples) are in the Developer Guide Appendix.
 
 ```
 .specify/
-├── preset.yml                              ← Manifest: archetype, templates, commands, settings
+├── preset.yml                              ← G1: Manifest
 ├── templates/
-│   ├── spec-template.md                    ← /specify loads this — 10-section structured format
-│   ├── plan-template.md                    ← /plan loads this — technical questions
-│   └── tasks-template.md                   ← /tasks loads this — generated vs manual work
+│   ├── spec-template.md                    ← T1: 10-section spec
+│   ├── plan-template.md                    ← T2: Technical questions
+│   └── tasks-template.md                   ← T3: Generated vs manual
 ├── commands/
-│   ├── catalyst.blueprint.md               ← Custom command: sends spec+plan to Blueprint Advisor
-│   ├── catalyst.assess.md                  ← Custom command: sends solution artifacts to Governance Guardian
-│   └── catalyst.generate.md                ← Custom command: generates code (with governance gate)
-│   └── catalyst.generate.md                ← Custom command: reads blueprint, triggers skill-guided generation (with governance gate)
+│   ├── catalyst.blueprint.md               ← P1: Blueprint Advisor call
+│   ├── catalyst.assess.md                  ← P2: Governance Guardian call
+│   └── catalyst.generate.md                ← P3: Code generation + gov gate
+├── skills/
+│   ├── adk-agents/SKILL.md                 ← S1: ADK agent patterns
+│   ├── adk-tools/SKILL.md                  ← S2: ADK tool patterns
+│   ├── company-terraform/SKILL.md          ← S3: IaC overlay
+│   ├── company-observability/SKILL.md      ← S4: Monitoring overlay
+│   ├── company-cicd/SKILL.md               ← S5: CI/CD overlay
+│   └── company-security/SKILL.md           ← S6: Security overlay
 ├── memory/
-│   ├── adk-reference.md                    ← ADK framework patterns, imports, constructors
-│   ├── company-patterns.md                 ← Company coding standards, naming, error handling
-│   ├── approved-tools.md                   ← Approved MCP servers, A2A endpoints, FunctionTools
-│   └── infra-standards.md                  ← Terraform modules, Dynatrace config, CI/CD templates
-└── constitution.md                         ← Non-negotiable rules the coding agent MUST follow
+│   ├── adk-reference.md                    ← M1: ADK framework reference
+│   ├── company-patterns.md                 ← M2: Company coding standards
+│   ├── approved-tools.md                   ← M3: Approved integrations
+│   └── infra-standards.md                  ← M4: Infrastructure standards
+├── schemas/
+│   └── app-blueprint.schema.json           ← F2: JSON schema
+└── constitution.md                         ← C1: Non-negotiable rules
 ```
+
+→ *app-blueprint.md template (F1) is in `app-blueprint-md-template-and-fnol-example.md` (18-section template + FNOL example).*
 
 ---
 
-### A.1 preset.yml
+### G1 — preset.yml
 
 ```yaml
-# AgentCatalyst Preset for GitHub Spec Kit
-# Install: specify preset add agentcatalyst-enterprise
-# Source: github.com/[company]/agentcatalyst-preset
-
 name: agentcatalyst
 version: "1.0.0"
 description: >
@@ -966,7 +971,7 @@ description: >
   Structured requirements capture, AI-assisted architecture advice
   via Blueprint Advisor, and skill-guided code generation.
 
-archetype: agentic    # Also available: microservice, pipeline, api
+archetype: agentic
 
 templates:
   spec: templates/spec-template.md
@@ -975,6 +980,7 @@ templates:
 
 commands:
   - commands/catalyst.blueprint.md
+  - commands/catalyst.assess.md
   - commands/catalyst.generate.md
 
 memory:
@@ -1013,1194 +1019,999 @@ settings:
 
 ---
 
-### A.2 templates/spec-template.md
+### T1 — templates/spec-template.md
 
 ```markdown
 ---
 template: agentcatalyst-spec
-version: "1.0.0"
-description: Structured requirements for agentic AI applications
-usage: Run /specify to fill in this template
+version: "2.0"
+archetype: agentic
 ---
 
 # Agent Specification
 
-## Business Problem
+## 1. Business Context
+<!-- What business problem does this agent solve? Who are the users? What's the current process? -->
 
-<!--
-Describe who uses this agent, what it automates, and the business value.
-EXAMPLE: "We need an AI agent that handles FNOL for auto insurance.
-When a policyholder reports an accident, the agent verifies coverage,
-collects details, assesses severity, and routes high-severity to adjusters.
-Currently takes 3-5 days. Target: under 1 hour."
--->
+## 2. Workflow — Step by Step
+<!-- Describe the agent's workflow using ordering words: "First... then... in parallel... loop until... route to..." -->
+<!-- These ordering words are signals for the Blueprint Advisor to select agentic patterns. -->
 
-[Describe your business problem here]
+## 3. Regulatory Requirements
+<!-- Compliance, data residency, audit trail, PII handling, retention policies -->
 
-## Workflow
+## 4. Data Systems
+<!-- What databases, data warehouses, or data lakes does this agent need? -->
+<!-- Include: system name, read/write/both, data format, existing or new -->
 
-<!--
-Step-by-step workflow using ordering words that guide pattern selection:
-- "First... Then... Finally" → Sequential
-- "Simultaneously... In parallel" → Parallel
-- "Generate... validate... refine until" → Loop
-- "If [condition], route to [role]" → HITL
--->
+## 5. External Partners & Integrations
+<!-- External APIs, partner systems, third-party services -->
+<!-- Include: who owns it, API type (REST/gRPC/MCP/A2A), auth method -->
+<!-- Use phrases like "they operate their own" to signal A2A boundaries -->
 
-[Describe your workflow here]
+## 6. What We Own vs What We Connect To
+<!-- Clarify ownership: which systems does your team own/control vs consume -->
+<!-- "EXISTING REST API — MUST use these existing endpoints" signals FunctionTool wrapping -->
 
-## Data Sources
+## 7. Business Rules
+<!-- Structured IF/THEN conditions. These generate working FunctionTool code. -->
+<!-- Format: IF <condition> THEN <action> [ELSE <alternative>] -->
 
-<!--
-List every data system with access pattern and workload type:
-- "BigQuery policy warehouse (analytical, read-only)" → BigQuery MCP
-- "Cloud SQL active claims (transactional, read-write)" → Cloud SQL MCP
-- "Policy documents in GCS (retrieval)" → Vertex AI Search
--->
+## 8. Transformation Rules
+<!-- Data transformation, mapping, enrichment logic -->
+<!-- Format: TRANSFORM <source_field> TO <target_field> USING <logic> -->
 
-[List your data sources here]
+## 9. Error Handling
+<!-- What happens when things fail? Retry? Fallback? Human escalation? -->
 
-## External Integrations
-
-<!--
-Partner services you DON'T operate. Use "they operate their own"
-to signal A2A agent connections vs MCP tool connections.
-EXAMPLE: "Body shop network — they operate their own scheduling system"
--->
-
-[List external integrations here]
-
-## Internal Capabilities
-
-<!--
-Proprietary logic YOUR team owns. These become FunctionTool implementations.
-Describe each as structured IF/THEN rules where possible.
-EXAMPLE: "Severity classifier — IF vehicle_damage > $10K AND injuries = true
-THEN severity = 'high' AND route_to_adjuster = true"
--->
-
-[List internal capabilities here]
-
-## Infrastructure Requirements
-
-<!--
-GCP region, compliance, data residency, networking constraints.
-Check memory/infra-standards.md for approved Terraform module versions.
--->
-
-[Describe infrastructure requirements here]
-
-## Business Rules
-
-<!--
-Structured IF/THEN conditions per decision point. These generate
-first-draft FunctionTool implementations that you review and refine.
-
-FORMAT:
-Decision Point: [name]
-  Inputs: [what data feeds this decision]
-  IF [condition] THEN [action]
-  IF [condition] THEN [action]
-  ELSE [default action]
-  Edge cases: [what happens with missing/invalid data]
-  Validation: [how to verify correctness]
--->
-
-[Define your business rules here]
-
-## Transformation Rules
-
-<!--
-Field mappings and formulas for data transformations.
-FORMAT:
-Source: [field_name from system_name]
-Target: [output_field_name]
-Formula: [transformation logic]
--->
-
-[Define your transformation rules here]
-
-## Error Handling
-
-<!--
-Per-dependency timeout, failure, and retry behavior.
-FORMAT:
-Dependency: [system_name]
-  Timeout: [duration]
-  On failure: [retry N times / fail open / fail closed / use cached]
-  On partial data: [proceed with available / block until complete]
--->
-
-[Define your error handling here]
-
-## Acceptance Criteria
-
-<!--
-GIVEN/WHEN/THEN assertions per workflow step. These generate
-the starter golden dataset for EvalOps evaluation.
-
-FORMAT:
-GIVEN [precondition]
-WHEN [action/trigger]
-THEN [expected outcome]
-AND [additional assertion]
--->
-
-[Define your acceptance criteria here]
+## 10. Acceptance Criteria
+<!-- Measurable criteria for success. These seed the golden dataset. -->
+<!-- Format: GIVEN <context> WHEN <action> THEN <expected_result> -->
 ```
 
 ---
 
-### A.3 templates/plan-template.md
+### T2 — templates/plan-template.md
 
 ```markdown
 ---
 template: agentcatalyst-plan
-version: "1.0.0"
-description: Technical decisions mapping to blueprint fields
-usage: Run /plan to answer these questions
+version: "2.0"
+archetype: agentic
 ---
 
 # Technical Plan
 
-## Target Platform
-- **Runtime:** [cloud_run]
-- **GCP Project:** [project-id]
-- **GCP Region:** [e.g., us-central1]
+## Infrastructure
+- **Primary GCP region:** <!-- e.g., us-east1 -->
+- **DR region:** <!-- e.g., us-west1 -->
+- **DR strategy:** <!-- active-active | hot-standby | pilot-cold -->
 
 ## Model Selection
-- **Primary model:** [e.g., gemini-2.0-flash]
-- **Reasoning model (if different):** [e.g., gemini-2.0-pro for complex steps]
-
-## Infrastructure
-- **Terraform module source:** [e.g., github.com/[company]/terraform-modules]
-- **Terraform module version:** [e.g., v3.2.1]
-- **VPC-SC perimeter:** [yes/no]
-- **CMEK encryption:** [yes/no]
+- **Primary LLM:** <!-- e.g., gemini-2.0-flash -->
+- **Fallback LLM:** <!-- e.g., gemini-2.0-flash-lite -->
+- **Embedding model:** <!-- e.g., text-embedding-005 -->
 
 ## CI/CD
-- **Infrastructure pipeline:** [Jenkins]
-- **Application pipeline:** [Harness]
-- **Deployment strategy:** [canary/blue-green/rolling]
-- **Canary percentage:** [e.g., 10%]
-- **Observation window:** [e.g., 30 minutes]
-
-## Observability
-- **APM:** [Dynatrace]
-- **SIEM:** [Splunk]
-- **Tracing:** [OpenTelemetry + Arize Phoenix]
+- **Infrastructure pipeline:** <!-- Jenkins | Cloud Build -->
+- **Application pipeline:** <!-- Harness | Cloud Deploy -->
+- **IaC module source:** <!-- e.g., github.com/[company]/terraform-modules -->
 
 ## Security
-- **Model Armor:** [standard]
-- **DLP scanning:** [yes/no]
-- **Secret Manager:** [yes/no — for API keys, credentials]
+- **Auth method for MCP servers:** <!-- mTLS | OAuth 2.1 | API Key -->
+- **Data classification:** <!-- public | internal | confidential | restricted -->
+- **PII handling:** <!-- mask | tokenize | encrypt -->
+
+## Observability
+- **APM:** <!-- Dynatrace | Cloud Monitoring -->
+- **Logging:** <!-- Splunk | Cloud Logging -->
+- **Tracing:** <!-- Arize Phoenix | Cloud Trace -->
 
 ## EvalOps
-- **Pre-commit threshold:** [e.g., 10% max regression]
-- **Arize pass_rate gate:** [e.g., >= 0.95]
-- **Arize p95_latency gate:** [e.g., <= 3s]
-- **HITL routing condition:** [e.g., confidence < 0.7 or edge_case = true]
+- **Evaluation frequency:** <!-- pre-commit | nightly | weekly -->
+- **HITL reviewers:** <!-- number of human reviewers for phase 3 -->
+- **AutoSxS baseline model:** <!-- e.g., gemini-1.5-pro for comparison -->
 ```
 
 ---
 
-### A.4 templates/tasks-template.md
+### T3 — templates/tasks-template.md
 
 ```markdown
 ---
 template: agentcatalyst-tasks
-version: "1.0.0"
-description: Task breakdown — generated vs developer-implemented
-usage: Run /tasks after receiving blueprint to see the breakdown
+version: "2.0"
+archetype: agentic
 ---
 
-# Task Breakdown
+# Work Breakdown — Generated vs Manual
 
-## Generated by coding agent (developer reviews)
+## Auto-Generated by /catalyst.generate (80-95%)
 
-| Component | Source (blueprint section) | Status |
+| Category | Files | Source |
 |---|---|---|
-| ADK agent class hierarchy | agents: | ⬜ Generated |
-| MCP server connections | tools.mcp_servers: | ⬜ Generated |
-| A2A client connections | tools.a2a_agents: | ⬜ Generated |
-| FunctionTool implementations (first draft from business rules) | tools.function_tools: + business_rules: | ⬜ Generated — REVIEW REQUIRED |
-| Terraform modules | infrastructure: | ⬜ Generated |
-| Dynatrace observability config | observability: | ⬜ Generated |
-| Jenkins + Harness pipelines | ci_cd: | ⬜ Generated |
-| Model Armor callbacks | security: | ⬜ Generated |
-| Pre-commit evaluation hook | evalops: | ⬜ Generated |
-| Arize Phoenix tracing config | evalops: | ⬜ Generated |
-| Golden dataset (starter) | golden_dataset: | ⬜ Generated |
-| 3-phase Harness eval pipeline | evalops: | ⬜ Generated |
+| Agent classes | `app/agents/*.py` | Blueprint §3 agent topology |
+| MCP connections | `app/mcp_connections/*.py` | Blueprint §5 tool bindings |
+| A2A clients | `app/a2a_clients/*.py` | Blueprint §5 A2A bindings |
+| FunctionTools (first draft) | `app/tools/*.py` | Spec §7 business rules (IF/THEN → Python) |
+| Model Armor callbacks | `app/security/*.py` | Blueprint §16 screening config |
+| Terraform (multi-region) | `deployment/terraform/*.tf` | Blueprint §8 infra modules |
+| Gateway proxy routes | `deployment/terraform/gateway/*.tf` | Blueprint §5 tool bindings |
+| Agent Workload Identity | `deployment/terraform/identity/*.tf` | Blueprint §3+§5 topology+bindings |
+| API Hub registration | `deployment/terraform/registry/*.tf` | Blueprint §1+§3 metadata+topology |
+| Dynatrace config | `config/dynatrace/*.json` | Plan observability settings |
+| CI/CD pipelines | `ci-cd/*.yaml` | Plan CI/CD settings |
+| Pre-commit eval hook | `.pre-commit-config.yaml` | Always generated |
+| Golden dataset (starter) | `eval/golden-dataset.json` | Spec §10 acceptance criteria |
+| EvalOps pipeline | `eval/pipeline.yaml` | Plan EvalOps settings |
+| OTel collector config | `config/otel-collector-config.yaml` | Always generated |
 
-## Developer implements / reviews
+## Developer Implements (5-20%)
 
-| Task | Why it can't be generated | Priority |
-|---|---|---|
-| Review FunctionTool business logic | First draft generated from spec rules — developer refines and makes it their own | P0 |
-| System prompts per agent | Requires domain expertise, tone, persona | P0 |
-| Eval dataset curation | Requires real-world edge cases beyond acceptance criteria | P1 |
-| Proprietary algorithms | ML models, actuarial formulas not expressible as IF/THEN | P1 |
-| Pydantic output schemas | Domain-specific data contracts | P2 |
+| Task | Priority | Effort | Why |
+|---|---|---|---|
+| System prompts | P0 | 2-4 hrs | Domain expertise — only you know the right tone, constraints, persona |
+| Review FunctionTool logic | P0 | 2-4 hrs | First-draft from business rules — verify edge cases, add domain nuance |
+| Eval dataset curation | P1 | 4-8 hrs | Add edge cases, adversarial inputs, domain-specific test scenarios |
+| Proprietary algorithms | P1 | 4-8 hrs | Complex domain logic that can't be captured as IF/THEN rules |
+| Integration testing | P1 | 2-4 hrs | End-to-end testing with real data sources |
 ```
 
 ---
 
-### A.5 commands/catalyst.blueprint.md
+### P1 — commands/catalyst.blueprint.md
 
 ```markdown
 ---
-name: catalyst.blueprint
-description: Connect to Blueprint Advisor MCP Server for architecture recommendation
-usage: /catalyst.blueprint
+command: catalyst.blueprint
+description: Send spec and plan to Blueprint Advisor for AI-assisted architecture advice
 ---
 
 # /catalyst.blueprint
 
-Read `spec.md` and `plan.md` from the current workspace.
+## What this command does
+Connects to the Blueprint Advisor MCP Server, sends your spec.md and plan.md, and retrieves an architecture blueprint with diagrams.
 
-Connect to the Blueprint Advisor MCP Server:
-  endpoint: mcp://blueprint-advisor.[company-domain].run.app
-  auth: OAuth 2.1 (company SSO)
+## Steps (you execute these automatically)
 
-Call the `submit_spec_and_plan` MCP tool with:
-  - spec: contents of spec.md
-  - plan: contents of plan.md
-  - archetype: from preset.yml (e.g., "agentic")
+1. Read `spec.md` and `plan.md` from the workspace.
+2. Call `blueprint_start` on the Blueprint Advisor MCP Server:
+   - Endpoint: configured in preset (MCP Server URL)
+   - Auth: OAuth 2.1 + Entra ID (automatic via stored token)
+   - Payload: `{ spec: <spec.md content>, plan: <plan.md content> }`
+   - Response: `{ taskId, status: "accepted", pollInterval: 10000 }`
+3. Poll `blueprint_status(taskId)` every `pollInterval` milliseconds:
+   - Report progress to the developer: stage name + message
+   - Continue until `status` is `completed` or `failed`
+4. Call `blueprint_result(taskId)` to retrieve the output.
+5. Write all files to the workspace:
+   - `app-blueprint.md` from the `markdown` field (PRIMARY artifact)
+   - `app-blueprint.json` from the `blueprint_json` field (DERIVED — never edit directly)
+   - All diagram files from the `diagrams` array (base64-decode each):
+     - `*-component-diagram.png` + `.eraser` + `.drawio.xml` + `.svg`
+     - `*-hadr-diagram.png` + `.eraser` + `.drawio.xml` + `.svg`
+6. Report to developer: "Blueprint ready. Review app-blueprint.md in your editor."
 
-The MCP server internally runs the Blueprint Advisor LlmAgent:
-  1. Queries Vertex AI Search catalogs (patterns, skills, tools)
-  2. Applies LLM reasoning guided by company system prompt
-  3. Assembles the blueprint markdown
-  4. Returns the result via MCP protocol
+## Error handling
+- If `blueprint_start` returns 401: OAuth token expired. Run `/auth refresh` and retry.
+- If `blueprint_status` returns `failed`: Report the error message. Developer should check spec.md format.
+- If polling exceeds 5 minutes: Report timeout. The Blueprint Advisor may be overloaded.
 
-The coding agent CANNOT access Vertex AI Search directly.
-The coding agent CANNOT invoke the LlmAgent directly.
-All intelligence lives on the server side, accessed only via MCP tools.```
-
-Connect to the Blueprint Advisor MCP Server:
-`mcp://blueprint-advisor.[company-domain].run.app`
-
-Call the `submit_spec_and_plan` MCP tool with the spec and plan contents.
-The MCP server handles all internal processing (RAG search, LLM reasoning, blueprint assembly) and returns the result.
-
-Save the response as `app-blueprint.md` in the workspace root.
-
-Display a summary showing:
-- Number and types of agents recommended
-- Number of MCP servers, A2A agents, and FunctionTool implementations
-- Skills discovered with versions
-- Confidence level (high/medium/low) for each recommendation
-
-Remind the developer: "Review the YAML and edit any field before running /catalyst.generate."
+## What NOT to do
+- Do NOT read or modify `app-blueprint.json` — it is auto-generated from `.md`.
+- Do NOT call `blueprint_result` before status is `completed`.
+- Do NOT send `app-blueprint.md` content back to the MCP Server — the blueprint is a LOCAL artifact.
 ```
 
 ---
 
-### A.6 commands/catalyst.generate.md
+### P2 — commands/catalyst.assess.md
 
 ```markdown
 ---
-name: catalyst.generate
-description: Read the markdown blueprint and generate the complete project using skills
-usage: /catalyst.generate
+command: catalyst.assess
+description: Send solution artifacts to Governance Guardian for EA assessment
+---
+
+# /catalyst.assess
+
+## What this command does
+Extracts architecture artifacts from app-blueprint.md (NOT app-blueprint.json) and sends them to the Governance Guardian for enterprise architecture assessment.
+
+## Steps (you execute these automatically)
+
+1. Read `app-blueprint.md` from the workspace. Do NOT read `app-blueprint.json`.
+2. Extract 7 artifact types by section header:
+   - TSA component diagram: read PNG path from `![...]()` in §4
+   - HA/DR views: read PNG paths from §13
+   - Sequence diagrams: extract mermaid code blocks from §14
+   - NFRs: extract the table from §10
+   - Architecture decisions log: extract the table from §11
+   - Tech stack: extract the table from §12
+   - Patterns used: extract from §2
+3. Package as a `solution_package` JSON (ephemeral transport — NOT the same as `app-blueprint.json`):
+   ```json
+   {
+     "tsa_diagram": "<base64 PNG>",
+     "hadr_views": ["<base64 PNG>", ...],
+     "sequence_diagrams": ["<mermaid code>", ...],
+     "nfrs": [{ "category": "...", "requirement": "...", "target": "..." }],
+     "adl": [{ "decision": "...", "rationale": "...", "alternatives": "..." }],
+     "tech_stack": [{ "component": "...", "technology": "...", "version": "..." }],
+     "patterns": [{ "name": "...", "justification": "..." }]
+   }
+   ```
+4. Call `assess_start` on the Governance Guardian MCP Server:
+   - Payload: the `solution_package` JSON
+   - Response: `{ taskId, status: "accepted" }`
+5. Poll `assess_status(taskId)` every 10 seconds:
+   - Report progress: "Evaluating architecture compliance...", "Scoring HA/DR readiness..."
+6. Call `assess_result(taskId)` to retrieve the scorecard + findings.
+7. Display to developer:
+   - Scorecard (7 categories, score 0-100)
+   - Findings list (severity: showstopper / high / medium / low)
+   - If showstoppers: "Fix showstoppers and re-run /catalyst.assess"
+   - If no showstoppers: "Assessment passed. You can run /catalyst.generate"
+
+## Critical rules
+- ALWAYS read from `app-blueprint.md`, NEVER from `app-blueprint.json`.
+- The `solution_package` is an ephemeral transport payload — not a file, not the `.json`.
+- `app-blueprint.json` is NOT read, NOT sent, NOT modified during assessment.
+```
+
+---
+
+### P3 — commands/catalyst.generate.md
+
+```markdown
+---
+command: catalyst.generate
+description: Generate complete project with governance gate
 ---
 
 # /catalyst.generate
 
-Read `app-blueprint.md` from the workspace root.
+## What this command does
+Checks governance gate, auto-regenerates app-blueprint.json if needed, then generates the complete project using skill-constrained code generation.
 
-Validate the YAML schema:
-- All required fields present (archetype, agents[], tools, infrastructure)
-- All referenced skills available in the preset
-- Pattern composition is valid (no forbidden nesting)
+## Steps (you execute these automatically)
 
-Load skills in this order:
-1. constitution.md (non-negotiable rules — read FIRST)
-2. Archetype skill (e.g., adk-agents) — teaches framework-specific patterns
-3. Company overlay skills (terraform, observability, cicd, security) — teaches company standards
+### Step 0 — Governance gate
+1. Call `recordTechDebt` on the Governance Guardian MCP Server.
+2. If response is `{ signal: "stop", showstoppers: [...] }`:
+   - Report: "Governance gate BLOCKED. Showstoppers remain. Run /catalyst.assess after fixing."
+   - STOP. Do not proceed.
+3. If response is `{ signal: "resume", tech_debt_id: "TD-..." }`:
+   - Report: "Governance gate passed. Tech debt recorded as [tech_debt_id]."
+   - Proceed to Step 0a.
 
-Generate the complete project following the blueprint:
-- For each agent in agents[]: generate ADK class file
-- For each MCP server: generate connection file
-- For each A2A agent: generate client file
-- For each FunctionTool: generate implementation file with first-draft business logic from business_rules
-- Generate Terraform modules from infrastructure section
-- Generate observability config from observability section
-- Generate CI/CD pipelines from ci_cd section
-- Generate Model Armor callbacks from security section
-- Generate pre-commit evaluation hook from evalops section
-- Generate Phoenix tracing config from evalops section
-- Generate golden dataset from golden_dataset section
-- Generate 3-phase Harness evaluation pipeline from evalops section
+### Step 0a — Auto-regeneration
+1. Read `blueprint_hash` from `app-blueprint.json`.
+2. Compute SHA-256 of current `app-blueprint.md`.
+3. If hashes differ:
+   - Call `assemble_blueprint` on the Blueprint Advisor MCP Server to regenerate `.json` from `.md`.
+   - Write updated `app-blueprint.json` to workspace.
+   - Report: "Blueprint changed. JSON regenerated."
+4. If hashes match: proceed (JSON is current).
 
-Commit all generated files to the workspace.
+### Step 1–18 — Skill-guided code generation
+1. Read `app-blueprint.json` (machine-readable — the WHAT).
+2. Load domain skills: `adk-agents` SKILL.md + `adk-tools` SKILL.md (the HOW).
+3. Load overlay skills: `company-terraform`, `company-observability`, `company-cicd`, `company-security` (the MUST).
+4. Load `constitution.md` (non-negotiable rules).
+5. Generate files in this order:
+   - Agent classes from `agents[]` in JSON (constrained by `adk-agents` skill)
+   - MCP connections from `tools.mcp_servers[]` (constrained by `adk-tools` skill)
+   - A2A clients from `tools.a2a_agents[]` (constrained by `adk-tools` skill)
+   - FunctionTools from `business_rules{}` (first-draft Python from IF/THEN rules)
+   - Model Armor callbacks from `screening_config{}` (constrained by `company-security` skill)
+   - Terraform from `infrastructure{}` (constrained by `company-terraform` skill)
+   - Gateway proxy routes from `tools[]` (constrained by `company-terraform` skill)
+   - Agent Workload Identity from `agents[]` + `tools[]` (constrained by `company-terraform` skill)
+   - API Hub registration from `metadata{}` + `agents[]` (constrained by `company-terraform` skill)
+   - Dynatrace config (constrained by `company-observability` skill)
+   - CI/CD pipelines (constrained by `company-cicd` skill)
+   - Pre-commit eval hook (always generated)
+   - Golden dataset from `evalops.golden_dataset{}` (constrained by `company-cicd` skill)
+   - EvalOps pipeline (constrained by `company-cicd` skill)
+   - OTel collector config (constrained by `company-observability` skill)
+   - README.md, pyproject.toml, Dockerfile
+6. `git add` all generated files. Do NOT `git push` or deploy.
+7. Report: "Project generated. Review files, write system prompts, then create a PR."
 
-CRITICAL: Do NOT deploy. Do NOT run `terraform apply`. Do NOT run `agents-cli deploy`.
-Generate pipeline FILES. The company's CI/CD will deploy after the developer commits and opens a PR.
+## Critical rules
+- NEVER use raw `google_*` or `aws_*` Terraform resources — ALWAYS use company modules from §8.
+- NEVER deploy directly — generate code + IaC + pipeline definitions ONLY.
+- ALWAYS generate pre-commit evaluation hooks.
+- ALWAYS generate Model Armor callbacks for agents handling PII.
+- Read `app-blueprint.json` for code generation, NOT `app-blueprint.md`.
 ```
 
 ---
 
-### A.7 memory/ files (summaries)
-
-**memory/adk-reference.md** — ADK framework reference loaded into the coding agent's context. Contains correct import paths (`from google.adk import Agent`), class constructors for all ADK agent types (LlmAgent, SequentialAgent, ParallelAgent, LoopAgent), tool wiring patterns, MCP connection boilerplate, A2A client patterns, and common pitfalls to avoid.
-
-**memory/company-patterns.md** — Company coding standards loaded into the coding agent's context. Contains naming conventions (snake_case for files, PascalCase for classes), error handling standards (structured logging, retry with exponential backoff), code organization patterns (agents in `app/sub_agents/`, tools in `app/tools/`, MCP in `app/mcp_connections/`), and documentation requirements (docstrings on all public functions).
-
-**memory/approved-tools.md** — Registry of approved MCP servers, A2A endpoints, and FunctionTool patterns. Each entry includes the tool name, endpoint URL, connection type (MCP/A2A/FunctionTool), capabilities description, assigned data domain, and SLA. The coding agent checks this list before generating tool connections.
-
-**memory/infra-standards.md** — Infrastructure standards loaded into the coding agent's context. Contains approved Terraform module versions (pinned), Dynatrace dashboard-as-code templates, Jenkins pipeline template paths, Harness pipeline template structure, VPC-SC perimeter rules, CMEK key ring references, and Cloud Run scaling parameters.
-
----
-
-### A.8 constitution.md (key rules)
+### S1 — skills/adk-agents/SKILL.md
 
 ```markdown
 ---
-name: agentcatalyst-constitution
-description: Non-negotiable rules for the coding agent
----
-
-# Constitution
-
-## MUST follow (non-negotiable)
-
-1. NEVER deploy directly. Generate pipeline files only. The company's CI/CD deploys.
-2. NEVER create resources outside the approved GCP project.
-3. ALWAYS use company Terraform modules — never raw GCP provider resources.
-4. ALWAYS use approved Dynatrace dashboard templates — never custom dashboards.
-5. ALWAYS generate pre-commit evaluation hooks and golden dataset.
-6. ALWAYS use company naming conventions (see memory/company-patterns.md).
-7. NEVER hardcode secrets — use Secret Manager references.
-8. ALWAYS generate Model Armor callbacks for every agent.
-9. ALWAYS include VPC-SC configuration when security.vpc_sc = true.
-10. ALWAYS generate 3-phase Harness evaluation pipeline (Arize → AutoSxS → HITL).
-
-## SHOULD follow (best practice)
-
-1. Prefer FunctionTool with business logic from spec over empty stubs.
-2. Include retry logic with exponential backoff for all external calls.
-3. Add structured logging at every agent decision point.
-4. Generate Pydantic models for all tool input/output schemas.
-5. Include health check endpoints for every deployed service.
-```
-
----
-
-### A.9 FNOL Example: Filled spec.md
-
-```markdown
-# Agent Specification — FNOL (First Notice of Loss)
-
-## Business Problem
-
-We need an AI agent that handles First Notice of Loss (FNOL) for auto insurance.
-When a policyholder reports an accident via phone or web, the agent should verify
-their policy, collect incident details, assess severity, and either auto-approve
-low-severity claims or route high-severity ones to a human adjuster. Currently
-this process takes 3-5 days manually. The agent should reduce it to under 1 hour.
-
-## Workflow
-
-1. First, verify the policyholder's identity and active coverage by
-   querying our BigQuery policy data warehouse.
-2. Then, extract structured incident details from the caller's description.
-3. After extraction, simultaneously enrich with three external sources:
-   body shop repair estimates, rental car availability, police report.
-4. Generate a claim summary, validate against our quality rubric, and
-   refine until the quality score exceeds 0.85.
-5. If severity is high or fraud score > 0.7, route to a human adjuster
-   for review and approval.
-
-## Data Sources
-
-- BigQuery policy data warehouse (analytical, read-only) — coverage verification
-- Cloud SQL active claims database (transactional, read-write) — claim creation and updates
-- Vertex AI Search policy documents (retrieval) — policy terms and conditions
-
-## External Integrations
-
-- Body shop network — they operate their own scheduling and estimation system
-- Rental car service — they operate their own fleet availability API
-- Police report service — they operate their own incident report retrieval
-
-## Internal Capabilities
-
-- Severity classifier — our proprietary algorithm that assesses claim severity
-- Coverage calculator — determines deductible and coverage limits per policy type
-- Notification sender — sends status updates to policyholder via email/SMS
-
-## Infrastructure Requirements
-
-- GCP region: us-central1
-- Data residency: US only
-- VPC-SC perimeter required
-- CMEK encryption for all data at rest
-
-## Business Rules
-
-Decision Point: Severity Classification
-  Inputs: vehicle_damage_estimate, injury_reported, num_vehicles, police_report_filed
-  IF vehicle_damage > $10,000 AND injury_reported = true THEN severity = "critical"
-  IF vehicle_damage > $10,000 AND injury_reported = false THEN severity = "high"
-  IF vehicle_damage > $2,000 THEN severity = "medium"
-  ELSE severity = "low"
-  Edge cases: IF vehicle_damage is unknown, default to severity = "high" (conservative)
-
-Decision Point: Fraud Routing
-  Inputs: fraud_risk_score, claim_frequency_last_12mo, police_report_consistent
-  IF fraud_risk_score > 0.7 THEN route_to_siu = true
-  IF claim_frequency_last_12mo > 3 THEN flag_for_review = true
-  IF police_report_consistent = false THEN escalate_to_adjuster = true
-
-## Transformation Rules
-
-Source: caller_description (free text)
-Target: structured_incident (JSON)
-Formula: Extract date, time, location, vehicles involved, injuries, description using LLM
-
-Source: policy_record (BigQuery row)
-Target: coverage_summary (JSON)
-Formula: Map policy_type to deductible schedule, calculate remaining coverage = max_coverage - ytd_claims
-
-## Error Handling
-
-Dependency: BigQuery policy warehouse
-  Timeout: 5 seconds
-  On failure: Retry 3 times with exponential backoff. If still failing, proceed with cached policy data (stale up to 24 hours).
-  On partial data: Proceed with available fields, flag missing fields in claim summary.
-
-Dependency: Body shop network API
-  Timeout: 10 seconds
-  On failure: Retry 2 times. If still failing, skip enrichment and flag "estimate pending" in claim.
-  On partial data: Use available estimate, note confidence = "partial".
-
-## Acceptance Criteria
-
-GIVEN a policyholder with active policy P-12345
-WHEN they report a minor fender bender with $1,500 damage and no injuries
-THEN severity = "low" AND auto_approved = true AND adjuster_review = false
-
-GIVEN a policyholder with active policy P-67890
-WHEN they report a multi-vehicle accident with $25,000 damage and injuries
-THEN severity = "critical" AND route_to_adjuster = true AND priority = "urgent"
-
-GIVEN a caller with no matching policy
-WHEN they attempt to file a claim
-THEN claim_rejected = true AND reason = "no active policy" AND redirect_to_sales = true
-```
-
----
-
-### A.10 FNOL Example: Generated app-blueprint.md
-
-```yaml
-# Generated by Blueprint Advisor
-# Spec: spec.md (SHA: abc123)
-# Plan: plan.md (SHA: def456)
-# Generated: 2026-05-10T14:30:00Z
-
+skill: adk-agents
+version: "1.2.0"
 archetype: agentic
-
-agents:
-  - name: fnol_coordinator
-    type: LlmAgent
-    model: gemini-2.0-flash
-    role: Root coordinator for FNOL claim processing
-    sub_agents: [intake_pipeline, enrichment_parallel, summary_loop, adjuster_review]
-
-  - name: intake_pipeline
-    type: SequentialAgent
-    steps: [verify_coverage, extract_details]
-    role: Sequential intake — verify then extract
-
-  - name: enrichment_parallel
-    type: ParallelAgent
-    branches: [body_shop_enrichment, rental_car_enrichment, police_report_enrichment]
-    role: Parallel enrichment from 3 external sources
-
-  - name: summary_loop
-    type: LoopAgent
-    max_iterations: 3
-    exit_condition: quality_score >= 0.85
-    role: Generate and refine claim summary until quality threshold
-
-  - name: adjuster_review
-    type: LlmAgent
-    role: Human-in-the-loop — routes high severity to adjuster
-
-tools:
-  mcp_servers:
-    - name: bigquery-policy
-      endpoint: mcp://bigquery.internal:8443
-      assigned_to: verify_coverage
-      capabilities: Query policy data warehouse
-
-    - name: cloud-sql-claims
-      endpoint: mcp://cloudsql-claims.internal:8443
-      assigned_to: fnol_coordinator
-      capabilities: Create and update claim records
-
-    - name: vertex-search-policies
-      endpoint: mcp://vertex-search.internal:8443
-      assigned_to: verify_coverage
-      capabilities: Search policy terms and conditions
-
-  a2a_agents:
-    - name: body-shop-network
-      agent_card: https://bodyshop-agent.partner.com/.well-known/agent.json
-      assigned_to: body_shop_enrichment
-      capabilities: Get repair estimates and scheduling
-
-    - name: rental-car-service
-      agent_card: https://rental-agent.partner.com/.well-known/agent.json
-      assigned_to: rental_car_enrichment
-      capabilities: Check fleet availability and pricing
-
-    - name: police-report-service
-      agent_card: https://police-report.gov/.well-known/agent.json
-      assigned_to: police_report_enrichment
-      capabilities: Retrieve incident reports by case number
-
-  function_tools:
-    - name: severity_classifier
-      assigned_to: fnol_coordinator
-      description: Classify claim severity based on damage, injuries, vehicles
-      business_rules:
-        - "IF vehicle_damage > $10,000 AND injury_reported = true THEN severity = critical"
-        - "IF vehicle_damage > $10,000 AND injury_reported = false THEN severity = high"
-        - "IF vehicle_damage > $2,000 THEN severity = medium"
-        - "ELSE severity = low"
-        - "Edge: IF vehicle_damage unknown THEN severity = high (conservative)"
-
-    - name: coverage_calculator
-      assigned_to: verify_coverage
-      description: Calculate deductible and remaining coverage
-      business_rules:
-        - "Map policy_type to deductible schedule"
-        - "remaining_coverage = max_coverage - ytd_claims"
-
-    - name: notification_sender
-      assigned_to: fnol_coordinator
-      description: Send status updates to policyholder
-      business_rules:
-        - "IF severity = critical THEN notify via SMS + email immediately"
-        - "IF severity = low AND auto_approved THEN notify via email within 1 hour"
-
-skills:
-  - name: adk-agents
-    version: "1.2.0"
-    provenance: github.com/[company]/skills/adk-agents@sha256:abc123
-
-infrastructure:
-  runtime: cloud_run
-  region: us-central1
-  terraform_module: github.com/[company]/terraform-modules@v3.2.1
-  vpc_sc: true
-  cmek: true
-
-observability:
-  apm: dynatrace
-  siem: splunk
-  tracing: opentelemetry + arize-phoenix
-
-security:
-  model_armor: standard
-  dlp: true
-  secret_manager: true
-
-evalops:
-  pre_commit_threshold: 0.10
-  arize_pass_rate: 0.95
-  arize_p95_latency: 3.0
-  hitl_routing: "confidence < 0.7 OR edge_case = true"
-
-golden_dataset:
-  - given: "policyholder with active policy P-12345"
-    when: "minor fender bender, $1500 damage, no injuries"
-    then: "severity=low, auto_approved=true, adjuster_review=false"
-  - given: "policyholder with active policy P-67890"
-    when: "multi-vehicle, $25000 damage, injuries"
-    then: "severity=critical, route_to_adjuster=true, priority=urgent"
-  - given: "caller with no matching policy"
-    when: "attempt to file claim"
-    then: "claim_rejected=true, reason=no_active_policy"
-
-ci_cd:
-  infra_pipeline: jenkins
-  app_pipeline: harness
-  deployment_strategy: canary
-  canary_percentage: 10
-  observation_window_minutes: 30
-
-patterns_used:
-  - pattern: coordinator
-    confidence: high
-    rationale: "Multiple specialized sub-agents coordinated by root"
-  - pattern: sequential
-    confidence: high
-    rationale: "Workflow says 'First...Then' for intake steps"
-  - pattern: parallel
-    confidence: high
-    rationale: "Workflow says 'simultaneously' for enrichment"
-  - pattern: loop
-    confidence: high
-    rationale: "Workflow says 'refine until quality score exceeds 0.85'"
-  - pattern: hitl
-    confidence: high
-    rationale: "Workflow says 'route to human adjuster for review'"
-```
-
-*End of Appendix A*
-
-
 ---
 
-## Appendix B — Microservice Brownfield Application: Complete Preset & Example Files
+# ADK Agent Patterns
 
-*This appendix contains all files for the microservice archetype preset, demonstrated with a Spring Boot + Angular brownfield "Hello World" reference implementation. This preset shares the same company overlay skills as the agentic preset (Appendix A) but uses different templates, catalogs, and domain skills.*
+## When to use this skill
+Use when generating ADK agent classes from `app-blueprint.json` agent topology.
 
-### Directory structure
+## Agent class patterns
 
+### LlmAgent (reasoning agent)
+```python
+from google.adk.agents import LlmAgent
+
+class ExtractDetails(LlmAgent):
+    def __init__(self):
+        super().__init__(
+            name="extract_details",
+            model="gemini-2.0-flash",
+            instruction="You are a claims intake agent. Extract claimant details from the conversation.",
+            tools=[ClaimsDbMcp()],
+            before_model_callback=model_armor_input_screen,
+            after_model_callback=model_armor_output_screen,
+        )
 ```
-.specify/
-├── preset.yml                              ← Microservice preset manifest
-├── templates/
-│   ├── service-spec-template.md            ← /specify loads this — microservice-specific sections
-│   ├── service-plan-template.md            ← /plan loads this — framework + infra questions
-│   └── service-tasks-template.md           ← /tasks loads this — generated vs manual work
-├── commands/
-│   ├── catalyst.blueprint.md               ← Same as agentic (sends spec+plan to Blueprint Advisor)
-│   └── catalyst.generate.md                ← Same as agentic (reads YAML, triggers skill-guided gen)
-├── memory/
-│   ├── springboot-reference.md             ← Spring Boot patterns, annotations, JPA conventions
-│   ├── angular-reference.md                ← Angular component patterns, service injection, routing
-│   ├── company-patterns.md                 ← SHARED — same company standards as agentic preset
-│   ├── approved-tools.md                   ← SHARED — same approved endpoints
-│   └── infra-standards.md                  ← SHARED — same Terraform, CI/CD, observability
-└── constitution.md                         ← SHARED — same non-negotiable rules
+
+### SequentialAgent (ordered steps)
+```python
+from google.adk.agents import SequentialAgent
+
+class FnolCoordinator(SequentialAgent):
+    def __init__(self):
+        super().__init__(
+            name="fnol_coordinator",
+            sub_agents=[
+                ExtractDetails(),
+                ParallelEnrichment(),
+                SeverityClassifier(),
+                HumanReview(),
+            ],
+        )
+```
+
+### ParallelAgent (concurrent execution)
+```python
+from google.adk.agents import ParallelAgent
+
+class ParallelEnrichment(ParallelAgent):
+    def __init__(self):
+        super().__init__(
+            name="parallel_enrichment",
+            sub_agents=[
+                EnrichPolicy(),
+                EnrichVehicle(),
+                EnrichWeather(),
+            ],
+        )
+```
+
+### LoopAgent (iterate until condition)
+```python
+from google.adk.agents import LoopAgent
+
+class QualityLoop(LoopAgent):
+    def __init__(self):
+        super().__init__(
+            name="quality_loop",
+            sub_agents=[EnrichAndValidate()],
+            max_iterations=5,
+            exit_condition="quality_score >= 0.85",
+        )
+```
+
+## Rules
+- ALWAYS set `name` to match the agent name in the blueprint JSON `agents[]`.
+- ALWAYS wire `before_model_callback` and `after_model_callback` for agents handling PII.
+- ALWAYS use the model specified in `plan.md` — do not hardcode model names.
+- Root agent MUST be a SequentialAgent or LlmAgent — never a ParallelAgent.
+- File naming: `app/agents/{agent_name}.py` (snake_case).
 ```
 
 ---
 
-### B.1 preset.yml (microservice variant)
-
-```yaml
-# AgentCatalyst Microservice Preset for GitHub Spec Kit
-# Install: specify preset add agentcatalyst-microservice
-# Source: github.com/[company]/agentcatalyst-preset-microservice
-
-name: agentcatalyst-microservice
-version: "1.0.0"
-description: >
-  AgentCatalyst accelerator for microservice applications.
-  Supports Spring Boot, FastAPI, and Node.js backends with
-  Angular, React, or Vue frontends. Brownfield-aware.
-
-archetype: microservice
-
-templates:
-  spec: templates/service-spec-template.md
-  plan: templates/service-plan-template.md
-  tasks: templates/service-tasks-template.md
-
-commands:
-  - commands/catalyst.blueprint.md        # SHARED with agentic preset
-  - commands/catalyst.generate.md         # SHARED with agentic preset
-
-memory:
-  - memory/springboot-reference.md        # Framework-specific
-  - memory/angular-reference.md           # Framework-specific
-  - memory/company-patterns.md            # SHARED overlay
-  - memory/approved-tools.md              # SHARED overlay
-  - memory/infra-standards.md             # SHARED overlay
-
-skills:
-  domain:
-    - name: springboot-service
-      version: "2.1.0"
-      source: github.com/[company]/skills/springboot-service
-    - name: angular-spa
-      version: "1.4.0"
-      source: github.com/[company]/skills/angular-spa
-    - name: jpa-oracle
-      version: "1.2.0"
-      source: github.com/[company]/skills/jpa-oracle
-  overlay:                                # SHARED — identical to agentic preset
-    - name: company-terraform
-      version: "2.0.0"
-    - name: company-observability
-      version: "1.3.0"
-    - name: company-cicd
-      version: "1.5.0"
-    - name: company-security
-      version: "1.2.0"
-
-settings:
-  coding_agents: [copilot, claude-code, gemini-cli, cursor, windsurf]
-  output_format: markdown
-  save_location: workspace_root
-```
-
----
-
-### B.2 templates/service-spec-template.md
+### S2 — skills/adk-tools/SKILL.md
 
 ```markdown
 ---
-template: agentcatalyst-service-spec
-version: "1.0.0"
-description: Structured requirements for microservice applications
-usage: Run /specify to fill in this template
+skill: adk-tools
+version: "1.1.0"
+archetype: agentic
 ---
 
-# Service Specification
+# ADK Tool Patterns
 
-## Service Purpose
+## MCP Connection
+```python
+from google.adk.tools import MCPToolset
 
-<!--
-Describe what this service does and why it exists.
-For BROWNFIELD: state what ALREADY EXISTS and what's NEW.
-Use "EXISTING" to mark infrastructure/code that must not be regenerated.
-Use "NEW" to mark what needs to be built.
+claims_db_toolset = MCPToolset.from_server(
+    server_name="claims-db-mcp",
+    server_url="mcp://claims-db.internal:8080",
+    auth_method="mtls",
+    cert_path=os.environ["CLAIMS_DB_CERT_PATH"],  # From Secret Manager
+)
+```
 
-EXAMPLE: "Hello World reference implementation for the Angular + Spring Boot
-SPA pattern on ECS Fargate with Oracle RDS. NOT a production application —
-a minimal working example that proves every layer of the stack works."
--->
+## A2A Client
+```python
+from google.adk.tools import A2AClient
 
-[Describe your service purpose here]
+body_shop_client = A2AClient(
+    agent_name="body-shop-agent",
+    agent_card_url="https://bodyshop.partner.com/.well-known/agent.json",
+    auth_method="mtls",
+)
+```
 
-## API Contracts
+## FunctionTool (from business rules)
+```python
+from google.adk.tools import FunctionTool
 
-<!--
-List all endpoints with HTTP method, path, request/response bodies.
-For BROWNFIELD: mark which endpoints already exist vs are new.
+def severity_classifier(damage_amount: float, injury_reported: bool, vehicle_total_loss: bool) -> str:
+    """Classify claim severity based on business rules from spec §7."""
+    if injury_reported or vehicle_total_loss:
+        return "critical"
+    elif damage_amount > 10000:
+        return "high"
+    elif damage_amount > 2500:
+        return "medium"
+    else:
+        return "low"
 
-EXAMPLE:
-GET  /api/greetings         — list all greetings (NEW)
-POST /api/greetings         — create a greeting (NEW)
-GET  /api/health            — health check (NEW)
--->
+severity_tool = FunctionTool(func=severity_classifier)
+```
 
-[Define your API contracts here]
-
-## Dependencies
-
-<!--
-List all external dependencies: databases, message queues, other services.
-For BROWNFIELD: use "EXISTING" + point to the config file.
-
-EXAMPLE: "Oracle RDS — EXISTING database at endpoint configured in
-boilerplate/backend/src/main/resources/application.yml.
-DO NOT create a new database or modify connection settings."
--->
-
-[List your dependencies here]
-
-## Data Model
-
-<!--
-Define entities with fields, types, and constraints.
-
-EXAMPLE:
-Greeting: id (NUMBER, auto-generated), name (VARCHAR2 100),
-    message (VARCHAR2 500), created_at (TIMESTAMP, auto-generated)
--->
-
-[Define your data model here]
-
-## Frontend Requirements
-
-<!--
-For services with a UI component. Describe pages, components, interactions.
-For BROWNFIELD: mark which UI elements exist vs are new.
-
-EXAMPLE: "Angular SPA with one page: form with Name + Message fields,
-list of submitted greetings below, minimal Angular Material styling."
--->
-
-[Define frontend requirements here — or write N/A if backend-only]
-
-## Infrastructure Requirements
-
-<!--
-For GREENFIELD: specify what needs to be provisioned.
-For BROWNFIELD: specify "EXISTING infrastructure — DO NOT generate new Terraform."
-
-EXAMPLE: "EXISTING infrastructure — use ECS Fargate + Oracle RDS + ALB
-from terraform/. Use existing Dockerfiles from boilerplate/.
-Only generate application code."
--->
-
-[Define infrastructure requirements here]
-
-## Business Rules
-
-<!--
-Same format as agentic preset — IF/THEN conditions per decision point.
-For microservices, these typically cover validation rules, business logic
-in service layer, and authorization decisions.
-
-EXAMPLE:
-Decision Point: Greeting Validation
-  IF name is blank THEN return 400 Bad Request
-  IF message length > 500 THEN truncate to 500 characters
--->
-
-[Define your business rules here]
-
-## Error Handling
-
-<!--
-Per-dependency timeout, failure, and retry behavior.
-
-EXAMPLE:
-Dependency: Oracle RDS
-  Timeout: 5 seconds
-  On failure: Return 503 Service Unavailable with retry-after header
-  Connection pool: HikariCP with max 10 connections
--->
-
-[Define your error handling here]
-
-## Acceptance Criteria
-
-<!--
-GIVEN/WHEN/THEN assertions. Generate starter test cases for EvalOps.
-
-EXAMPLE:
-GIVEN the service is running
-WHEN POST /api/greetings with {"name": "Alice", "message": "Hello"}
-THEN return 201 Created with the greeting including generated id
-AND the greeting appears in GET /api/greetings response
--->
-
-[Define your acceptance criteria here]
+## Rules
+- ALWAYS use `os.environ` for credentials — NEVER hardcode.
+- ALWAYS reference Secret Manager paths, not literal secrets.
+- MCP server URLs MUST match `app-blueprint.json` `tools.mcp_servers[].endpoint`.
+- A2A agent URLs MUST match `app-blueprint.json` `tools.a2a_agents[].endpoint`.
+- FunctionTool implementations are first-draft from spec §7 business rules — developer MUST review.
+- File naming: `app/mcp_connections/{server_name}.py`, `app/a2a_clients/{agent_name}.py`, `app/tools/{tool_name}.py`.
 ```
 
 ---
 
-### B.3 templates/service-plan-template.md
+### S3 — skills/company-terraform/SKILL.md
 
 ```markdown
 ---
-template: agentcatalyst-service-plan
-version: "1.0.0"
-description: Technical decisions for microservice applications
-usage: Run /plan to answer these questions
+skill: company-terraform
+version: "2.0.0"
+type: overlay
 ---
 
-# Technical Plan
+# Company Terraform Standards
 
-## Backend Framework
-- **Framework:** [spring-boot | fastapi | express]
-- **Language version:** [e.g., Java 21, Python 3.12, Node 20]
-- **Build tool:** [gradle | maven | pip | npm]
+## Rule 1: NEVER use raw resources
+NEVER use raw `google_*` or `aws_*` Terraform resources. ALWAYS reference a company module from `app-blueprint.json` `infrastructure.modules[]`. If no module exists for a required service, add `# TODO: Request tf-{service} module from platform team` and skip the resource.
 
-## Frontend Framework (if applicable)
-- **Framework:** [angular | react | vue | none]
-- **Version:** [e.g., Angular 17+]
-- **Styling:** [angular-material | tailwind | bootstrap | custom]
+## Rule 2: Read modules from GitHub via MCP
+Use the GitHub MCP Server to read `variables.tf` and `outputs.tf` from each module repo. Map blueprint fields to module variables.
 
-## Database
-- **Type:** [oracle | postgresql | mysql | mongodb]
-- **ORM:** [jpa-hibernate | sqlalchemy | prisma | none]
-- **Migration tool:** [flyway | liquibase | alembic | none]
-- **Config source:** [new | EXISTING — path to config file]
+## Rule 3: Multi-region + DR
+Always generate `environments/dev.tfvars`, `environments/staging.tfvars`, `environments/prod.tfvars`. DR strategy from `plan.md` determines failover config.
 
-## Target Platform
-- **Runtime:** [ecs_fargate | cloud_run | gke | EXISTING]
-- **GCP/AWS Region:** [e.g., us-central1, us-east-1]
+## Rule 4: Gateway proxy routes
+For each entry in `tools.mcp_servers[]` and `tools.a2a_agents[]`, generate one Apigee proxy route in `deployment/terraform/gateway/routes.tf` with auth settings from the blueprint.
+
+## Rule 5: Per-agent Workload Identity
+For each agent in `agents[]`, generate a GCP service account in `deployment/terraform/identity/agent-identities.tf` with IAM bindings ONLY for the tools assigned to that agent. All other tools are implicitly denied.
+
+## Rule 6: API Hub registration
+Generate `deployment/terraform/registry/agent-entry.tf` with capabilities from the agent topology and an Agent Card URL.
+
+## Rule 7: Pin versions
+All module source refs MUST use pinned versions: `source = "github.com/[company]/tf-cloud-sql?ref=v2.1.0"`.
+
+## Output structure
+```
+deployment/terraform/
+├── main.tf                    ← Pattern scaffold from infra_modules[0]
+├── database.tf                ← Service modules from infra_modules[1+]
+├── security.tf                ← VPC-SC, CMEK, Secret Manager
+├── gateway/
+│   ├── routes.tf              ← One route per tool binding
+│   └── a2a-routes.tf          ← A2A delegation routes
+├── identity/
+│   ├── agent-identities.tf    ← Per-agent capabilities
+│   └── denied-policies.tf     ← Least-privilege deny rules
+├── registry/
+│   └── agent-entry.tf         ← Agent Card for A2A discovery
+└── environments/
+    ├── dev.tfvars / staging.tfvars / prod.tfvars
+```
+```
+
+---
+
+### S4 — skills/company-observability/SKILL.md
+
+```markdown
+---
+skill: company-observability
+version: "1.3.0"
+type: overlay
+---
+
+# Company Observability Standards
+
+## Dynatrace
+- Generate dashboard-as-code JSON in `config/dynatrace/dashboard.json`.
+- Include tiles: agent latency (p50/p95/p99), error rate, throughput, LLM token usage, eval scores.
+- Use Dynatrace API token from Secret Manager: `os.environ["DT_API_TOKEN"]`.
+
+## OpenTelemetry
+- Generate `config/otel-collector-config.yaml` with exporters for Cloud Trace AND Dynatrace.
+- Every agent class MUST have `@trace` decorator or `tracer.start_span()` at entry.
+- Span attributes MUST include: `agent.name`, `tool.name`, `llm.model`, `llm.token_count`.
+
+## Structured Logging
+- All logs MUST use structured JSON format compatible with Splunk.
+- Include fields: `timestamp`, `level`, `agent_name`, `trace_id`, `span_id`, `message`.
+- Use `google.cloud.logging` client with Splunk HEC forwarder config.
+
+## Health Checks
+- Every agent MUST expose a `/health` endpoint returning `{ "status": "healthy", "version": "..." }`.
+- Generate `app/health.py` with readiness and liveness probes.
+
+## Alert Rules
+- Generate `deployment/terraform/monitoring.tf` with `google_monitoring_alert_policy` for: error rate > 1%, latency p95 > 5s, eval score drop > 10%.
+```
+
+---
+
+### S5 — skills/company-cicd/SKILL.md
+
+```markdown
+---
+skill: company-cicd
+version: "1.5.0"
+type: overlay
+---
+
+# Company CI/CD Standards
+
+## Jenkins (infrastructure plane)
+- Generate `ci-cd/Jenkinsfile` with stages: `terraform plan` → approval gate → `terraform apply`.
+- Multi-region: apply to primary region first, then DR region.
+- NEVER apply without plan approval.
+
+## Harness (application plane)
+- Generate `ci-cd/harness-pipeline.yaml` with stages: build → deploy-nonprod → eval → deploy-preprod (canary 10%) → eval → deploy-prod.
+- Auto-rollback if error rate > 1% during canary.
+- Progressive rollout: 10% → 50% → 100%.
+
+## EvalOps (3-phase pipeline)
+- Generate `eval/pipeline.yaml` with 3 phases:
+  - Phase 1: Vertex AI Eval SDK (automated metrics: coherence, groundedness, safety)
+  - Phase 2: AutoSxS (side-by-side comparison against baseline model)
+  - Phase 3: HITL triage (human reviewers for edge cases)
+- Generate `eval/golden-dataset.json` seeded from spec §10 acceptance criteria.
+- GIVEN/WHEN/THEN acceptance criteria → JSON test entries with `input`, `expected_output`, `tags`.
+
+## Pre-commit hook
+- ALWAYS generate `.pre-commit-config.yaml` with eval hook that runs Phase 1 on every commit.
+
+## API Hub registration (post-deployment)
+- Generate a post-deployment step in the Harness pipeline that registers the agent in Apigee API Hub:
+  - `type=a2a_agent`, capabilities from agent topology, Agent Card URL.
+```
+
+---
+
+### S6 — skills/company-security/SKILL.md
+
+```markdown
+---
+skill: company-security
+version: "1.2.0"
+type: overlay
+---
+
+# Company Security Standards
+
+## Model Armor (segmented callbacks)
+- Generate `app/security/model_armor.py` with:
+  - `model_armor_input_screen(request)` — screens user input before LLM call
+  - `model_armor_output_screen(response)` — screens LLM output before returning to user
+- Agents handling PII (from `screening_config{}` in blueprint): wire BOTH callbacks.
+- Agents NOT handling PII: wire output callback only.
+
+## VPC-SC
+- Generate VPC-SC perimeter in Terraform: `google_access_context_manager_service_perimeter`.
+- Include all Cloud Run services, Cloud SQL instances, and Secret Manager.
+
+## CMEK
+- Generate `google_kms_crypto_key` for all data-at-rest: Cloud SQL, Secret Manager, Cloud Storage.
+- Key ring in primary region; replica key ring in DR region.
+
+## Workload Identity
+- NEVER use service account keys. ALWAYS use `google.auth.default()`.
+- No `.json` key files anywhere in the codebase.
+- No `credentials = "..."` in Terraform.
+
+## Secret Manager
+- All credentials (DB passwords, API keys, mTLS certs) MUST be in Secret Manager.
+- Reference via `os.environ["SECRET_NAME"]` — NEVER hardcode.
+
+## Rules
+- NEVER hardcode API keys, passwords, connection strings, or base64-encoded credentials.
+- NEVER use `google.auth.credentials.Credentials(...)` with inline keys.
+- ALWAYS generate Model Armor callbacks for agents listed in `screening_config{}`.
+```
+
+---
+
+### M1 — memory/adk-reference.md
+
+```markdown
+# ADK Framework Quick Reference
+
+## Imports
+- `from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent, LoopAgent`
+- `from google.adk.tools import FunctionTool, MCPToolset, A2AClient`
+- `from google.adk.skills import SkillToolset`
+- `from google.adk.runners import Runner`
+
+## Agent hierarchy
+- Root agent: the entry point. Must be `SequentialAgent` or `LlmAgent`.
+- Sub-agents: children in the agent tree. Can be any agent type.
+- ParallelAgent: runs all sub-agents concurrently, merges results.
+- LoopAgent: repeats sub-agents until `exit_condition` is met or `max_iterations` reached.
+
+## Tool binding
+- `LlmAgent(tools=[tool1, tool2])` — binds tools to agent.
+- Tools can be `FunctionTool`, `MCPToolset`, or `A2AClient` instances.
+
+## Runner
+```python
+runner = Runner(agent=FnolCoordinator(), app_name="fnol-claims")
+response = await runner.run(user_id="test", session_id="s1", new_message=message)
+```
+
+## Key constraints
+- Agent `name` must be unique within the tree.
+- `LoopAgent` cannot be nested inside `ParallelAgent`.
+- `before_model_callback` runs BEFORE every LLM call — use for input screening.
+- `after_model_callback` runs AFTER every LLM call — use for output screening.
+```
+
+---
+
+### M2 — memory/company-patterns.md
+
+```markdown
+# Company Coding Standards
+
+## Naming
+- Files: `snake_case.py` (e.g., `extract_details.py`)
+- Classes: `PascalCase` (e.g., `ExtractDetails`)
+- Functions/variables: `snake_case` (e.g., `severity_classifier`)
+
+## Code organization
+```
+app/
+├── agents/            ← Agent classes (one per file)
+├── tools/             ← FunctionTool implementations
+├── mcp_connections/   ← MCP server connections
+├── a2a_clients/       ← A2A agent clients
+├── security/          ← Model Armor callbacks
+├── health.py          ← Health check endpoint
+└── main.py            ← Runner entry point
+```
+
+## Error handling
+- Use structured logging (JSON to Splunk).
+- Retry with exponential backoff for transient failures.
+- Human escalation for persistent failures (>3 retries).
+
+## Documentation
+- Docstrings on all public functions and classes.
+- Type hints on all function parameters and return values.
+```
+
+---
+
+### M3 — memory/approved-tools.md
+
+```markdown
+# Approved Integrations
+
+## MCP Servers (query Apigee API Hub for latest)
+| Server | Endpoint pattern | Auth | Status |
+|---|---|---|---|
+| claims-db-mcp | mcp://{project}-claims-db.internal:8080 | mTLS | approved |
+| policy-api-mcp | mcp://{project}-policy-api.internal:8080 | OAuth 2.1 | approved |
+| vehicle-api-mcp | mcp://{project}-vehicle-api.internal:8080 | API Key | approved |
+| bigquery-mcp | mcp://{project}-bigquery.internal:8080 | Workload Identity | approved |
+
+## A2A Agents (query API Hub for deployed agents — type=a2a_agent)
+| Agent | Capabilities | Protocol | Status |
+|---|---|---|---|
+| body-shop-agent | estimate, schedule, parts-lookup | A2A | deployed |
+| rental-car-agent | reserve, cancel, extend | A2A | deployed |
+
+## Public APIs (no approval needed)
+| API | Endpoint | Auth |
+|---|---|---|
+| weather.gov | https://api.weather.gov/points | None |
+| geocoding | https://maps.googleapis.com/maps/api/geocode | API Key |
+```
+
+---
+
+### M4 — memory/infra-standards.md
+
+```markdown
+# Infrastructure Standards
+
+## Terraform modules (pinned versions)
+| Module | Repo | Version | Purpose |
+|---|---|---|---|
+| tf-agentic-pilot-cold | github.com/[company]/tf-agentic-pilot-cold | v3.1.0 | Cloud Run + Agent Engine scaffold (pilot-cold DR) |
+| tf-agentic-hot-standby | github.com/[company]/tf-agentic-hot-standby | v2.0.0 | Cloud Run + Agent Engine scaffold (hot-standby DR) |
+| tf-cloud-sql | github.com/[company]/tf-cloud-sql | v2.1.0 | Cloud SQL with CMEK + backup |
+| tf-model-armor | github.com/[company]/tf-model-armor | v1.3.0 | Model Armor config + policies |
+| tf-vpc-sc | github.com/[company]/tf-vpc-sc | v1.2.0 | VPC-SC perimeter |
+| tf-secret-manager | github.com/[company]/tf-secret-manager | v1.1.0 | Secret Manager secrets + IAM |
+
+## Dynatrace
+- Dashboard template: `config/dynatrace/agent-dashboard-template.json`
+- API token secret: `projects/{project}/secrets/DT_API_TOKEN/versions/latest`
+
+## CI/CD paths
+- Jenkins template: `ci-cd/templates/agent-infra-plan-apply-v3`
+- Harness template: `ci-cd/templates/agent-deploy-canary-v2`
+- EvalOps template: `ci-cd/templates/agent-evalops-3phase-v1`
+
+## Cloud Run scaling
+- Min instances: 1 (dev), 2 (staging), 3 (prod)
+- Max instances: 10 (dev), 25 (staging), 100 (prod)
+- Concurrency: 80 requests per instance
+```
+
+---
+
+### C1 — constitution.md
+
+```markdown
+# AgentCatalyst Constitution — Non-Negotiable Rules
+
+You are a coding agent generating an enterprise application. These rules are ABSOLUTE — no exception, no override, no "just this once."
+
+## Deployment
+1. NEVER deploy code, infrastructure, or pipelines directly. Generate definitions ONLY.
+2. NEVER run `terraform apply`, `kubectl apply`, `docker push`, or any deployment command.
+3. NEVER push to `main` or `production` branches. Create feature branches and PRs only.
 
 ## Infrastructure
-- **Terraform:** [generate_new | SKIP — existing terraform/]
-- **Terraform module source:** [e.g., github.com/[company]/terraform-modules]
-- **Docker:** [generate_new | SKIP — existing Dockerfiles]
+4. NEVER use raw `google_*` or `aws_*` Terraform resources. ALWAYS use company modules from app-blueprint.md §8.
+5. NEVER hardcode credentials, API keys, passwords, or connection strings. Use Secret Manager.
+6. NEVER use service account key files. Use Workload Identity (`google.auth.default()`).
 
-## CI/CD
-- **Pipeline:** [EXISTING | generate_new]
-- **Infrastructure pipeline:** [Jenkins]
-- **Application pipeline:** [Harness]
-- **Deployment strategy:** [canary | blue-green | rolling]
+## Security
+7. ALWAYS generate Model Armor callbacks for agents handling PII (from screening_config).
+8. ALWAYS generate VPC-SC perimeter and CMEK encryption in Terraform.
+9. NEVER expose internal endpoints to the public internet without Apigee proxy.
+
+## Quality
+10. ALWAYS generate a pre-commit evaluation hook (`.pre-commit-config.yaml`).
+11. ALWAYS generate a golden dataset from acceptance criteria (minimum 10 entries).
+12. ALWAYS generate health check endpoints (`/health`, `/ready`).
 
 ## Observability
-- **APM:** [Dynatrace]
-- **Tracing:** [OpenTelemetry]
-- **Health check path:** [e.g., /api/health]
+13. ALWAYS generate OpenTelemetry spans on every agent.
+14. ALWAYS generate structured JSON logging compatible with Splunk.
+15. ALWAYS generate Dynatrace dashboard-as-code configuration.
 
-## EvalOps
-- **Test framework:** [junit | pytest | jest]
-- **Contract testing:** [pact | spring-cloud-contract | none]
-- **Pre-commit threshold:** [e.g., 10% max regression]
+## Code generation
+16. ALWAYS read `app-blueprint.json` (NOT `.md`) for code generation input.
+17. ALWAYS follow the domain skill (adk-agents/adk-tools) for framework-correct code.
+18. ALWAYS follow the overlay skills for company-standard infrastructure, CI/CD, security, and observability.
+19. NEVER modify existing source code, database schemas, or API contracts.
+20. ALWAYS generate `README.md` with setup instructions, architecture summary, and development workflow.
 ```
 
 ---
 
-### B.4 templates/service-tasks-template.md
+### F2 — schemas/app-blueprint.schema.json
 
-```markdown
----
-template: agentcatalyst-service-tasks
-version: "1.0.0"
-description: Task breakdown for microservice applications
-usage: Run /tasks after receiving blueprint
----
-
-# Task Breakdown
-
-## Generated by coding agent (developer reviews)
-
-| Component | Source (blueprint section) | Status |
-|---|---|---|
-| Controller / route handlers | backend.endpoints: | ⬜ Generated |
-| Service layer (business logic first draft) | backend.endpoints: + business_rules: | ⬜ Generated — REVIEW REQUIRED |
-| Entity / model classes | backend.entities: | ⬜ Generated |
-| Repository / data access | backend.entities: | ⬜ Generated |
-| Database migration scripts | backend.entities: | ⬜ Generated |
-| DTOs / request-response models | backend.endpoints: | ⬜ Generated |
-| Frontend components (if applicable) | frontend: | ⬜ Generated |
-| Frontend services + API calls | frontend: | ⬜ Generated |
-| Unit tests | acceptance_criteria: | ⬜ Generated |
-| Integration tests | acceptance_criteria: | ⬜ Generated |
-| Terraform (if greenfield) | infrastructure: | ⬜ Generated or SKIP |
-| Dockerfile (if greenfield) | infrastructure: | ⬜ Generated or SKIP |
-| CI/CD pipeline (if greenfield) | ci_cd: | ⬜ Generated or SKIP |
-| Observability config | observability: | ⬜ Generated |
-| Health check endpoint | observability: | ⬜ Generated |
-
-## Developer implements / reviews
-
-| Task | Why | Priority |
-|---|---|---|
-| Review service layer business logic | First draft from spec rules — refine edge cases | P0 |
-| Authentication / authorization | Company-specific SSO/OAuth patterns | P0 |
-| Performance tuning | Requires load testing with real data volumes | P1 |
-| Custom validation rules | Domain-specific beyond IF/THEN | P1 |
-| Error response format | Company API standards | P2 |
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentCatalyst App Blueprint",
+  "description": "Machine-readable blueprint derived from app-blueprint.md by assemble_blueprint. Consumed by /catalyst.generate for code generation.",
+  "type": "object",
+  "required": ["metadata", "agents", "tools", "infrastructure", "screening_config", "evalops", "blueprint_hash"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["name", "version", "archetype"],
+      "properties": {
+        "name": { "type": "string", "description": "Agent application name (from §1)" },
+        "version": { "type": "string", "description": "Blueprint version" },
+        "archetype": { "type": "string", "enum": ["agentic", "microservice", "pipeline", "api"] },
+        "description": { "type": "string" },
+        "team": { "type": "string" },
+        "lob": { "type": "string" }
+      }
+    },
+    "pattern_composition": {
+      "type": "object",
+      "description": "Agent topology pattern tree (from §2)",
+      "properties": {
+        "root_pattern": { "type": "string", "description": "Top-level pattern: Sequential, Parallel, Loop, HITL" },
+        "composition": { "type": "array", "items": { "type": "string" }, "description": "Ordered list of composed patterns" }
+      }
+    },
+    "agents": {
+      "type": "array",
+      "description": "Agent topology tree (from §3)",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "role"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["LlmAgent", "SequentialAgent", "ParallelAgent", "LoopAgent"] },
+          "role": { "type": "string" },
+          "parent": { "type": "string", "description": "Parent agent name (null for root)" },
+          "model": { "type": "string" },
+          "tools": { "type": "array", "items": { "type": "string" }, "description": "Tool names bound to this agent" }
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "description": "Tool bindings (from §5)",
+      "properties": {
+        "mcp_servers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "endpoint", "auth_method", "assigned_to"],
+            "properties": {
+              "name": { "type": "string" },
+              "endpoint": { "type": "string" },
+              "auth_method": { "type": "string", "enum": ["mtls", "oauth2", "api_key", "none"] },
+              "assigned_to": { "type": "string", "description": "Agent name this tool is bound to" },
+              "timeout": { "type": "string" },
+              "retry": { "type": "integer" },
+              "discovered_via": { "type": "string" }
+            }
+          }
+        },
+        "a2a_agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "endpoint", "assigned_to"],
+            "properties": {
+              "name": { "type": "string" },
+              "endpoint": { "type": "string" },
+              "agent_card_url": { "type": "string" },
+              "capabilities": { "type": "array", "items": { "type": "string" } },
+              "assigned_to": { "type": "string" },
+              "discovered_via": { "type": "string" }
+            }
+          }
+        },
+        "function_tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "assigned_to"],
+            "properties": {
+              "name": { "type": "string" },
+              "assigned_to": { "type": "string" },
+              "business_rules_ref": { "type": "string", "description": "Reference to spec §7 rule set" }
+            }
+          }
+        }
+      }
+    },
+    "infrastructure": {
+      "type": "object",
+      "description": "Infrastructure modules (from §8)",
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "source", "version"],
+            "properties": {
+              "name": { "type": "string" },
+              "source": { "type": "string" },
+              "version": { "type": "string" },
+              "assigned_to": { "type": "string" },
+              "dr_aware": { "type": "boolean" }
+            }
+          }
+        },
+        "dr_strategy": { "type": "string", "enum": ["active-active", "hot-standby", "pilot-cold"] },
+        "primary_region": { "type": "string" },
+        "dr_region": { "type": "string" }
+      }
+    },
+    "business_rules": {
+      "type": "object",
+      "description": "Structured business rules per FunctionTool (from §9, sourced from spec §7)",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "condition": { "type": "string" },
+            "action": { "type": "string" },
+            "else_action": { "type": "string" }
+          }
+        }
+      }
+    },
+    "screening_config": {
+      "type": "object",
+      "description": "Model Armor segmentation (from §16)",
+      "properties": {
+        "agents_with_input_screening": { "type": "array", "items": { "type": "string" } },
+        "agents_with_output_screening": { "type": "array", "items": { "type": "string" } },
+        "pii_fields": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "evalops": {
+      "type": "object",
+      "description": "EvalOps configuration (from §15)",
+      "properties": {
+        "golden_dataset": {
+          "type": "object",
+          "properties": {
+            "entries": { "type": "array", "items": { "type": "object" } },
+            "min_count": { "type": "integer" }
+          }
+        },
+        "eval_frequency": { "type": "string" },
+        "hitl_reviewers": { "type": "integer" },
+        "autosxs_baseline": { "type": "string" }
+      }
+    },
+    "nfrs": {
+      "type": "array",
+      "description": "Non-functional requirements (from §10)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "category": { "type": "string" },
+          "requirement": { "type": "string" },
+          "target": { "type": "string" }
+        }
+      }
+    },
+    "pipeline_configs": {
+      "type": "object",
+      "description": "CI/CD pipeline configuration (from §17)",
+      "properties": {
+        "infrastructure_pipeline": { "type": "string" },
+        "deployment_pipeline": { "type": "string" },
+        "evalops_pipeline": { "type": "string" },
+        "api_hub_registration": { "type": "string" }
+      }
+    },
+    "blueprint_hash": {
+      "type": "string",
+      "description": "SHA-256 hash of app-blueprint.md at time of JSON generation. Used by /catalyst.generate to detect edits."
+    },
+    "spec_hash": { "type": "string" },
+    "plan_hash": { "type": "string" }
+  }
+}
 ```
 
----
-
-### B.5 memory/ files (microservice-specific)
-
-**memory/springboot-reference.md** — Spring Boot patterns: correct annotations (`@RestController`, `@Service`, `@Repository`, `@Entity`), JPA conventions, Flyway migration naming, `application.yml` structure, health check actuator setup, error handling with `@ControllerAdvice`, request/response DTO patterns, HikariCP connection pool configuration.
-
-**memory/angular-reference.md** — Angular patterns: component structure, service injection with `HttpClient`, reactive forms, routing with lazy loading, Angular Material component usage, proxy configuration for backend API calls, environment-specific configuration, build optimization.
-
-**memory/company-patterns.md** — SHARED with agentic preset (identical file). Company coding standards, naming, error handling, logging.
-
-**memory/approved-tools.md** — SHARED with agentic preset (identical file). Approved endpoints and services.
-
-**memory/infra-standards.md** — SHARED with agentic preset (identical file). Terraform modules, CI/CD templates, observability.
-
----
-
-### B.6 Hello World Brownfield Example: Filled spec.md
-
-```markdown
-# Service Specification — Hello World SPA Reference Implementation
-
-## Service Purpose
-
-Hello World reference implementation for the Angular + Spring Boot SPA
-pattern on ECS Fargate with Oracle RDS. This is NOT a production
-application — it's a minimal working example that proves every layer
-of the stack works end to end.
-
-## API Contracts
-
-GET  /api/greetings         — list all greetings
-POST /api/greetings         — create a greeting (body: { "name": "Alice", "message": "Hello" })
-GET  /api/greetings/{id}    — get greeting by ID
-GET  /api/health            — health check (returns DB connectivity status)
-
-## Dependencies
-
-Oracle RDS — EXISTING database at the endpoint configured in
-    boilerplate/backend/src/main/resources/application.yml.
-    The agent MUST use the EXISTING datasource configuration.
-    DO NOT create a new database or modify the connection settings.
-
-## Data Model
-
-Greeting: id (NUMBER, auto-generated), name (VARCHAR2 100),
-    message (VARCHAR2 500), created_at (TIMESTAMP, auto-generated)
-
-## Frontend Requirements
-
-Angular SPA with one page:
-    - A form with "Name" and "Message" fields + Submit button
-    - A list below showing all submitted greetings (auto-refreshes)
-    - Minimal styling using Angular Material
-    - Calls backend via /api/greetings (proxied through nginx/ALB)
-
-## Infrastructure Requirements
-
-EXISTING infrastructure — DO NOT generate new Terraform.
-Use the existing ECS Fargate + Oracle RDS + ALB from terraform/.
-Use the existing Dockerfiles from boilerplate/.
-Use the existing CI/CD from ci-cd/.
-Only generate application code that runs inside the existing containers.
-
-## Business Rules
-
-Decision Point: Greeting Validation
-  Inputs: name, message
-  IF name is blank THEN return 400 Bad Request with error "name is required"
-  IF message is blank THEN return 400 Bad Request with error "message is required"
-  IF message length > 500 THEN truncate to 500 characters with warning
-  IF name contains special characters THEN sanitize (strip HTML tags)
-
-## Error Handling
-
-Dependency: Oracle RDS
-  Timeout: 5 seconds
-  On failure: Return 503 with retry-after header
-  Connection pool: HikariCP max 10 connections, min-idle 2
-
-## Acceptance Criteria
-
-GIVEN the service is running and database is accessible
-WHEN POST /api/greetings with {"name": "Alice", "message": "Hello"}
-THEN return 201 Created with greeting including auto-generated id and created_at
-
-GIVEN one greeting exists in the database
-WHEN GET /api/greetings
-THEN return 200 with array containing the greeting
-
-GIVEN no greeting with id 999 exists
-WHEN GET /api/greetings/999
-THEN return 404 Not Found
-
-GIVEN the database is unreachable
-WHEN GET /api/health
-THEN return 503 Service Unavailable with {"status": "DOWN", "database": "unreachable"}
-```
-
----
-
-### B.7 Hello World Brownfield Example: Generated app-blueprint.md
-
-```yaml
-# Generated by Blueprint Advisor
-# Spec: spec.md (SHA: xyz789)
-# Plan: plan.md (SHA: uvw012)
-# Archetype: microservice
-# Brownfield: true
-
-archetype: microservice
-
-metadata:
-  name: hello-world-spa
-  template: springboot-angular
-  description: "Hello World ref impl for SPA pattern on ECS Fargate"
-
-platform:
-  runtime: ecs_fargate              # EXISTING — do not provision
-
-backend:
-  framework: spring-boot
-  version: "3.x"
-  base_package: com.company.helloworld
-  build_tool: gradle                # EXISTING build.gradle
-
-  endpoints:
-    - method: GET
-      path: /api/greetings
-      handler: listGreetings
-      description: List all greetings
-    - method: POST
-      path: /api/greetings
-      handler: createGreeting
-      description: Create a new greeting
-    - method: GET
-      path: /api/greetings/{id}
-      handler: getGreeting
-      description: Get greeting by ID
-    - method: GET
-      path: /api/health
-      handler: healthCheck
-      description: Health check with DB status
-
-  entities:
-    - name: Greeting
-      table: GREETINGS
-      fields:
-        - { name: id, type: Long, generated: true }
-        - { name: name, type: String, length: 100, nullable: false }
-        - { name: message, type: String, length: 500, nullable: false }
-        - { name: createdAt, type: Timestamp, generated: true }
-
-  business_rules:
-    - context: greeting_validation
-      rules:
-        - "IF name is blank THEN return 400 Bad Request"
-        - "IF message is blank THEN return 400 Bad Request"
-        - "IF message length > 500 THEN truncate to 500 with warning"
-        - "IF name contains special characters THEN sanitize (strip HTML)"
-
-  database:
-    type: oracle
-    orm: jpa-hibernate
-    migration: flyway
-    config_source: boilerplate/backend/src/main/resources/application.yml  # EXISTING
-
-frontend:
-  framework: angular
-  version: "17+"
-  styling: angular-material
-  pages:
-    - name: GreetingPage
-      route: /
-      components: [GreetingForm, GreetingList]
-  proxy:
-    target: /api/
-    config_source: boilerplate/frontend/proxy.conf.json  # EXISTING
-
-infrastructure:
-  terraform:
-    action: SKIP                    # EXISTING — do not generate
-  docker:
-    action: SKIP                    # EXISTING Dockerfiles
-  cicd:
-    action: SKIP                    # EXISTING Jenkins + Harness
-
-observability:
-  apm: dynatrace
-  health_check: /api/health
-  tracing: opentelemetry
-
-evalops:
-  test_framework: junit
-  contract_testing: spring-cloud-contract
-
-golden_dataset:
-  - given: "service running, DB accessible"
-    when: "POST /api/greetings with valid body"
-    then: "201 Created with auto-generated id"
-  - given: "one greeting exists"
-    when: "GET /api/greetings"
-    then: "200 with array containing greeting"
-  - given: "no greeting with id 999"
-    when: "GET /api/greetings/999"
-    then: "404 Not Found"
-  - given: "database unreachable"
-    when: "GET /api/health"
-    then: "503 with status DOWN"
-
-patterns_used:
-  - pattern: rest-crud
-    confidence: high
-    rationale: "Standard CRUD endpoints for Greeting entity"
-  - pattern: brownfield-integration
-    confidence: high
-    rationale: "Spec contains EXISTING signals — infrastructure reuse"
-  - pattern: spa-backend
-    confidence: high
-    rationale: "Angular frontend + Spring Boot backend pattern"
-```
-
-*End of Appendix B*
-
+*End of Appendix — Architecture Document*

@@ -2080,3 +2080,669 @@ A: The brownfield SPA example in Section 3 uses AWS (ECS Fargate + Oracle RDS). 
 | Section 13 (Deployment Scenario) | Architecture doc — FNOL walkthrough | Architectural context for deployment steps |
 
 *The architecture document provides the WHY. This guide provides the HOW. The operations runbook provides the PROCEDURES for maintaining the platform.*
+
+---
+
+## Appendix — FNOL Use Case: Complete Sample Files
+
+This appendix contains every FNOL-specific sample for the greenfield Agentic SpecKit preset. Template files (empty structures) are in the Architecture Document Appendix.
+
+---
+
+### FNOL-T1 — Filled spec.md
+
+```markdown
+---
+template: agentcatalyst-spec
+version: "2.0"
+archetype: agentic
+use_case: fnol-claims-intake
+---
+
+# Agent Specification — FNOL Claims Intake
+
+## 1. Business Context
+Our auto insurance company processes approximately 2,000 first notice of loss (FNOL) claims per day. Currently, claims intake is handled by call center agents who manually enter data into a legacy mainframe system, look up policy details in a separate application, and classify severity using a paper decision tree. Average handling time is 45 minutes per claim. We want to build an AI agent that automates the intake process, reducing handling time to under 5 minutes while improving data accuracy and consistency.
+
+## 2. Workflow — Step by Step
+First, the customer calls or submits a claim through our web portal. The system extracts claimant details (name, policy number, date of loss, description of incident).
+
+Then, in parallel, it enriches from three sources:
+- Policy details from the policy management system (coverage limits, deductible, named drivers)
+- Vehicle details from the vehicle registry (make, model, year, VIN, market value)
+- Weather conditions at the time and location of the incident from weather.gov
+
+After enrichment, the system classifies the claim severity (critical, high, medium, low) based on damage amount, injury reports, and vehicle total loss indicators.
+
+Loop until the quality score exceeds 0.85: validate all enriched data for completeness and consistency.
+
+Route high-severity and critical claims to a human adjuster for review before finalizing. Low and medium severity claims are auto-approved.
+
+Finally, send confirmation notification to the claimant with their claim number and next steps.
+
+## 3. Regulatory Requirements
+- All claim data must be retained for 7 years per state insurance regulations
+- PII (name, SSN, policy number) must be encrypted at rest and masked in logs
+- Audit trail required for every claim status change
+- Data residency: US only (us-east1, us-west1)
+
+## 4. Data Systems
+- Claims database (Cloud SQL) — read/write — stores claim records, status, notes
+- Policy management system — read only — existing REST API at policy-api.internal
+- Vehicle registry — read only — existing REST API at vehicle-api.internal
+
+## 5. External Partners & Integrations
+- Body shop network — they operate their own system. We send severity + vehicle details, they return repair estimates and available appointment slots.
+- Weather.gov — public API, no auth required
+- Police report system — future integration (Phase 2)
+
+## 6. What We Own vs What We Connect To
+- We OWN: Claims database, claim processing logic, severity classification rules
+- We CONNECT TO: Policy management system (EXISTING REST API — MUST use these existing endpoints), Vehicle registry (EXISTING REST API), Body shop partner (THEIR system), Weather.gov (public)
+
+## 7. Business Rules
+IF injury_reported = true OR vehicle_total_loss = true THEN severity = "critical"
+IF damage_amount > 10000 AND injury_reported = false THEN severity = "high"
+IF damage_amount > 2500 AND damage_amount <= 10000 THEN severity = "medium"
+IF damage_amount <= 2500 THEN severity = "low"
+
+IF severity = "critical" OR severity = "high" THEN route_to = "human_adjuster"
+IF severity = "medium" OR severity = "low" THEN route_to = "auto_approve"
+
+IF policy_status != "active" THEN REJECT claim WITH reason = "inactive_policy"
+IF date_of_loss > today() THEN REJECT claim WITH reason = "future_date"
+
+TRANSFORM damage_description TO damage_categories USING keyword extraction (fire, flood, collision, theft, vandalism)
+
+## 8. Transformation Rules
+TRANSFORM claimant_phone TO E.164 format USING country_code + national_number
+TRANSFORM date_of_loss TO ISO 8601 format
+TRANSFORM policy_number TO uppercase + zero-padded (12 digits)
+
+## 9. Error Handling
+IF policy-api returns 503: retry 3 times with exponential backoff, then escalate to human
+IF vehicle-api returns 404: proceed without vehicle enrichment, flag for manual lookup
+IF weather.gov times out: proceed without weather data, set weather_enriched = false
+IF body-shop-a2a is unreachable: queue the request, retry every 15 minutes for 4 hours
+
+## 10. Acceptance Criteria
+GIVEN a new claim with policy number POL-000123456 WHEN the agent processes it THEN it should return severity "medium" and all enrichments populated within 30 seconds
+GIVEN a claim with injury_reported = true WHEN classified THEN severity MUST be "critical" and routed to human adjuster
+GIVEN an inactive policy WHEN claim submitted THEN the claim MUST be rejected with reason "inactive_policy"
+GIVEN a weather.gov timeout WHEN processing THEN the claim should complete with weather_enriched = false and no error
+GIVEN 100 concurrent claims WHEN submitted simultaneously THEN all should complete within 60 seconds with zero data corruption
+```
+
+---
+
+### FNOL-T2 — Filled plan.md
+
+```markdown
+---
+template: agentcatalyst-plan
+version: "2.0"
+archetype: agentic
+use_case: fnol-claims-intake
+---
+
+# Technical Plan — FNOL Claims Intake
+
+## Infrastructure
+- **Primary GCP region:** us-east1
+- **DR region:** us-west1
+- **DR strategy:** pilot-cold
+
+## Model Selection
+- **Primary LLM:** gemini-2.0-flash
+- **Fallback LLM:** gemini-2.0-flash-lite
+- **Embedding model:** text-embedding-005
+
+## CI/CD
+- **Infrastructure pipeline:** Jenkins
+- **Application pipeline:** Harness
+- **IaC module source:** github.com/[company]/terraform-modules
+
+## Security
+- **Auth method for MCP servers:** mTLS (internal), OAuth 2.1 (policy-api), API Key (vehicle-api)
+- **Data classification:** confidential (PII present)
+- **PII handling:** encrypt at rest, mask in logs
+
+## Observability
+- **APM:** Dynatrace
+- **Logging:** Splunk
+- **Tracing:** Cloud Trace (default) + Arize Phoenix (eval)
+
+## EvalOps
+- **Evaluation frequency:** pre-commit (Phase 1), nightly (Phase 1+2), weekly (all 3 phases)
+- **HITL reviewers:** 3
+- **AutoSxS baseline model:** gemini-1.5-pro
+```
+
+---
+
+### FNOL-T3 — Filled tasks.md
+
+```markdown
+# FNOL Claims Intake — Work Breakdown
+
+## Auto-Generated (87%)
+| Category | Files | Status |
+|---|---|---|
+| 6 agent classes | `app/agents/fnol_coordinator.py`, `extract_details.py`, `parallel_enrichment.py`, `enrich_policy.py`, `enrich_vehicle.py`, `enrich_weather.py`, `severity_classifier.py`, `human_review.py` | ✅ Generated |
+| 3 MCP connections | `app/mcp_connections/claims_db.py`, `policy_api.py`, `vehicle_api.py` | ✅ Generated |
+| 1 A2A client | `app/a2a_clients/body_shop.py` | ✅ Generated |
+| 3 FunctionTools | `app/tools/severity_classifier.py`, `coverage_calculator.py`, `notification_sender.py` | ✅ First-draft (review needed) |
+| Model Armor | `app/security/model_armor.py` | ✅ Generated |
+| Terraform | `deployment/terraform/*.tf` (15 files incl gateway + identity + registry) | ✅ Generated |
+| Dynatrace | `config/dynatrace/dashboard.json` | ✅ Generated |
+| CI/CD | `ci-cd/Jenkinsfile`, `ci-cd/harness-pipeline.yaml` | ✅ Generated |
+| EvalOps | `eval/pipeline.yaml`, `eval/golden-dataset.json` | ✅ Generated |
+| OTel | `config/otel-collector-config.yaml` | ✅ Generated |
+
+## Developer Implements (13%)
+| Task | Effort | Notes |
+|---|---|---|
+| System prompts for each LlmAgent | 2 hrs | Tone, constraints, persona for claims domain |
+| Review severity_classifier logic | 1 hr | Verify edge cases from business rules |
+| Review coverage_calculator logic | 1 hr | Verify deductible calculations |
+| Write notification templates | 1 hr | Email/SMS content for claimant |
+| Curate golden dataset | 4 hrs | Add 40+ edge cases beyond the 5 seeded entries |
+| Integration testing | 2 hrs | Test with real policy-api and vehicle-api |
+```
+
+---
+
+### FNOL-F2 — app-blueprint.json (FNOL example)
+
+```json
+{
+  "metadata": {
+    "name": "fnol-claims-agent",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "description": "FNOL Claims intake agent — processes first notice of loss claims",
+    "team": "claims-engineering",
+    "lob": "auto-insurance"
+  },
+  "pattern_composition": {
+    "root_pattern": "Sequential",
+    "composition": ["Sequential", "Parallel", "Loop", "HITL"]
+  },
+  "agents": [
+    { "name": "fnol_coordinator", "type": "SequentialAgent", "role": "Root orchestrator", "parent": null, "model": null, "tools": [] },
+    { "name": "extract_details", "type": "LlmAgent", "role": "Extract claimant details from intake", "parent": "fnol_coordinator", "model": "gemini-2.0-flash", "tools": ["claims-db-mcp"] },
+    { "name": "parallel_enrichment", "type": "ParallelAgent", "role": "Concurrent data enrichment", "parent": "fnol_coordinator", "model": null, "tools": [] },
+    { "name": "enrich_policy", "type": "LlmAgent", "role": "Enrich with policy details", "parent": "parallel_enrichment", "model": "gemini-2.0-flash", "tools": ["policy-api-mcp"] },
+    { "name": "enrich_vehicle", "type": "LlmAgent", "role": "Enrich with vehicle details", "parent": "parallel_enrichment", "model": "gemini-2.0-flash", "tools": ["vehicle-api-mcp"] },
+    { "name": "enrich_weather", "type": "LlmAgent", "role": "Enrich with weather data", "parent": "parallel_enrichment", "model": "gemini-2.0-flash", "tools": ["weather-api-mcp"] },
+    { "name": "severity_classifier", "type": "LlmAgent", "role": "Classify claim severity", "parent": "fnol_coordinator", "model": "gemini-2.0-flash", "tools": ["severity_classifier_fn", "body-shop-a2a"] },
+    { "name": "human_review", "type": "LlmAgent", "role": "Route critical claims to human adjuster", "parent": "fnol_coordinator", "model": "gemini-2.0-flash", "tools": ["review-queue-mcp"] }
+  ],
+  "tools": {
+    "mcp_servers": [
+      { "name": "claims-db-mcp", "endpoint": "mcp://claims-db.internal:8080", "auth_method": "mtls", "assigned_to": "extract_details", "timeout": "30s", "retry": 3, "discovered_via": "Vertex AI Search (tool registry)" },
+      { "name": "policy-api-mcp", "endpoint": "mcp://policy-api.internal:8080", "auth_method": "oauth2", "assigned_to": "enrich_policy", "timeout": "15s", "retry": 2, "discovered_via": "Vertex AI Search (tool registry)" },
+      { "name": "vehicle-api-mcp", "endpoint": "mcp://vehicle-api.internal:8080", "auth_method": "api_key", "assigned_to": "enrich_vehicle", "timeout": "15s", "retry": 2, "discovered_via": "Vertex AI Search (tool registry)" },
+      { "name": "weather-api-mcp", "endpoint": "https://api.weather.gov/points", "auth_method": "none", "assigned_to": "enrich_weather", "timeout": "10s", "retry": 1, "discovered_via": "Vertex AI Search (tool registry)" },
+      { "name": "review-queue-mcp", "endpoint": "mcp://review-queue.internal:8080", "auth_method": "mtls", "assigned_to": "human_review", "timeout": "60s", "retry": 1, "discovered_via": "Vertex AI Search (tool registry)" }
+    ],
+    "a2a_agents": [
+      { "name": "body-shop-a2a", "endpoint": "https://bodyshop.partner.com/a2a", "agent_card_url": "https://bodyshop.partner.com/.well-known/agent.json", "capabilities": ["estimate", "schedule", "parts-lookup"], "assigned_to": "severity_classifier", "discovered_via": "Apigee API Hub (type=a2a_agent, v2.3, active)" }
+    ],
+    "function_tools": [
+      { "name": "severity_classifier_fn", "assigned_to": "severity_classifier", "business_rules_ref": "spec §7 — severity classification rules" },
+      { "name": "coverage_calculator_fn", "assigned_to": "extract_details", "business_rules_ref": "spec §7 — policy validation rules" },
+      { "name": "notification_sender_fn", "assigned_to": "human_review", "business_rules_ref": "spec §2 — final confirmation step" }
+    ]
+  },
+  "infrastructure": {
+    "modules": [
+      { "name": "tf-agentic-pilot-cold", "source": "github.com/[company]/tf-agentic-pilot-cold", "version": "v3.1.0", "assigned_to": "fnol_coordinator (scaffold)", "dr_aware": true },
+      { "name": "tf-cloud-sql", "source": "github.com/[company]/tf-cloud-sql", "version": "v2.1.0", "assigned_to": "claims-db", "dr_aware": true },
+      { "name": "tf-model-armor", "source": "github.com/[company]/tf-model-armor", "version": "v1.3.0", "assigned_to": "fnol_coordinator (screening)", "dr_aware": false },
+      { "name": "tf-vpc-sc", "source": "github.com/[company]/tf-vpc-sc", "version": "v1.2.0", "assigned_to": "all services", "dr_aware": true },
+      { "name": "tf-secret-manager", "source": "github.com/[company]/tf-secret-manager", "version": "v1.1.0", "assigned_to": "credentials", "dr_aware": true }
+    ],
+    "dr_strategy": "pilot-cold",
+    "primary_region": "us-east1",
+    "dr_region": "us-west1"
+  },
+  "business_rules": {
+    "severity_classifier_fn": [
+      { "condition": "injury_reported = true OR vehicle_total_loss = true", "action": "return 'critical'" },
+      { "condition": "damage_amount > 10000 AND injury_reported = false", "action": "return 'high'" },
+      { "condition": "damage_amount > 2500 AND damage_amount <= 10000", "action": "return 'medium'" },
+      { "condition": "damage_amount <= 2500", "action": "return 'low'" }
+    ],
+    "coverage_calculator_fn": [
+      { "condition": "policy_status != 'active'", "action": "reject claim", "else_action": "proceed" },
+      { "condition": "date_of_loss > today()", "action": "reject claim with 'future_date'" }
+    ]
+  },
+  "screening_config": {
+    "agents_with_input_screening": ["fnol_coordinator", "extract_details"],
+    "agents_with_output_screening": ["fnol_coordinator", "extract_details", "severity_classifier", "human_review"],
+    "pii_fields": ["claimant_name", "ssn", "policy_number", "phone", "address"]
+  },
+  "evalops": {
+    "golden_dataset": {
+      "entries": [
+        { "input": "Claim for policy POL-000123456, fender bender, $3,200 damage, no injuries", "expected_output": "severity: medium, auto-approved", "tags": ["happy-path", "medium-severity"] },
+        { "input": "Claim for policy POL-000789012, head-on collision, injuries reported", "expected_output": "severity: critical, routed to human adjuster", "tags": ["critical", "injury"] },
+        { "input": "Claim for inactive policy POL-000000001", "expected_output": "rejected: inactive_policy", "tags": ["edge-case", "rejection"] },
+        { "input": "Claim with future date_of_loss 2027-01-01", "expected_output": "rejected: future_date", "tags": ["edge-case", "validation"] },
+        { "input": "Claim for policy POL-000456789, vehicle total loss, $45,000", "expected_output": "severity: critical, routed to human adjuster", "tags": ["critical", "total-loss"] }
+      ],
+      "min_count": 10
+    },
+    "eval_frequency": "pre-commit",
+    "hitl_reviewers": 3,
+    "autosxs_baseline": "gemini-1.5-pro"
+  },
+  "nfrs": [
+    { "category": "Latency", "requirement": "End-to-end claim processing", "target": "< 30 seconds (p95)" },
+    { "category": "Throughput", "requirement": "Concurrent claim processing", "target": ">= 100 concurrent claims" },
+    { "category": "Availability", "requirement": "Service uptime", "target": "99.9% (3-nines)" },
+    { "category": "Data retention", "requirement": "Claim data retention", "target": "7 years per regulation" },
+    { "category": "Security", "requirement": "PII encryption", "target": "AES-256 at rest, TLS 1.3 in transit" }
+  ],
+  "pipeline_configs": {
+    "infrastructure_pipeline": "agent-infra-plan-apply-v3",
+    "deployment_pipeline": "agent-deploy-canary-v2",
+    "evalops_pipeline": "agent-evalops-3phase-v1",
+    "api_hub_registration": "agent-api-hub-register-v1"
+  },
+  "blueprint_hash": "sha256:a1b2c3d4e5f6...",
+  "spec_hash": "sha256:f6e5d4c3b2a1...",
+  "plan_hash": "sha256:1a2b3c4d5e6f..."
+}
+```
+
+---
+
+### FNOL-S1 — adk-agents skill output sample
+
+```python
+# app/agents/fnol_coordinator.py — Generated by /catalyst.generate (adk-agents skill)
+
+from google.adk.agents import SequentialAgent
+from app.agents.extract_details import ExtractDetails
+from app.agents.parallel_enrichment import ParallelEnrichment
+from app.agents.severity_classifier import SeverityClassifier
+from app.agents.human_review import HumanReview
+
+class FnolCoordinator(SequentialAgent):
+    """Root orchestrator for FNOL claims intake workflow."""
+
+    def __init__(self):
+        super().__init__(
+            name="fnol_coordinator",
+            sub_agents=[
+                ExtractDetails(),
+                ParallelEnrichment(),
+                SeverityClassifier(),
+                HumanReview(),
+            ],
+        )
+```
+
+```python
+# app/agents/parallel_enrichment.py — Generated by /catalyst.generate (adk-agents skill)
+
+from google.adk.agents import ParallelAgent
+from app.agents.enrich_policy import EnrichPolicy
+from app.agents.enrich_vehicle import EnrichVehicle
+from app.agents.enrich_weather import EnrichWeather
+
+class ParallelEnrichment(ParallelAgent):
+    """Runs policy, vehicle, and weather enrichment concurrently."""
+
+    def __init__(self):
+        super().__init__(
+            name="parallel_enrichment",
+            sub_agents=[
+                EnrichPolicy(),
+                EnrichVehicle(),
+                EnrichWeather(),
+            ],
+        )
+```
+
+```python
+# app/agents/extract_details.py — Generated by /catalyst.generate (adk-agents skill)
+
+from google.adk.agents import LlmAgent
+from app.mcp_connections.claims_db import claims_db_toolset
+from app.security.model_armor import model_armor_input_screen, model_armor_output_screen
+
+class ExtractDetails(LlmAgent):
+    """Extract claimant details from intake and store in claims database."""
+
+    def __init__(self):
+        super().__init__(
+            name="extract_details",
+            model="gemini-2.0-flash",  # from plan.md
+            instruction="",  # TODO: Developer writes system prompt
+            tools=[claims_db_toolset],
+            before_model_callback=model_armor_input_screen,
+            after_model_callback=model_armor_output_screen,
+        )
+```
+
+---
+
+### FNOL-S2 — adk-tools skill output sample
+
+```python
+# app/mcp_connections/claims_db.py — Generated by /catalyst.generate (adk-tools skill)
+
+import os
+from google.adk.tools import MCPToolset
+
+claims_db_toolset = MCPToolset.from_server(
+    server_name="claims-db-mcp",
+    server_url="mcp://claims-db.internal:8080",  # from app-blueprint.json tools.mcp_servers[0].endpoint
+    auth_method="mtls",
+    cert_path=os.environ["CLAIMS_DB_CERT_PATH"],  # from Secret Manager
+)
+```
+
+```python
+# app/a2a_clients/body_shop.py — Generated by /catalyst.generate (adk-tools skill)
+
+from google.adk.tools import A2AClient
+
+body_shop_client = A2AClient(
+    agent_name="body-shop-agent",
+    agent_card_url="https://bodyshop.partner.com/.well-known/agent.json",
+    auth_method="mtls",
+    # Discovered via: Apigee API Hub (type=a2a_agent, v2.3, active)
+)
+```
+
+```python
+# app/tools/severity_classifier.py — Generated by /catalyst.generate (adk-tools skill)
+# FIRST DRAFT from spec §7 business rules — DEVELOPER MUST REVIEW
+
+from google.adk.tools import FunctionTool
+
+def severity_classifier(damage_amount: float, injury_reported: bool, vehicle_total_loss: bool) -> str:
+    """Classify claim severity. Auto-generated from spec §7 — review edge cases."""
+    if injury_reported or vehicle_total_loss:
+        return "critical"
+    elif damage_amount > 10000:
+        return "high"
+    elif damage_amount > 2500:
+        return "medium"
+    else:
+        return "low"
+
+severity_classifier_tool = FunctionTool(func=severity_classifier)
+```
+
+---
+
+### FNOL-S3 — company-terraform skill output sample
+
+```hcl
+# deployment/terraform/main.tf — Generated by /catalyst.generate (company-terraform skill)
+
+module "agent_platform" {
+  source  = "github.com/[company]/tf-agentic-pilot-cold?ref=v3.1.0"
+  project = var.project_id
+  region  = var.primary_region
+  dr_region = var.dr_region
+  service_name = "fnol-claims-agent"
+}
+```
+
+```hcl
+# deployment/terraform/gateway/routes.tf — Generated from app-blueprint.json tools.mcp_servers[]
+
+resource "google_apigee_proxy" "claims_db_route" {
+  name        = "fnol-claims-db-proxy"
+  target_url  = "mcp://claims-db.internal:8080"
+  auth_method = "mtls"
+  agent_name  = "extract_details"
+}
+
+resource "google_apigee_proxy" "policy_api_route" {
+  name        = "fnol-policy-api-proxy"
+  target_url  = "mcp://policy-api.internal:8080"
+  auth_method = "oauth2"
+  agent_name  = "enrich_policy"
+}
+```
+
+```hcl
+# deployment/terraform/identity/agent-identities.tf — Generated from agents[] + tools[]
+
+resource "google_service_account" "extract_details" {
+  account_id   = "fnol-extract-details"
+  display_name = "FNOL - extract_details agent"
+}
+
+resource "google_project_iam_member" "extract_details_claims_db" {
+  role   = "roles/cloudsql.client"
+  member = "serviceAccount:${google_service_account.extract_details.email}"
+}
+# extract_details CANNOT access policy-api, vehicle-api, weather-api, or review-queue
+```
+
+---
+
+### FNOL-S4 — company-observability skill output sample
+
+```yaml
+# config/otel-collector-config.yaml — Generated by /catalyst.generate (company-observability skill)
+
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: "0.0.0.0:4317" }
+      http: { endpoint: "0.0.0.0:4318" }
+
+exporters:
+  googlecloud:
+    project: ${PROJECT_ID}
+  dynatrace:
+    endpoint: ${DT_ENDPOINT}
+    api_token: ${DT_API_TOKEN}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [googlecloud, dynatrace]
+```
+
+---
+
+### FNOL-S5 — company-cicd skill output sample
+
+```yaml
+# ci-cd/harness-pipeline.yaml — Generated by /catalyst.generate (company-cicd skill)
+
+pipeline:
+  name: fnol-claims-agent-deploy
+  stages:
+    - stage: build
+      steps:
+        - run: pytest tests/ --cov=app
+        - run: docker build -t ${REGISTRY}/fnol-claims-agent:${TAG} .
+    - stage: deploy-nonprod
+      steps:
+        - deploy: { service: fnol-claims-agent, env: nonprod }
+    - stage: eval-nonprod
+      steps:
+        - run: python eval/pipeline.py --phase 1 --env nonprod
+    - stage: deploy-preprod
+      steps:
+        - deploy: { service: fnol-claims-agent, env: preprod, canary: 10% }
+        - rollback_if: error_rate > 1%
+    - stage: deploy-prod
+      steps:
+        - deploy: { service: fnol-claims-agent, env: prod, progressive: [10, 50, 100] }
+    - stage: register-api-hub
+      steps:
+        - run: |
+            apihub register \
+              --name=fnol-claims-agent --version=1.0.0 \
+              --type=a2a_agent \
+              --capabilities=claim-submission,claim-lookup,severity-classification \
+              --agent-card=https://fnol.internal/.well-known/agent.json
+```
+
+---
+
+### FNOL-S6 — company-security skill output sample
+
+```python
+# app/security/model_armor.py — Generated by /catalyst.generate (company-security skill)
+
+from google.cloud.modelarmor import ModelArmor
+
+_armor = ModelArmor(project=os.environ["PROJECT_ID"])
+
+PII_FIELDS = ["claimant_name", "ssn", "policy_number", "phone", "address"]
+
+def model_armor_input_screen(request):
+    """Screen user input before LLM call — blocks PII leakage and prompt injection."""
+    result = _armor.screen_input(
+        content=request.content,
+        policies=["prompt-injection", "pii-detection"],
+        pii_fields=PII_FIELDS,
+    )
+    if result.blocked:
+        raise ValueError(f"Input blocked by Model Armor: {result.reason}")
+    return request
+
+def model_armor_output_screen(response):
+    """Screen LLM output before returning — blocks PII in response."""
+    result = _armor.screen_output(
+        content=response.content,
+        policies=["pii-detection", "harmful-content"],
+        pii_fields=PII_FIELDS,
+    )
+    if result.blocked:
+        raise ValueError(f"Output blocked by Model Armor: {result.reason}")
+    return response
+```
+
+---
+
+### FNOL-P1 — catalyst.blueprint interaction sample
+
+```
+Developer: /catalyst.blueprint
+
+Coding Agent: Connecting to Blueprint Advisor MCP Server...
+Coding Agent: ✓ blueprint_start called — taskId: bp-2026-05-23-001
+Coding Agent: Polling blueprint_status...
+  → Stage: mapping — "Mapping current-state integrations to target-state..."
+  → Stage: recommending — "Searching pattern catalog for Sequential + Parallel + Loop + HITL..."
+  → Stage: recommending — "Discovering A2A agents in API Hub..."
+  → Stage: checking — "Validating ADR compliance..."
+  → Stage: assembling — "Rendering diagrams via Eraser.io API..."
+  → Stage: assembling — "Generating app-blueprint.json from .md..."
+  → Stage: completed
+
+Coding Agent: ✓ blueprint_result retrieved. Writing to workspace:
+  → app-blueprint.md (PRIMARY — 18 sections, 347 lines)
+  → app-blueprint.json (DERIVED — machine-readable, 189 lines)
+  → fnol-component-diagram.png + .eraser + .drawio.xml + .svg
+  → fnol-hadr-diagram.png + .eraser + .drawio.xml + .svg
+
+Blueprint ready. Review app-blueprint.md in your editor.
+```
+
+---
+
+### FNOL-P2 — catalyst.assess interaction sample
+
+```
+Developer: /catalyst.assess
+
+Coding Agent: Reading app-blueprint.md (NOT app-blueprint.json)...
+Coding Agent: Extracting 7 artifact types from .md sections...
+  → TSA component diagram: fnol-component-diagram.png (§4)
+  → HA/DR views: fnol-hadr-diagram.png (§13)
+  → Sequence diagrams: 2 mermaid blocks (§14)
+  → NFRs: 5 entries (§10)
+  → ADL: 4 entries (§11)
+  → Tech stack: 8 entries (§12)
+  → Patterns: Sequential + Parallel + Loop + HITL (§2)
+
+Coding Agent: Packaging as solution_package (ephemeral transport — NOT the .json file)...
+Coding Agent: ✓ assess_start called — taskId: as-2026-05-23-001
+Coding Agent: Polling assess_status...
+  → "Evaluating architecture compliance..."
+  → "Checking pattern adherence..."
+  → "Scoring HA/DR readiness..."
+  → completed
+
+Assessment Results:
+  Scorecard: 88/100
+  ┌─────────────────────────────────────────────────────┐
+  │ Findings:                                           │
+  │ ⚠ SHOWSTOPPER: No cross-region DR for Cloud SQL    │
+  │   → Add Aurora Global Database or Cloud SQL replica │
+  │ ⓘ HIGH: WAF rules not using enterprise managed set │
+  │ ⓘ MEDIUM: Angular 17 not on approved tech radar    │
+  └─────────────────────────────────────────────────────┘
+
+Fix showstoppers and re-run /catalyst.assess.
+```
+
+---
+
+### FNOL-P3 — catalyst.generate interaction sample
+
+```
+Developer: /catalyst.generate
+
+Coding Agent: Checking governance gate...
+  → Calling recordTechDebt on Governance Guardian...
+  → Response: { signal: "resume", tech_debt_id: "TD-2026-0142" }
+  → Governance gate PASSED. Tech debt recorded.
+
+Coding Agent: Checking app-blueprint.json freshness...
+  → .md hash: sha256:a1b2c3... vs .json blueprint_hash: sha256:a1b2c3...
+  → Hashes match. JSON is current.
+
+Coding Agent: Loading skills...
+  → Domain: adk-agents v1.2.0, adk-tools v1.1.0
+  → Overlay: company-terraform v2.0.0, company-observability v1.3.0,
+             company-cicd v1.5.0, company-security v1.2.0
+  → Constitution: 20 non-negotiable rules loaded
+
+Coding Agent: Generating project from app-blueprint.json...
+  → [1/18] Agent classes: 6 files in app/agents/
+  → [2/18] MCP connections: 3 files in app/mcp_connections/
+  → [3/18] A2A clients: 1 file in app/a2a_clients/
+  → [4/18] FunctionTools: 3 files in app/tools/ (first-draft — review needed)
+  → [5/18] Model Armor: app/security/model_armor.py
+  → [6/18] Terraform scaffold: deployment/terraform/main.tf
+  → [7/18] Terraform services: database.tf, security.tf
+  → [8/18] Gateway proxy routes: deployment/terraform/gateway/routes.tf (5 routes)
+  → [9/18] Agent Workload Identity: deployment/terraform/identity/agent-identities.tf (6 agents)
+  → [10/18] API Hub registration: deployment/terraform/registry/agent-entry.tf
+  → [11/18] Dynatrace config: config/dynatrace/dashboard.json
+  → [12/18] OTel collector: config/otel-collector-config.yaml
+  → [13/18] CI/CD: ci-cd/Jenkinsfile + ci-cd/harness-pipeline.yaml
+  → [14/18] Pre-commit hook: .pre-commit-config.yaml
+  → [15/18] Golden dataset: eval/golden-dataset.json (5 seeded entries)
+  → [16/18] EvalOps pipeline: eval/pipeline.yaml
+  → [17/18] README.md + pyproject.toml + Dockerfile
+  → [18/18] Health check: app/health.py
+
+✅ Project generated. 42 files created.
+
+Next steps:
+  1. Write system prompts for each LlmAgent (TODO markers in agent files)
+  2. Review FunctionTool logic in app/tools/ (first-draft from business rules)
+  3. Curate golden dataset (5 entries seeded — add 40+ edge cases)
+  4. Create a PR: git checkout -b feature/fnol-claims-agent && git add . && git push
+```
+
+*End of Appendix — Developer Guide*
