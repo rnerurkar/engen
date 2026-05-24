@@ -345,6 +345,8 @@ Rate limiting applies to `blueprint_start` (10 starts/hour per user, 200/hour pe
 
 ![Blueprint Advisor — Async Internal Architecture (MCP Tasks)](blueprint-advisor-components.png)
 
+The LlmAgent inside `recommend_architecture` is guided by a company-curated system prompt that encodes brownfield-specific reasoning: CSA→TSA tech substitution priority, Strangler-Fig composition rules, migration phase sequencing, and ADR compliance enforcement. → *See Developer Guide "System Prompt Template — Brownfield Blueprint Advisor" for the full system prompt.*
+
 ### 9.3 Call sequence (async MCP Tasks)
 
 → *Standalone Mermaid file: [`blueprint-advisor-sequence.mmd`](blueprint-advisor-sequence.mmd)*
@@ -1101,6 +1103,735 @@ The per-call compute cost (~$0.11/blueprint) represents ~2% of total platform TC
 ---
 
 *End of architecture document.*
+
+---
+
+## Appendix — Brownfield CSA→TSA SpecKit Preset: Complete Template Files
+
+This appendix contains every template file in the `agentcatalyst-brownfield` preset. MPA→SPA samples (filled examples) are in the Developer Guide Appendix.
+
+```
+.specify/
+├── preset.yml                              ← G1: Manifest
+├── templates/
+│   ├── spec-template.md                    ← T1: 10-section spec (with current_state + integrations[])
+│   ├── plan-template.md                    ← T2: Technical plan (with r_factor + cutover + sequencing)
+│   └── tasks-template.md                   ← T3: Generated vs manual (migration-aware)
+├── commands/
+│   ├── speckit.specify.md                  ← P1: CSA diagram parsing
+│   ├── speckit.plan.draft.md               ← P2: Plan draft generation
+│   ├── speckit.plan.review.md              ← P3: Async EA review
+│   ├── catalyst.blueprint.md               ← P4: Blueprint Advisor call
+│   ├── catalyst.assess.md                  ← P5: Governance Guardian call
+│   ├── catalyst.generate.md                ← P6: Code generation + gov gate
+│   └── catalyst.refresh.md                 ← P7: Design contract refresh
+├── skills/
+│   ├── brownfield-migration/SKILL.md       ← S1: Migration patterns (Strangler-Fig, BFF, coexistence)
+│   ├── spa-frontend/SKILL.md               ← S2: Angular/React SPA generation
+│   ├── bff-backend/SKILL.md                ← S3: Spring Boot BFF generation
+│   ├── company-terraform/SKILL.md          ← S4: IaC overlay (AWS modules for brownfield)
+│   ├── company-observability/SKILL.md      ← S5: Monitoring overlay (Dynatrace + Splunk)
+│   ├── company-cicd/SKILL.md               ← S6: CI/CD overlay (Jenkins + Harness)
+│   └── company-security/SKILL.md           ← S7: Security overlay (Model Armor + VPC-SC)
+├── memory/
+│   ├── csa-patterns.md                     ← M1: CSA diagram parsing patterns
+│   ├── company-patterns.md                 ← M2: Company coding standards
+│   ├── approved-tools.md                   ← M3: Approved integrations (API Hub)
+│   ├── infra-standards.md                  ← M4: Infrastructure standards (AWS + GCP)
+│   └── tech-substitution-reference.md      ← M5: Common CSA→TSA tech substitutions
+├── schemas/
+│   └── app-blueprint.schema.json           ← F2: JSON schema (extends greenfield with migration fields)
+└── constitution.md                         ← C1: Non-negotiable rules (brownfield-specific additions)
+```
+
+→ *`app-blueprint.md` template (F1) is shared with the greenfield preset — see `app-blueprint-md-template-and-fnol-example.md`. Brownfield blueprints use the same 18 sections with brownfield-specific content (migration_phases[], coexistence_constraints[], Strangler-Fig patterns).*
+
+---
+
+### G1 — preset.yml (brownfield)
+
+```yaml
+name: agentcatalyst-brownfield
+version: "1.0.0"
+description: >
+  AgentCatalyst brownfield CSA→TSA transformation preset.
+  Parses CSA diagrams, maps current-state to target-state via tech substitution,
+  generates opinionated TSA blueprints with migration phases.
+
+archetype: brownfield-migration
+
+templates:
+  spec: templates/spec-template.md
+  plan: templates/plan-template.md
+  tasks: templates/tasks-template.md
+
+commands:
+  - commands/speckit.specify.md
+  - commands/speckit.plan.draft.md
+  - commands/speckit.plan.review.md
+  - commands/catalyst.blueprint.md
+  - commands/catalyst.assess.md
+  - commands/catalyst.generate.md
+  - commands/catalyst.refresh.md
+
+memory:
+  - memory/csa-patterns.md
+  - memory/company-patterns.md
+  - memory/approved-tools.md
+  - memory/infra-standards.md
+  - memory/tech-substitution-reference.md
+
+skills:
+  domain:
+    - name: brownfield-migration
+      version: "1.0.0"
+      source: github.com/[company]/skills/brownfield-migration
+    - name: spa-frontend
+      version: "1.1.0"
+      source: github.com/[company]/skills/spa-frontend
+    - name: bff-backend
+      version: "1.2.0"
+      source: github.com/[company]/skills/bff-backend
+  overlay:
+    - name: company-terraform
+      version: "2.0.0"
+      source: github.com/[company]/skills/company-terraform
+    - name: company-observability
+      version: "1.3.0"
+      source: github.com/[company]/skills/company-observability
+    - name: company-cicd
+      version: "1.5.0"
+      source: github.com/[company]/skills/company-cicd
+    - name: company-security
+      version: "1.2.0"
+      source: github.com/[company]/skills/company-security
+
+settings:
+  coding_agents: [copilot, claude-code, gemini-cli, cursor, windsurf]
+  output_format: markdown
+  save_location: workspace_root
+```
+
+---
+
+### T1 — templates/spec-template.md (brownfield)
+
+```markdown
+---
+template: agentcatalyst-brownfield-spec
+version: "2.0"
+archetype: brownfield-migration
+---
+
+# Application Specification — CSA→TSA Transformation
+
+## 1. Business Context
+<!-- What business problem does this application solve? Who are the users? What's the current MPA/monolith doing? -->
+
+## 2. Current State — What Exists Today
+<!-- Describe the current architecture: MPA framework (JSP/Struts/ASP.NET), application server (WebSphere/Tomcat/IIS), database (Oracle/SQL Server/DB2), infrastructure (vSphere/bare-metal/on-prem cloud) -->
+<!-- The CSA Agent diagram will be parsed to pre-fill integrations[] -->
+
+## 3. Target Intent — What We Want
+<!-- High-level target: SPA + BFF, microservices, cloud-native. Don't specify tech — the Blueprint Advisor will recommend based on ADRs and pattern catalog. -->
+<!-- Use phrases like "modernize to SPA" or "decompose into microservices" — the tech substitution table handles the rest. -->
+
+## 4. Integrations — Current State (pre-filled from CSA diagram)
+<!-- This section is auto-populated by /speckit.specify from the CSA diagram. -->
+<!-- Format: CURRENT: <system> | TYPE: <sync/async/batch> | PROTOCOL: <SOAP/REST/MQ/file> | OWNER: <team> -->
+
+## 5. External Partners & Integrations
+<!-- Same as greenfield — external APIs, partner systems, third-party services -->
+<!-- Use "they operate their own" for A2A boundaries -->
+
+## 6. What We Own vs What We Connect To
+<!-- Clarify ownership for migration scoping -->
+
+## 7. Business Rules
+<!-- IF/THEN conditions — these generate working code. Same format as greenfield. -->
+
+## 8. Transformation Rules
+<!-- Data migration, schema evolution, format changes -->
+<!-- MIGRATE <source_table> TO <target_table> USING <strategy: big-bang | trickle | dual-write> -->
+
+## 9. Error Handling
+<!-- Include: coexistence error handling (what if old system and new system both try to update?) -->
+<!-- Include: rollback strategy if migration phase fails -->
+
+## 10. Acceptance Criteria
+<!-- Same GIVEN/WHEN/THEN format as greenfield, plus migration-specific criteria -->
+<!-- GIVEN old system processing requests WHEN new system takes over THEN zero data loss and < 5 min downtime -->
+```
+
+---
+
+### T2 — templates/plan-template.md (brownfield)
+
+```markdown
+---
+template: agentcatalyst-brownfield-plan
+version: "2.0"
+archetype: brownfield-migration
+---
+
+# Technical Plan — CSA→TSA Transformation
+
+## Infrastructure
+- **Current platform:** <!-- e.g., vSphere 7.x, on-prem datacenter, US-East -->
+- **Target cloud:** <!-- e.g., AWS us-east-1 -->
+- **Target DR region:** <!-- e.g., AWS us-west-2 -->
+- **DR strategy:** <!-- active-active | hot-standby | pilot-cold -->
+
+## Migration Strategy
+- **R-factor:** <!-- Rehost | Replatform | Refactor | Rebuild | Replace -->
+- **Cutover strategy:** <!-- big-bang | phased | strangler-fig -->
+- **Coexistence period:** <!-- e.g., 6 months — old and new run in parallel -->
+- **Data migration approach:** <!-- dual-write | trickle-migration | big-bang ETL -->
+
+## Sequencing
+- **Phase 1 scope:** <!-- Which integrations migrate first? Lowest risk, highest value -->
+- **Phase 2 scope:** <!-- Next batch of integrations -->
+- **Phase 3+ scope:** <!-- Remaining integrations + decommission old system -->
+- **Cross-cloud egress:** <!-- PrivateLink + PSC | VPN | Direct Connect -->
+
+## Model Selection
+- **Primary LLM:** <!-- e.g., gemini-2.0-flash (for BFF logic generation) -->
+- **Fallback LLM:** <!-- e.g., gemini-2.0-flash-lite -->
+
+## CI/CD
+- **Infrastructure pipeline:** <!-- Jenkins | Cloud Build -->
+- **Application pipeline:** <!-- Harness | Cloud Deploy -->
+- **IaC module source:** <!-- e.g., github.com/[company]/terraform-modules -->
+
+## Observability
+- **APM:** <!-- Dynatrace | Cloud Monitoring -->
+- **Logging:** <!-- Splunk | Cloud Logging -->
+- **Tracing:** <!-- Arize Phoenix | Cloud Trace -->
+```
+
+---
+
+### T3 — templates/tasks-template.md (brownfield)
+
+```markdown
+---
+template: agentcatalyst-brownfield-tasks
+version: "2.0"
+archetype: brownfield-migration
+---
+
+# Work Breakdown — Generated vs Manual (Brownfield)
+
+## Auto-Generated by /catalyst.generate (75-90%)
+
+| Category | Files | Source |
+|---|---|---|
+| SPA frontend scaffold | `frontend/src/**` | Blueprint §3 + spa-frontend skill |
+| BFF backend services | `backend/src/**` | Blueprint §3 + bff-backend skill |
+| Migration phase configs | `migration/*.yaml` | Design contract migration_phases[] |
+| Coexistence proxies | `coexistence/*.py` | Design contract coexistence_constraints[] |
+| Terraform (multi-region) | `deployment/terraform/*.tf` | Blueprint §8 infra modules |
+| Apigee proxy routes | `deployment/terraform/gateway/*.tf` | Blueprint §5 tool bindings |
+| Per-agent Workload Identity | `deployment/terraform/identity/*.tf` | Blueprint §3+§5 topology+bindings |
+| API Hub registration | `deployment/terraform/registry/*.tf` | Blueprint §1+§3 metadata+topology |
+| Dynatrace config | `config/dynatrace/*.json` | Plan observability settings |
+| CI/CD pipelines | `ci-cd/*.yaml` | Plan CI/CD settings |
+| Data migration scripts | `migration/data/*.sql` | Spec §8 transformation rules |
+| Rollback procedures | `migration/rollback/*.yaml` | Design contract rollback_strategy |
+
+## Developer Implements (10-25%)
+
+| Task | Priority | Effort | Why |
+|---|---|---|---|
+| Review SPA component logic | P0 | 4-8 hrs | Verify UI behavior matches current MPA |
+| Review BFF service logic | P0 | 4-8 hrs | Verify API contracts match existing consumers |
+| Data migration validation | P0 | 4-8 hrs | Verify schema mapping correctness |
+| System prompts (if agentic components) | P1 | 2-4 hrs | Domain expertise |
+| Coexistence testing | P1 | 4-8 hrs | Test old+new running in parallel |
+| Cutover runbook | P1 | 2-4 hrs | Step-by-step cutover for each phase |
+```
+
+---
+
+### P1 — commands/speckit.specify.md
+
+```markdown
+---
+command: speckit.specify
+description: Parse CSA diagram and extract current-state integrations into spec.md
+---
+
+# /speckit.specify
+
+## What this command does
+Reads a CSA diagram (.drawio.xml or .mmd) from the workspace, parses it to extract current-state integrations, and pre-fills spec.md §4 with the integration inventory.
+
+## Steps
+1. Find the CSA diagram in the workspace (`.drawio.xml` or `.mmd` file).
+2. Parse the diagram to extract: system names, connection types (sync/async/batch), protocols (SOAP/REST/MQ/file), owning teams.
+3. Read `spec-template.md` and create `spec.md` with §4 pre-filled:
+   ```
+   ## 4. Integrations — Current State (pre-filled from CSA diagram)
+   CURRENT: PolicyDB | TYPE: sync | PROTOCOL: JDBC | OWNER: policy-team
+   CURRENT: ClaimsQueue | TYPE: async | PROTOCOL: MQ | OWNER: claims-team
+   CURRENT: ReportingDW | TYPE: batch | PROTOCOL: SFTP/CSV | OWNER: analytics-team
+   ```
+4. Prompt the developer to fill in remaining sections (§1-§3, §5-§10).
+5. Report: "spec.md created with [N] integrations pre-filled from CSA diagram. Fill in remaining sections."
+
+## Rules
+- Extract ALL connections from the CSA diagram — do not filter.
+- Mark each with `requires_review: true` for developer verification.
+- If the diagram format is unrecognized, ask the developer to provide a drawio or mermaid version.
+```
+
+---
+
+### P2 — commands/speckit.plan.draft.md
+
+```markdown
+---
+command: speckit.plan.draft
+description: Generate a draft technical plan from spec.md integrations
+---
+
+# /speckit.plan.draft
+
+## What this command does
+Reads spec.md and generates a draft plan.md with r_factor, cutover strategy, migration sequencing, and cross-cloud egress recommendations.
+
+## Steps
+1. Read `spec.md` — extract integrations[], current_state, target_intent.
+2. For each integration, recommend an r_factor (Rehost/Replatform/Refactor/Rebuild/Replace) based on complexity and risk.
+3. Recommend cutover strategy (big-bang/phased/strangler-fig) based on integration count and coexistence constraints.
+4. Sequence integrations into phases (lowest risk + highest value first).
+5. Generate `plan.md` with all recommendations marked as `draft: true`.
+6. Report: "Draft plan.md generated. Run /speckit.plan.review for async EA review."
+```
+
+---
+
+### P3 — commands/speckit.plan.review.md
+
+```markdown
+---
+command: speckit.plan.review
+description: Submit draft plan for async EA review
+---
+
+# /speckit.plan.review
+
+## What this command does
+Submits the draft plan.md to the EA review workflow (async). The EA office reviews sequencing, risk assessment, and cross-cloud egress decisions.
+
+## Steps
+1. Read `plan.md` from workspace.
+2. Validate all required fields are present.
+3. Submit to EA review queue (async — typically 1-2 business days).
+4. Report: "Plan submitted for EA review. You'll be notified when review is complete."
+5. When review returns: update `plan.md` with EA feedback, mark `draft: false`.
+```
+
+---
+
+### P4–P6 — Blueprint, Assess, Generate commands
+
+These are identical to the greenfield commands (P1–P3 in the greenfield preset) with one addition:
+
+**P4 (catalyst.blueprint)** — Same as greenfield P1. Output includes `migration_phases[]` and `coexistence_constraints[]` in the design contract alongside the standard `app-blueprint.md` + `app-blueprint.json` + diagrams.
+
+**P5 (catalyst.assess)** — Same as greenfield P2. Reads `app-blueprint.md` (NOT `.json`). Extracts 7 artifacts. Packages as ephemeral solution_package.
+
+**P6 (catalyst.generate)** — Same as greenfield P3 but loads brownfield-specific skills (`brownfield-migration`, `spa-frontend`, `bff-backend`) alongside overlays. Auto-regenerates `.json` from `.md`.
+
+---
+
+### P7 — commands/catalyst.refresh.md
+
+```markdown
+---
+command: catalyst.refresh
+description: Refresh the design contract when peripheral systems have changed
+---
+
+# /catalyst.refresh
+
+## What this command does
+Re-runs the Blueprint Advisor to detect changes in peripheral systems (API versions, schema changes, deprecated endpoints) and updates the design contract.
+
+## Steps
+1. Read current `app-blueprint.md`, `app-blueprint.json`, and `design_contract.json`.
+2. Call `blueprint_start` with the current spec + plan + a `refresh: true` flag.
+3. The Blueprint Advisor re-queries Vertex AI Search and API Hub for updated tool versions, A2A agent statuses, and pattern changes.
+4. Diff the new result against the existing design contract.
+5. If changes detected: write updated `.md` + `.json` + contract. Report changes.
+6. If no changes: report "Design contract is current. No updates needed."
+
+## When to use
+- Before a new migration phase begins (re-check peripheral readiness).
+- After a peripheral system upgrade (API version change, schema migration).
+- Periodically (monthly) as a hygiene check.
+```
+
+---
+
+### S1 — skills/brownfield-migration/SKILL.md
+
+```markdown
+---
+skill: brownfield-migration
+version: "1.0.0"
+archetype: brownfield-migration
+---
+
+# Brownfield Migration Patterns
+
+## Strangler-Fig pattern
+```python
+# coexistence/strangler_proxy.py
+class StranglerProxy:
+    """Routes requests to old or new system based on migration phase."""
+    
+    def __init__(self, old_endpoint: str, new_endpoint: str, phase_config: dict):
+        self.old = old_endpoint
+        self.new = new_endpoint
+        self.phase = phase_config
+    
+    async def route(self, request):
+        if self._should_route_to_new(request):
+            return await self._call_new(request)
+        return await self._call_old(request)
+    
+    def _should_route_to_new(self, request) -> bool:
+        """Check if this request type is migrated in the current phase."""
+        return request.type in self.phase.get("migrated_types", [])
+```
+
+## Migration phase configuration
+```yaml
+# migration/phases.yaml
+phases:
+  - name: phase-1-read-path
+    migrated_types: [policy_lookup, vehicle_lookup]
+    coexistence: dual-read  # both systems serve reads
+    rollback: switch_proxy_back_to_old
+  - name: phase-2-write-path
+    migrated_types: [claim_create, claim_update]
+    coexistence: dual-write  # writes go to both, new is primary
+    rollback: stop_dual_write_revert_to_old
+  - name: phase-3-decommission
+    migrated_types: [all]
+    coexistence: none  # old system decommissioned
+    rollback: not_applicable
+```
+
+## Rules
+- ALWAYS generate a Strangler-Fig proxy when `cutover_strategy = "strangler-fig"`.
+- ALWAYS generate migration phase configs from `design_contract.migration_phases[]`.
+- ALWAYS generate rollback procedures for each phase.
+- NEVER assume big-bang cutover unless explicitly specified in plan.md.
+- File naming: `coexistence/{pattern_name}.py`, `migration/phases.yaml`.
+```
+
+---
+
+### S2 — skills/spa-frontend/SKILL.md
+
+```markdown
+---
+skill: spa-frontend
+version: "1.1.0"
+archetype: brownfield-migration
+---
+
+# SPA Frontend Generation
+
+## Angular scaffold (when blueprint specifies Angular)
+```typescript
+// frontend/src/app/app.component.ts
+@Component({
+  selector: 'app-root',
+  template: '<router-outlet></router-outlet>',
+})
+export class AppComponent {}
+```
+
+## React scaffold (when blueprint specifies React)
+```tsx
+// frontend/src/App.tsx
+const App: React.FC = () => <RouterProvider router={router} />;
+export default App;
+```
+
+## Rules
+- Generate SPA scaffold based on `tech_stack.frontend` in blueprint.
+- ALWAYS generate lazy-loaded route modules (code splitting).
+- ALWAYS generate an API service layer that calls the BFF (not backend directly).
+- ALWAYS generate environment-specific config (dev/staging/prod).
+- NEVER embed business logic in the frontend — it belongs in the BFF.
+- File structure: `frontend/src/app/` (Angular) or `frontend/src/` (React).
+```
+
+---
+
+### S3 — skills/bff-backend/SKILL.md
+
+```markdown
+---
+skill: bff-backend
+version: "1.2.0"
+archetype: brownfield-migration
+---
+
+# BFF Backend Generation (Spring Boot)
+
+## Controller pattern
+```java
+// backend/src/main/java/com/company/bff/controller/PolicyController.java
+@RestController
+@RequestMapping("/api/v1/policies")
+public class PolicyController {
+    
+    private final PolicyService policyService;
+    
+    @GetMapping("/{policyNumber}")
+    public ResponseEntity<PolicyResponse> getPolicy(@PathVariable String policyNumber) {
+        return ResponseEntity.ok(policyService.lookupPolicy(policyNumber));
+    }
+}
+```
+
+## Service pattern (wraps existing downstream API)
+```java
+// backend/src/main/java/com/company/bff/service/PolicyService.java
+@Service
+public class PolicyService {
+    
+    private final WebClient policyApiClient;  // configured from blueprint tool_bindings
+    
+    public PolicyResponse lookupPolicy(String policyNumber) {
+        return policyApiClient.get()
+            .uri("/policies/{id}", policyNumber)
+            .retrieve()
+            .bodyToMono(PolicyResponse.class)
+            .block();
+    }
+}
+```
+
+## Rules
+- ALWAYS generate a BFF service for each downstream integration in tool_bindings[].
+- ALWAYS use Spring WebClient (reactive) — NEVER RestTemplate.
+- ALWAYS generate health check endpoint at `/actuator/health`.
+- ALWAYS generate OpenAPI spec (`/v3/api-docs`).
+- NEVER expose downstream endpoints directly — always proxy through BFF.
+- File structure: `backend/src/main/java/com/company/bff/{controller,service,model,config}/`.
+```
+
+---
+
+### S4–S7 — Overlay skills
+
+The overlay skills (`company-terraform`, `company-observability`, `company-cicd`, `company-security`) are shared with the greenfield preset (see greenfield Architecture Appendix S3–S6). The only difference for brownfield:
+
+- **company-terraform** additionally generates AWS modules (ECS Fargate, Aurora, ALB) alongside GCP modules when `target_cloud = "aws"`.
+- **company-cicd** additionally generates migration phase gates in the Harness pipeline (phase-1 → validate → phase-2 → validate → phase-3).
+- **company-security** additionally generates AWS Config Rules for runtime compliance attestation verification.
+
+---
+
+### M1 — memory/csa-patterns.md
+
+```markdown
+# CSA Diagram Parsing Patterns
+
+## Supported formats
+- `.drawio.xml` — parse XML for `<mxCell>` elements with `style="shape=..."` and `source`/`target` edges
+- `.mmd` (mermaid) — parse flowchart/sequence nodes and edges
+
+## Common CSA element types
+| Element | Drawio style | Mermaid syntax | Maps to |
+|---|---|---|---|
+| Application server | `shape=process` | `[AppServer]` | compute target |
+| Database | `shape=cylinder` | `[(Database)]` | data store |
+| Queue | `shape=parallelogram` | `[/Queue/]` | async integration |
+| External system | `shape=cloud` | `((External))` | integration point |
+| User | `shape=actor` | `actor User` | frontend target |
+
+## Extraction rules
+- Each edge → one integration entry in spec §4
+- Edge label → protocol (REST, SOAP, MQ, JDBC, SFTP)
+- Source/target node labels → system names
+```
+
+---
+
+### M5 — memory/tech-substitution-reference.md
+
+```markdown
+# Common CSA→TSA Tech Substitutions
+
+| Current (CSA) | Target (TSA) | Confidence | Notes |
+|---|---|---|---|
+| WebSphere | Spring Boot on ECS Fargate | 0.95 | Standard modernization path |
+| Tomcat + JSP | Angular SPA + Spring Boot BFF | 0.92 | MPA→SPA transformation |
+| Oracle DB | Aurora PostgreSQL | 0.90 | Schema migration required |
+| SQL Server | Aurora PostgreSQL | 0.88 | Schema + stored proc migration |
+| IBM MQ | Amazon SQS/SNS | 0.90 | Message format mapping needed |
+| SFTP batch | S3 + EventBridge | 0.85 | Trigger-based processing |
+| vSphere VMs | ECS Fargate (containers) | 0.92 | Dockerfile generation |
+| F5 load balancer | ALB + WAF | 0.95 | Rule migration |
+| On-prem LDAP | Cognito + Entra ID | 0.80 | Identity federation |
+```
+
+---
+
+### C1 — constitution.md (Brownfield CSA→TSA Preset)
+
+```markdown
+# AgentCatalyst Constitution — Brownfield CSA→TSA Preset
+# Version: 2.0 | Effective: 2026-01-01 | Owner: Platform Engineering
+# Review cadence: Quarterly with EA office
+#
+# This constitution EXTENDS the greenfield constitution (Rules 1–21).
+# All greenfield rules apply. The rules below ADD migration-specific constraints.
+# Rule numbering continues from the greenfield constitution.
+
+# ═══════════════════════════════════════════════════════════════
+# GREENFIELD RULES 1–21: ALL APPLY (see greenfield constitution.md)
+# ═══════════════════════════════════════════════════════════════
+# Rules 1–3:   Deployment (never deploy, never push to protected branches, never modify existing)
+# Rules 4–6:   Infrastructure (company modules, no hardcoded secrets, Workload Identity)
+# Rules 7–10:  Security (Model Armor, VPC-SC, CMEK, Apigee proxy, per-agent Workload Identity)
+# Rules 11–13: Quality (pre-commit eval, golden dataset, health checks)
+# Rules 14–16: Observability (OTel spans, structured logging, Dynatrace dashboard)
+# Rules 17–21: Code generation (read JSON, follow skills, API Hub registration, README)
+
+# ═══════════════════════════════════════════════════════════════
+# SECTION 7: MIGRATION — Brownfield-specific constraints
+# ═══════════════════════════════════════════════════════════════
+
+## Rule 22: Always generate migration phase configurations
+For EVERY phase in `app-blueprint.json` → `migration_phases[]`, generate a migration config file
+in `migration/phases.yaml` with: phase name, scope (which integrations migrate), coexistence mode
+(dual-read / dual-write / none), rollback procedure, and sequence order.
+- Rationale: Migration without phased config is a big-bang risk.
+- Enforcement: PRS file-existence check for `migration/phases.yaml`. Entry count matches `migration_phases[]`.
+- Violation example: Generating code that assumes all integrations migrate simultaneously.
+
+## Rule 23: Always generate Strangler-Fig proxy when specified
+When `plan.md` specifies `cutover_strategy: strangler-fig`, ALWAYS generate a Strangler-Fig proxy
+in `coexistence/strangler_proxy.py` that routes requests to old or new system based on migration phase.
+The proxy MUST include: automatic fallback to old system if new system fails, dual-write support
+for write-path phases, and logging of all routing decisions.
+- Rationale: Strangler-Fig is the company-standard migration pattern. Manual routing is error-prone.
+- Enforcement: PRS file-existence check when cutover_strategy = "strangler-fig".
+- Violation example: Generating a simple redirect instead of a phase-aware proxy with fallback.
+
+## Rule 24: Always generate rollback procedures
+For EACH migration phase, generate a rollback procedure in `migration/rollback/{phase-name}.yaml`.
+Each rollback MUST include: trigger condition, rollback steps, data reconciliation procedure,
+verification checks, and estimated rollback time.
+- Rationale: Phases without rollback are irreversible — unacceptable for production migrations.
+- Enforcement: PRS checks that `migration/rollback/` has one file per phase in `migration_phases[]`.
+- Violation example: Phase 2 (write-path) without a dual-write reversal procedure.
+
+## Rule 25: Never generate big-bang cutover unless explicit
+NEVER generate code that assumes all integrations migrate at once.
+ALWAYS respect the phasing in `plan.md` → sequencing.
+The only exception: `plan.md` explicitly says `cutover_strategy: big-bang`.
+- Rationale: Big-bang migrations have the highest failure rate. Phased is the default.
+- Enforcement: Code review. PRS checks that coexistence patterns exist unless big-bang is specified.
+
+## Rule 26: Always generate coexistence constraints
+For EVERY constraint in `app-blueprint.json` → `coexistence_constraints[]`, generate enforcement logic.
+Examples: "Oracle read-only after Phase 2" → generate a database connection wrapper that rejects writes
+after phase flag is set. "MQ message format mapping" → generate a transformer.
+- Rationale: Coexistence violations corrupt data across old and new systems.
+- Enforcement: PRS checks that coexistence constraint count matches generated enforcement logic count.
+
+## Rule 27: Always generate data migration scripts with validation
+For EVERY `MIGRATE` rule in spec §8, generate a migration script in `migration/data/{table}.sql`
+with: schema mapping, data transformation, validation queries (row count, checksum, null checks),
+and a dry-run mode that reports differences without applying changes.
+- Rationale: Data migration without validation is the #1 cause of post-migration defects.
+- Enforcement: PRS checks for validation queries in every migration script.
+- Violation example: `INSERT INTO aurora_claims SELECT * FROM oracle_claims` without row count check.
+
+## Rule 28: Always preserve existing API contracts
+NEVER modify, rename, or remove existing API endpoints during migration.
+ALWAYS generate new endpoints ALONGSIDE existing ones. Old consumers continue using old endpoints
+until they are migrated in a later phase.
+- Rationale: Breaking existing API contracts causes cascading failures in downstream systems.
+- Enforcement: Code review. Generated BFF services must have versioned endpoints (`/api/v2/...`).
+- Violation example: Changing `/api/v1/policies` response format instead of creating `/api/v2/policies`.
+
+## Rule 29: Always generate cross-cloud connectivity config
+When source (on-prem/vSphere) and target (AWS/GCP) are on different networks, ALWAYS generate
+network connectivity configuration: AWS PrivateLink, GCP Private Service Connect (PSC), or VPN tunnel.
+NEVER assume direct internet routing between environments.
+- Rationale: Cross-cloud traffic must traverse private links for security and latency.
+- Enforcement: PRS checks for PrivateLink/PSC resources when source and target clouds differ.
+
+## Rule 30: Always tag resources with migration phase
+ALL generated Terraform resources MUST include a `migration_phase` tag indicating which phase
+the resource belongs to. This enables phase-by-phase cost tracking and cleanup.
+- Rationale: After Phase 3 (decommission), Phase 1 resources should be identifiable for cleanup.
+- Enforcement: PRS HCL scan checks for `migration_phase` tag on all resources.
+```
+
+---
+
+### F2 — schemas/app-blueprint.schema.json (brownfield extensions)
+
+The brownfield JSON schema extends the greenfield schema (see greenfield Architecture Appendix F2) with these additional fields:
+
+```json
+{
+  "migration_phases": {
+    "type": "array",
+    "description": "Migration phase plan from design contract",
+    "items": {
+      "type": "object",
+      "required": ["name", "scope", "coexistence", "rollback"],
+      "properties": {
+        "name": { "type": "string" },
+        "scope": { "type": "array", "items": { "type": "string" } },
+        "coexistence": { "type": "string", "enum": ["dual-read", "dual-write", "none"] },
+        "rollback": { "type": "string" },
+        "sequence_order": { "type": "integer" }
+      }
+    }
+  },
+  "coexistence_constraints": {
+    "type": "array",
+    "description": "Constraints for old+new system parallel operation",
+    "items": {
+      "type": "object",
+      "properties": {
+        "system": { "type": "string" },
+        "constraint": { "type": "string" },
+        "duration": { "type": "string" }
+      }
+    }
+  },
+  "csa_to_tsa_mappings": {
+    "type": "array",
+    "description": "Tech substitution mappings from CSA→TSA",
+    "items": {
+      "type": "object",
+      "properties": {
+        "current": { "type": "string" },
+        "target": { "type": "string" },
+        "confidence": { "type": "number" },
+        "migration_strategy": { "type": "string" }
+      }
+    }
+  }
+}
+```
+
+*End of Appendix — Brownfield Architecture Document*
 
 *→ Developer Guide: `csa-tsa-speckit-developerguide.md`*
 *→ Operating Playbook: `csa-tsa-speckit-operating-playbook.md`*

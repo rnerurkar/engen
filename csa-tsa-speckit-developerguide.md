@@ -934,7 +934,423 @@ A: At minimum before every PR. For long-lived projects, run weekly as a hygiene 
 
 ---
 
+### System Prompt Template — Brownfield Blueprint Advisor
+
+→ *Referenced from Architecture Document §9.2 (Blueprint Advisor internal components — company system prompt).*
+
+The Blueprint Advisor LlmAgent uses a curated system prompt that guides its reasoning about CSA→TSA transformation. This prompt is maintained by the platform engineering team and updated quarterly with the EA office.
+
+```markdown
+You are the Blueprint Advisor for brownfield CSA→TSA transformations. You receive a structured spec (with current-state integrations extracted from a CSA diagram) and a technical plan (with r_factor, cutover strategy, and migration sequencing).
+
+Your job is to produce an opinionated Target State Architecture (TSA) blueprint by:
+
+1. **Map current to target:** For each integration in spec §4, look up the tech substitution decision table. Apply the company-approved target technology. Flag low-confidence substitutions (< 0.85) with `requires_review: true`.
+
+2. **Compose patterns:** Read the workflow ordering words in spec §2. Select agentic patterns from the pattern catalog (Sequential, Parallel, Loop, HITL). For brownfield, ALWAYS consider Strangler-Fig when cutover_strategy is "strangler-fig". Validate composition rules (LoopAgent cannot nest inside ParallelAgent).
+
+3. **Discover tools and agents:** Search the tool registry (Vertex AI Search) for MCP servers matching each integration. Search Apigee API Hub for deployed A2A agents (`type=a2a_agent`). Priority: A2A (reuse) > MCP (tool) > Build (new).
+
+4. **Enforce ADR compliance:** Check every selection against the ADR constraint store. If a selection violates an ADR (e.g., "Oracle is prohibited — use Aurora PostgreSQL"), substitute and note the attestation.
+
+5. **Generate migration phases:** From plan.md sequencing, generate `migration_phases[]` with scope, coexistence mode, and rollback procedure per phase. Always start with read-path migration (lowest risk).
+
+6. **Assemble blueprint:** Generate `app-blueprint.md` (PRIMARY) + `app-blueprint.json` (DERIVED) + diagrams via Eraser.io API.
+
+CONSTRAINTS:
+- NEVER recommend technologies not in the company's approved tech radar.
+- ALWAYS generate migration phases — brownfield blueprints without phases are incomplete.
+- ALWAYS flag cross-cloud egress patterns (PrivateLink + PSC) when source and target are on different clouds.
+- Tag every recommendation with a confidence score (0.0–1.0).
+```
+
+---
+
 *End of developer guide.*
 
-*→ Architecture: `csa-tsa-speckit-architecture.md`*
-*→ Operating Playbook: `csa-tsa-speckit-operating-playbook.md`*
+---
+
+## Appendix — MPA→SPA Use Case: Complete Brownfield Sample Files
+
+This appendix contains every MPA→SPA-specific sample for the brownfield CSA→TSA SpecKit preset. Template files (empty structures) are in the Brownfield Architecture Document Appendix.
+
+**Reference case:** Insurance company migrating from vSphere-hosted Tomcat + JSP MPA with Oracle DB to Angular SPA + Spring Boot BFF on AWS ECS Fargate with Aurora PostgreSQL. 15 integrations, 3 migration phases, Strangler-Fig cutover.
+
+---
+
+### MPA-T1 — Filled spec.md
+
+```markdown
+---
+template: agentcatalyst-brownfield-spec
+version: "2.0"
+archetype: brownfield-migration
+use_case: insurance-mpa-to-spa
+---
+
+# Application Specification — Insurance Portal MPA→SPA
+
+## 1. Business Context
+Our auto insurance customer portal handles policy lookup, claims submission, billing, and document management. It serves 50,000 daily active users. The current MPA is a Tomcat 8.5 + JSP application on vSphere 7.x with an Oracle 19c database. Page load times average 4.2 seconds, mobile experience is poor (no responsive design), and deploying changes requires a full application restart with 15-minute downtime windows. We want to modernize to a responsive SPA with a BFF backend on AWS, reducing page loads to < 1 second and enabling zero-downtime deployments.
+
+## 2. Current State — What Exists Today
+- **Frontend:** JSP pages (312 JSP files) served by Tomcat 8.5 on vSphere VMs (4 VMs, load-balanced by F5)
+- **Backend:** Java servlets (monolithic WAR) with JDBC connections to Oracle
+- **Database:** Oracle 19c on dedicated vSphere VM (16 cores, 64GB RAM)
+- **Messaging:** IBM MQ for async claim processing (3 queues)
+- **Batch:** Nightly SFTP file transfers to reporting data warehouse
+- **Authentication:** On-prem LDAP (Active Directory)
+- **Infrastructure:** vSphere 7.x, 12 VMs total, US-East datacenter
+
+## 3. Target Intent — What We Want
+Modernize to a responsive SPA frontend with a Spring Boot BFF backend deployed on AWS. Decompose the monolith into domain-aligned services (policy, claims, billing, documents). Enable zero-downtime deployments and auto-scaling. Use Strangler-Fig pattern for phased migration over 6 months.
+
+## 4. Integrations — Current State (pre-filled from CSA diagram)
+CURRENT: OracleDB-PolicyStore | TYPE: sync | PROTOCOL: JDBC | OWNER: policy-team
+CURRENT: OracleDB-ClaimsStore | TYPE: sync | PROTOCOL: JDBC | OWNER: claims-team
+CURRENT: OracleDB-BillingStore | TYPE: sync | PROTOCOL: JDBC | OWNER: billing-team
+CURRENT: IBM-MQ-ClaimQueue | TYPE: async | PROTOCOL: MQ | OWNER: claims-team
+CURRENT: IBM-MQ-NotifyQueue | TYPE: async | PROTOCOL: MQ | OWNER: notification-team
+CURRENT: IBM-MQ-AuditQueue | TYPE: async | PROTOCOL: MQ | OWNER: compliance-team
+CURRENT: SFTP-ReportingDW | TYPE: batch | PROTOCOL: SFTP/CSV | OWNER: analytics-team
+CURRENT: LDAP-AuthN | TYPE: sync | PROTOCOL: LDAP | OWNER: identity-team
+CURRENT: F5-LoadBalancer | TYPE: sync | PROTOCOL: HTTP | OWNER: infra-team
+CURRENT: SMTP-EmailGateway | TYPE: async | PROTOCOL: SMTP | OWNER: notification-team
+CURRENT: PrintService | TYPE: sync | PROTOCOL: REST | OWNER: document-team
+CURRENT: GeocodingAPI | TYPE: sync | PROTOCOL: REST | OWNER: external (Google)
+CURRENT: CreditCheckAPI | TYPE: sync | PROTOCOL: SOAP | OWNER: external (Experian)
+CURRENT: PaymentGateway | TYPE: sync | PROTOCOL: REST | OWNER: external (Stripe)
+CURRENT: DocumentStore | TYPE: sync | PROTOCOL: NFS | OWNER: document-team
+
+## 5. External Partners & Integrations
+- Body shop network — they operate their own system (A2A)
+- Experian credit check — external SOAP API
+- Stripe payment gateway — external REST API
+- Google geocoding — public REST API
+
+## 6. What We Own vs What We Connect To
+- We OWN: Portal frontend, BFF backend, all databases, MQ queues, batch jobs, document store
+- We CONNECT TO: LDAP (shared identity infra), F5 (shared infra), Experian (external), Stripe (external), Google (external), Body shop (partner)
+
+## 7. Business Rules
+IF policy_type = "comprehensive" AND claim_amount > deductible THEN auto_approve = true
+IF policy_type = "third_party_only" AND claim_type = "own_damage" THEN reject WITH reason = "not_covered"
+IF payment_amount > 10000 THEN require_dual_approval = true
+IF document_type = "claim_photo" THEN max_size = 10MB AND format IN ["jpg", "png"]
+
+## 8. Transformation Rules
+MIGRATE OracleDB-PolicyStore TO Aurora-PolicyDB USING trickle-migration (dual-write during coexistence)
+MIGRATE OracleDB-ClaimsStore TO Aurora-ClaimsDB USING trickle-migration
+MIGRATE OracleDB-BillingStore TO Aurora-BillingDB USING trickle-migration
+MIGRATE IBM-MQ-ClaimQueue TO Amazon-SQS-ClaimQueue USING message-format-mapping
+MIGRATE SFTP-ReportingDW TO S3+EventBridge USING trigger-based-processing
+MIGRATE LDAP-AuthN TO Cognito+EntraID USING identity-federation
+MIGRATE NFS-DocumentStore TO S3-DocumentBucket USING bulk-copy + CDN
+
+## 9. Error Handling
+IF Oracle and Aurora dual-write conflict: Aurora wins (primary), log Oracle delta for reconciliation
+IF MQ message stuck in dead-letter: auto-retry 3x, then alert claims-team Slack channel
+IF Strangler-Fig proxy cannot reach new system: fallback to old system, log, alert
+IF phase rollback triggered: stop dual-write, revert proxy, verify data consistency
+
+## 10. Acceptance Criteria
+GIVEN the old JSP portal serving requests WHEN Phase 1 routes read-path to new SPA THEN zero user-facing errors and < 2 second page load
+GIVEN dual-write enabled WHEN claim created in new system THEN claim also appears in old Oracle DB within 5 seconds
+GIVEN Phase 2 complete WHEN all write-path on new system THEN Oracle is read-only backup
+GIVEN Phase 3 complete WHEN old system decommissioned THEN all 50,000 DAU served by new SPA with 99.9% uptime
+GIVEN Strangler-Fig proxy WHEN new system fails THEN automatic fallback to old system within 30 seconds
+```
+
+---
+
+### MPA-T2 — Filled plan.md
+
+```markdown
+---
+template: agentcatalyst-brownfield-plan
+version: "2.0"
+archetype: brownfield-migration
+use_case: insurance-mpa-to-spa
+---
+
+# Technical Plan — Insurance MPA→SPA
+
+## Infrastructure
+- **Current platform:** vSphere 7.x, on-prem datacenter, US-East
+- **Target cloud:** AWS us-east-1
+- **Target DR region:** AWS us-west-2
+- **DR strategy:** hot-standby
+
+## Migration Strategy
+- **R-factor:** Refactor (MPA→SPA + BFF decomposition)
+- **Cutover strategy:** strangler-fig
+- **Coexistence period:** 6 months (old Tomcat + new SPA/BFF running in parallel)
+- **Data migration approach:** trickle-migration with dual-write
+
+## Sequencing
+- **Phase 1 (Month 1-2):** Read-path migration — policy lookup, vehicle lookup, document viewing. Angular SPA serves these pages. Old Tomcat handles writes.
+- **Phase 2 (Month 3-4):** Write-path migration — claim submission, billing payments, document upload. Dual-write: new system primary, Oracle backup.
+- **Phase 3 (Month 5-6):** Decommission — remaining batch jobs, MQ migration, LDAP→Cognito, old system shutdown.
+- **Cross-cloud egress:** AWS PrivateLink for vSphere→AWS during coexistence. GCP PSC for BFF→GCP services (if any).
+
+## Model Selection
+- **Primary LLM:** gemini-2.0-flash (for BFF logic generation and agentic components)
+- **Fallback LLM:** gemini-2.0-flash-lite
+
+## CI/CD
+- **Infrastructure pipeline:** Jenkins
+- **Application pipeline:** Harness
+- **IaC module source:** github.com/[company]/terraform-modules
+
+## Observability
+- **APM:** Dynatrace
+- **Logging:** Splunk
+- **Tracing:** Cloud Trace + Arize Phoenix
+```
+
+---
+
+### MPA-F2 — app-blueprint.json (MPA→SPA example, abbreviated)
+
+```json
+{
+  "metadata": {
+    "name": "insurance-portal-spa",
+    "version": "1.0.0",
+    "archetype": "brownfield-migration",
+    "description": "Insurance portal MPA→SPA transformation with Strangler-Fig migration",
+    "team": "portal-engineering",
+    "lob": "auto-insurance"
+  },
+  "pattern_composition": {
+    "root_pattern": "Strangler-Fig",
+    "composition": ["Strangler-Fig", "BFF", "SPA", "Sequential"]
+  },
+  "agents": [
+    { "name": "portal_coordinator", "type": "SequentialAgent", "role": "Root orchestrator", "parent": null },
+    { "name": "policy_bff", "type": "LlmAgent", "role": "Policy domain BFF service", "parent": "portal_coordinator", "tools": ["aurora-policy-db", "policy-cache"] },
+    { "name": "claims_bff", "type": "LlmAgent", "role": "Claims domain BFF service", "parent": "portal_coordinator", "tools": ["aurora-claims-db", "sqs-claim-queue", "body-shop-a2a"] },
+    { "name": "billing_bff", "type": "LlmAgent", "role": "Billing domain BFF service", "parent": "portal_coordinator", "tools": ["aurora-billing-db", "stripe-payment"] },
+    { "name": "document_bff", "type": "LlmAgent", "role": "Document domain BFF service", "parent": "portal_coordinator", "tools": ["s3-document-store"] }
+  ],
+  "tools": {
+    "mcp_servers": [
+      { "name": "aurora-policy-db", "endpoint": "mcp://aurora-policy.internal:8080", "auth_method": "mtls", "assigned_to": "policy_bff", "discovered_via": "Vertex AI Search" },
+      { "name": "aurora-claims-db", "endpoint": "mcp://aurora-claims.internal:8080", "auth_method": "mtls", "assigned_to": "claims_bff", "discovered_via": "Vertex AI Search" },
+      { "name": "stripe-payment", "endpoint": "https://api.stripe.com/v1", "auth_method": "api_key", "assigned_to": "billing_bff", "discovered_via": "Vertex AI Search" }
+    ],
+    "a2a_agents": [
+      { "name": "body-shop-a2a", "endpoint": "https://bodyshop.partner.com/a2a", "capabilities": ["estimate", "schedule"], "assigned_to": "claims_bff", "discovered_via": "Apigee API Hub (type=a2a_agent, v2.3, active)" }
+    ]
+  },
+  "migration_phases": [
+    { "name": "phase-1-read-path", "scope": ["policy_lookup", "vehicle_lookup", "document_viewing"], "coexistence": "dual-read", "rollback": "switch_proxy_back_to_old", "sequence_order": 1 },
+    { "name": "phase-2-write-path", "scope": ["claim_submit", "billing_payment", "document_upload"], "coexistence": "dual-write", "rollback": "stop_dual_write_revert_to_old", "sequence_order": 2 },
+    { "name": "phase-3-decommission", "scope": ["batch_jobs", "mq_migration", "ldap_to_cognito", "old_system_shutdown"], "coexistence": "none", "rollback": "not_applicable", "sequence_order": 3 }
+  ],
+  "coexistence_constraints": [
+    { "system": "Oracle PolicyStore", "constraint": "read-only after Phase 2", "duration": "Phase 2-3 (months 3-6)" },
+    { "system": "IBM MQ", "constraint": "message format mapping required", "duration": "Phase 3 only" },
+    { "system": "LDAP", "constraint": "identity federation during transition", "duration": "Phase 3 only" }
+  ],
+  "csa_to_tsa_mappings": [
+    { "current": "Tomcat 8.5 + JSP", "target": "Angular 17 SPA + Spring Boot 3.2 BFF on ECS Fargate", "confidence": 0.92, "migration_strategy": "refactor" },
+    { "current": "Oracle 19c", "target": "Aurora PostgreSQL 15", "confidence": 0.90, "migration_strategy": "trickle-migration" },
+    { "current": "IBM MQ", "target": "Amazon SQS/SNS", "confidence": 0.90, "migration_strategy": "message-format-mapping" },
+    { "current": "SFTP batch", "target": "S3 + EventBridge", "confidence": 0.85, "migration_strategy": "trigger-based" },
+    { "current": "on-prem LDAP", "target": "Cognito + Entra ID", "confidence": 0.80, "migration_strategy": "identity-federation" },
+    { "current": "F5 LB", "target": "ALB + WAF", "confidence": 0.95, "migration_strategy": "rule-migration" }
+  ],
+  "blueprint_hash": "sha256:b2c3d4e5f6a7...",
+  "spec_hash": "sha256:e5d4c3b2a1f6...",
+  "plan_hash": "sha256:2b3c4d5e6f1a..."
+}
+```
+
+---
+
+### MPA-S1 — brownfield-migration skill output sample
+
+```python
+# coexistence/strangler_proxy.py — Generated by /catalyst.generate (brownfield-migration skill)
+
+import httpx
+import logging
+
+logger = logging.getLogger(__name__)
+
+PHASE_CONFIG = {
+    "phase-1-read-path": {
+        "migrated_types": ["policy_lookup", "vehicle_lookup", "document_viewing"],
+        "coexistence": "dual-read",
+    },
+    "phase-2-write-path": {
+        "migrated_types": ["claim_submit", "billing_payment", "document_upload"],
+        "coexistence": "dual-write",
+    },
+}
+
+class StranglerProxy:
+    """Routes requests to old Tomcat or new SPA/BFF based on current migration phase."""
+
+    def __init__(self, current_phase: str):
+        self.old_endpoint = "https://tomcat-legacy.internal:8443"
+        self.new_endpoint = "https://spa-bff.us-east-1.elb.amazonaws.com"
+        self.phase = PHASE_CONFIG.get(current_phase, {})
+
+    async def route(self, request_type: str, request_data: dict) -> dict:
+        if request_type in self.phase.get("migrated_types", []):
+            try:
+                result = await self._call_new(request_type, request_data)
+                if self.phase.get("coexistence") == "dual-write":
+                    await self._call_old(request_type, request_data)  # backup write
+                return result
+            except Exception as e:
+                logger.error(f"New system failed for {request_type}: {e}. Falling back to old.")
+                return await self._call_old(request_type, request_data)
+        return await self._call_old(request_type, request_data)
+```
+
+---
+
+### MPA-S2 — spa-frontend skill output sample
+
+```typescript
+// frontend/src/app/policy/policy-lookup.component.ts — Generated (spa-frontend skill)
+
+import { Component, OnInit } from '@angular/core';
+import { PolicyService } from '../services/policy.service';
+import { Policy } from '../models/policy.model';
+
+@Component({
+  selector: 'app-policy-lookup',
+  template: `
+    <div class="policy-container">
+      <input [(ngModel)]="policyNumber" placeholder="Enter policy number" />
+      <button (click)="lookupPolicy()">Search</button>
+      <app-policy-card *ngIf="policy" [policy]="policy"></app-policy-card>
+    </div>
+  `,
+})
+export class PolicyLookupComponent implements OnInit {
+  policyNumber = '';
+  policy: Policy | null = null;
+
+  constructor(private policyService: PolicyService) {}
+
+  async lookupPolicy(): Promise<void> {
+    this.policy = await this.policyService.getPolicy(this.policyNumber);
+  }
+}
+```
+
+---
+
+### MPA-S3 — bff-backend skill output sample
+
+```java
+// backend/src/main/java/com/company/bff/service/PolicyService.java — Generated (bff-backend skill)
+
+@Service
+public class PolicyService {
+
+    private final WebClient auroraClient;  // from blueprint tools.mcp_servers[0]
+
+    public PolicyService(@Qualifier("aurora-policy-db") WebClient auroraClient) {
+        this.auroraClient = auroraClient;
+    }
+
+    public Mono<PolicyResponse> lookupPolicy(String policyNumber) {
+        return auroraClient.get()
+            .uri("/policies/{id}", policyNumber)
+            .retrieve()
+            .bodyToMono(PolicyResponse.class)
+            .timeout(Duration.ofSeconds(15))
+            .retryWhen(Retry.backoff(2, Duration.ofMillis(500)));
+    }
+}
+```
+
+---
+
+### MPA-P1 — speckit.specify interaction sample
+
+```
+Developer: /speckit.specify
+
+Coding Agent: Scanning workspace for CSA diagram...
+  → Found: insurance-portal-csa.drawio.xml
+
+Coding Agent: Parsing CSA diagram...
+  → Extracted 15 integration points from 23 nodes and 31 edges.
+  → System types: 3 databases, 3 MQ queues, 1 batch (SFTP), 1 auth (LDAP),
+    1 load balancer, 1 email, 1 print, 3 external APIs, 1 file store
+
+Coding Agent: Creating spec.md from template...
+  → §4 pre-filled with 15 integrations (all marked requires_review: true)
+
+spec.md created with 15 integrations pre-filled from CSA diagram.
+Fill in remaining sections (§1-§3, §5-§10).
+```
+
+---
+
+### MPA-P4 — catalyst.blueprint interaction sample
+
+```
+Developer: /catalyst.blueprint
+
+Coding Agent: Connecting to Blueprint Advisor MCP Server...
+Coding Agent: ✓ blueprint_start called — taskId: bp-2026-05-23-mpa
+Coding Agent: Polling blueprint_status...
+  → Stage: mapping — "Mapping 15 CSA integrations to target-state technologies..."
+  → Stage: mapping — "Oracle 19c → Aurora PostgreSQL (confidence: 0.90)"
+  → Stage: mapping — "IBM MQ → Amazon SQS (confidence: 0.90)"
+  → Stage: recommending — "Composing: Strangler-Fig + BFF + SPA + Sequential..."
+  → Stage: recommending — "Discovering A2A agents in API Hub..."
+  → Stage: checking — "Validating ADR compliance (6 ADR attestations)..."
+  → Stage: assembling — "Generating 3 migration phases (strangler-fig)..."
+  → Stage: assembling — "Rendering diagrams via Eraser.io API..."
+  → Stage: assembling — "Generating app-blueprint.json from .md..."
+  → Stage: completed
+
+Coding Agent: ✓ blueprint_result retrieved. Writing to workspace:
+  → app-blueprint.md (PRIMARY — 18 sections, 412 lines, 15 integrations)
+  → app-blueprint.json (DERIVED — machine-readable, 245 lines)
+  → design_contract.json (migration_phases[], coexistence_constraints[], csa_to_tsa_mappings[])
+  → portal-component-diagram.png + .eraser + .drawio.xml + .svg
+  → portal-hadr-diagram.png + .eraser + .drawio.xml + .svg
+
+Blueprint ready. Review app-blueprint.md — pay attention to:
+  ⚠ 2 integrations flagged requires_review (LDAP: 0.80, SFTP: 0.85)
+  ✓ 3 migration phases generated (read-path → write-path → decommission)
+  ✓ 6 ADR attestations (Oracle prohibited, MQ deprecated, LDAP federate)
+```
+
+---
+
+### MPA-P7 — catalyst.refresh interaction sample
+
+```
+Developer: /catalyst.refresh
+
+Coding Agent: Reading current design contract...
+  → Last generated: 2026-04-15 (38 days ago)
+
+Coding Agent: Re-running Blueprint Advisor with refresh flag...
+  → Querying Vertex AI Search for tool updates...
+  → Querying API Hub for A2A agent status changes...
+
+Coding Agent: Diff detected — 2 changes:
+  1. body-shop-a2a upgraded from v2.3 → v2.4 (new capability: "parts-tracking")
+  2. tf-ecs-fargate module updated from v2.1.0 → v2.2.0 (security patch)
+
+Coding Agent: Updated files:
+  → app-blueprint.md — §5 body-shop-a2a version updated
+  → app-blueprint.json — regenerated from updated .md
+  → design_contract.json — updated tool versions
+
+No structural changes. Migration phases unchanged.
+```
+
+*End of Appendix — Brownfield Developer Guide*
