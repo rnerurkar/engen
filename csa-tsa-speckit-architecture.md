@@ -167,6 +167,7 @@ The diagram above shows the complete flow from CSA Agent through Blueprint Advis
 ---
 
 ## 6. Flow Walkthrough — The Ten Stages
+![AgentCatalyst Brownfield — End-to-End Component Architecture](agentcatalyst-brownfield-architecture_detailed.png)
 
 ### ⓪ CSA Agent (upstream) — Produce a validated CSA diagram
 

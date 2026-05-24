@@ -25,7 +25,7 @@ AgentCatalyst is a spec-driven development accelerator with three core capabilit
 
 AgentCatalyst does NOT deploy agents. It generates code, infrastructure definitions, and CI/CD pipeline files — then commits everything to the developer's GitHub repo. The company's existing Jenkins + Harness pipelines take it to production.
 
-![AgentCatalyst — How It Works](AgentCatalyst-SLT-Interaction-Diagram.png)
+![AgentCatalyst — End-to-End Component Architecture (Greenfield)](AgentCatalyst-Architecture-Diagram-SLT-Deck.png)
 
 ### AgentCatalyst at a glance
 
@@ -161,7 +161,7 @@ The Blueprint Advisor reads phrases like "EXISTING REST API" and "MUST use these
 
 **Architecture infographic:**
 
-![AgentCatalyst Component Architecture](AgentCatalyst-GA-Architecture-Infographic.png)
+![AgentCatalyst Component Architecture](AgentCatalyst-Architecture-Diagram-Detailed.png)
 
 ---
 
