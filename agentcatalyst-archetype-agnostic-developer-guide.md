@@ -31,6 +31,56 @@ gemini skills install github.com/company/agentcatalyst-skills --scope user
 /catalyst.generate    # Governance gate + coding agent generates everything using skills
 ```
 
+### How Signal Validation Works (Two Layers)
+
+Signal validation runs at two layers to catch issues as early as possible:
+
+**Layer 1 — Local (during `/specify` capture):** The SpecKit preset template includes inline validation instructions. As you answer each section, the coding agent checks your response immediately and asks you to fix issues before moving on. You'll see real-time feedback:
+
+```
+You: "Process the claim and do some checks"
+Agent: ⚠️ §2 needs ordering words. I can't determine the right patterns
+       without sequence information. Can you rephrase using 'first',
+       'then', 'in parallel', 'loop until', 'route to human if'?
+You: "First extract claim details, then in parallel check policy and get estimate"
+Agent: ✅ §2 captured. Detected: first (Sequential), in parallel (Parallel).
+```
+
+**Layer 2 — Server-side (inside `blueprint_start`):** When you run `/catalyst.blueprint`, the Blueprint Advisor runs `validate_spec` as Step 0 before the RAG pipeline. This catches complex issues that require server access: does the named data system have a pattern in the catalog? Is the A2A agent actually deployed? Does the spec violate an ADR?
+
+**Why both layers:** Layer 1 catches OBVIOUS issues instantly (you fix them in 10 seconds). Layer 2 catches COMPLEX issues that need catalog/registry access (you find out in 2 seconds when `blueprint_start` returns a BLOCK or WARN). Without Layer 1, you'd fill 10 sections over 20 minutes and only discover problems when the server rejects your spec.
+
+### Writing Specs That Pass Signal Validation
+
+The Blueprint Advisor validates your spec BEFORE running the RAG pipeline. Specs with strong signals produce high-quality blueprints. Specs with weak signals produce generic results. Here's how to write specs that pass validation:
+
+**§2 Workflow — Use ordering words (REQUIRED):**
+- ✅ GOOD: "**First**, the agent extracts claim details from the call transcript. **Then**, **in parallel**, it checks the policy database and requests a damage estimate. **Next**, it calculates the payout. **If** the payout exceeds $50K, **route to** a human adjuster."
+- ❌ BAD: "The system processes claims and does some checks and calculations."
+- WHY: Ordering words ("first", "then", "in parallel", "loop until", "route to human") determine which patterns the Blueprint Advisor retrieves. Without them, it can't distinguish Sequential from Parallel from Loop.
+
+**§4 Data Systems — Name specific systems (REQUIRED):**
+- ✅ GOOD: "**Cloud SQL** for claims data, **BigQuery** for analytics, **existing REST API** for the policy system"
+- ❌ BAD: "A database for storing stuff and some analytics"
+- WHY: "Cloud SQL" retrieves the Cloud SQL MCP server pattern and `tf-cloud-sql` Terraform module. "A database" matches everything and nothing.
+
+**§5 External Partners — Flag "own system" (IMPORTANT):**
+- ✅ GOOD: "BodyShopConnect — **they operate their own system** and expose an agent endpoint"
+- ❌ BAD: "We get damage estimates from somewhere"
+- WHY: "They operate their own" triggers A2A agent discovery via API Hub. Missing this → the Blueprint Advisor defaults to MCP wrapping when A2A delegation is correct.
+
+**§7 Business Rules — Use IF/THEN format (REQUIRED):**
+- ✅ GOOD: "**IF** payout > $50K **THEN** route to senior adjuster. **IF** policy expired **THEN** reject claim."
+- ❌ BAD: "Handle high-value claims carefully and check policy status"
+- WHY: IF/THEN rules become FunctionTool first-drafts in the generated code. Vague prose can't be converted to executable logic.
+
+**§10 Acceptance Criteria — Measurable (REQUIRED):**
+- ✅ GOOD: "Claim intake **< 5 minutes**, accuracy **> 95%**, customer satisfaction **> 4.5/5**"
+- ❌ BAD: "Make it fast and accurate"
+- WHY: Measurable criteria seed the golden dataset for EvalOps. "Fast" is not testable. "< 5 minutes" is a test case.
+
+
+
 That's it. Your complete project is generated. Skip to [Section 2](#2-greenfield-agentic--fnol-agent-from-scratch) for the full agentic walkthrough, or [Section 3](#3-brownfield-microservices--angular--spring-boot-on-ecs-fargate) for the microservices brownfield example.
 
 ---

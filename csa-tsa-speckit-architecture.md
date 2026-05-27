@@ -167,7 +167,6 @@ The diagram above shows the complete flow from CSA Agent through Blueprint Advis
 ---
 
 ## 6. Flow Walkthrough — The Ten Stages
-![AgentCatalyst Brownfield — End-to-End Component Architecture](agentcatalyst-brownfield-architecture_detailed.png)
 
 ### ⓪ CSA Agent (upstream) — Produce a validated CSA diagram
 
@@ -190,6 +189,127 @@ The developer runs `/speckit.plan.draft` to produce a first-pass `plan.md` with 
 The developer invokes `/catalyst.blueprint`. The command packages `spec.md` and `plan.md` into a single JSON envelope conforming to a versioned schema (`blueprint_request.schema.json`), then invokes the Blueprint Advisor MCP server using the **MCP Tasks** async protocol.
 
 VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls. A synchronous call that blocks for the full blueprint generation (1–30 minutes depending on integration count) would be killed immediately. The Blueprint Advisor therefore exposes three MCP tools — `blueprint_start`, `blueprint_status`, `blueprint_result` — instead of one blocking call. The prompt file orchestrates the polling loop: start the task, poll for status at the server-recommended interval, report progress to the developer in the Chat pane, and retrieve the result when complete. Each individual MCP call completes in under 2 seconds. The coding agent never touches Vertex AI Search, the ADR store, or the LlmAgent directly. The MCP server remains the single point of governance. → *§9 details the three-tool async interface and the internal 4-stage pipeline.*
+
+### ③a validate_spec — Brownfield Migration Readiness Gate
+
+Before the RAG pipeline runs, the Blueprint Advisor validates that the spec contains the signals needed for a SAFE migration. Brownfield validation is fundamentally different from greenfield — the core question is not "do we have enough signals to compose the right architecture?" but "do we have enough signals to plan a safe migration with rollback at every stage?"
+
+**Brownfield Signal Validation Matrix:**
+
+| Signal | What is checked | Why it matters | Pass | Warn | Block |
+|---|---|---|---|---|---|
+| **CSA Completeness** | All integration points identified with specific technology + version (e.g., "IBM MQ 9.3", "Oracle 19c") | Tech Substitution Table needs specific tech to map CSA→TSA. "Legacy system" can't be mapped. | Every integration has name + tech + version | Some vague ("messaging system") | CSA diagram missing or <3 integrations |
+| **Integration Type** | Each integration classified: sync API, async messaging, batch, DB link, file transfer | Determines migration approach per integration. Sync → Strangler-Fig proxy. Async → message bridge. Batch → scheduled job. | All integrations typed | >50% typed | <50% typed |
+| **Data Flow Direction** | Each integration marked: read-only, write-only, or bidirectional | Determines phase assignment. Read → Phase 1. Write → Phase 2. Bidirectional → Phase 2 with dual-write (hardest). | All integrations have direction | >50% have direction | <50% have direction |
+| **Criticality Rating** | Each integration rated: critical / high / medium / low | Determines migration ORDER. Low-risk first, critical last. Critical integrations need <5 min rollback SLA. | All integrations rated | >50% rated | <50% rated or no "critical" |
+| **Coexistence Constraints** | Each integration flagged: dual-read, dual-write, hard-cutover, or N/A | Missing flags → data inconsistency during migration. This is the #1 brownfield risk. | All integrations flagged | >50% flagged | 0 flags (migration will lose data) |
+| **API Surface** | External-facing APIs with contracts (OpenAPI/WSDL/endpoint URLs) | Strangler-Fig proxy needs contracts to route correctly. Undocumented APIs → broken consumers. | All external APIs have contracts | Some documented | External APIs exist, zero contracts |
+| **State Management** | Stateful components identified: session (sticky), transaction (2PC/XA), cache (shared) | Stateful components can't be proxy-switched — need session migration or saga pattern. | Each component identified with type | "Some state" but not specific | Stateful components undocumented |
+| **Data Volume + SLA** | Volume per integration, latency SLAs, throughput | Determines batch window, proxy overhead budget, dual-running infra sizing. | Volume + SLA per integration | Rough estimates only | No volume or SLA data |
+
+**Why brownfield validation is MORE critical than greenfield:** Greenfield validation prevents bad architecture (redesignable). Brownfield validation prevents data loss and broken production systems with real users and real data (much harder to recover from).
+
+**Validation output:** A `migration_readiness_score` (0-100) with per-signal status. If any signal is BLOCK, `blueprint_start` returns immediately with specific guidance. If WARN, the pipeline continues but flags affected integrations as higher-risk in the phase assignment. The output includes a `phase_assignment_preview` showing which integrations go in Phase 1 (read-path), Phase 2 (write-path), and Phase 3 (decommission) based on the data flow direction and criticality signals.
+
+**Two-layer validation architecture (local + server-side):**
+
+Brownfield validation runs at TWO layers. This is even more critical than greenfield because brownfield errors affect a RUNNING production system.
+
+```
+Layer 1: LOCAL (SpecKit Preset — during /speckit.specify capture)
+  ┌──────────────────────────────────────────────────────────┐
+  │ The /speckit.specify preset's csa-extractor parses the    │
+  │ CSA diagram and pre-fills integration blocks. The preset  │
+  │ template then validates EACH integration as the developer │
+  │ provides details:                                         │
+  │                                                           │
+  │ Per integration:                                          │
+  │   Technology + version? → ✅ "Oracle 19c" / ❌ "legacy db"│
+  │   Integration type? → ✅ sync/async/batch/DB/file         │
+  │   Data flow direction? → ✅ read/write/bidirectional      │
+  │   Criticality? → ✅ critical/high/medium/low              │
+  │   Coexistence? → ✅ dual-read/dual-write/hard-cutover/N/A │
+  │   API contract? → ✅ OpenAPI/WSDL documented              │
+  │                                                           │
+  │ Summary: migration readiness score → write spec.md        │
+  └──────────────────────────────────────────────────────────┘
+                          ↓ spec.md
+Layer 2: SERVER-SIDE (Blueprint Advisor — Step 0 of blueprint_start)
+  ┌──────────────────────────────────────────────────────────┐
+  │ validate_spec runs inside MCP Server with access to:      │
+  │ - Tech Substitution Table (verify EVERY tech has approved │
+  │   TSA mapping with confidence score)                      │
+  │ - Apigee API Hub (verify A2A agents for partners)         │
+  │ - ADR Store (verify migration decisions comply with ADRs, │
+  │   coexistence policies, rollback requirements)            │
+  │ - Cross-integration graph analysis (circular deps,        │
+  │   conflicting coexistence constraints, phase ordering)    │
+  │                                                           │
+  │ Returns: migration_readiness_score + per-signal status    │
+  │ + phase_assignment_preview                                │
+  │ BLOCK → return immediately. WARN → continue with flags.   │
+  └──────────────────────────────────────────────────────────┘
+                          ↓
+  RAG pipeline (map_current_to_target → recommend_architecture → adr_compliance → assemble)
+```
+
+**What server-side catches that local can't:**
+
+| Check | Why local can't do it | Server-side mechanism |
+|---|---|---|
+| Tech Substitution confidence | Requires the confidence score database | Server queries AlloyDB — flags low-confidence mappings (< 0.85) for EA review |
+| A2A agent availability | Requires Apigee API Hub | Server verifies external partners flagged as A2A actually have deployed, active agents |
+| ADR compliance pre-check | Requires ADR Store | Server catches spec decisions that violate existing architecture decisions (e.g., "no dual-write for financial systems" ADR) |
+| Cross-integration consistency | Complex graph analysis | Server checks: circular dependencies, conflicting coexistence (dual-write on one end, hard-cutover on the other), phase ordering conflicts |
+| Phase assignment preview | Requires all signals + graph analysis | Server generates preview: Phase 1 (read-path), Phase 2 (write-path), Phase 3 (decommission) based on data flow + criticality |
+
+**SpecKit preset template — per-integration validation:**
+
+The `/speckit.specify` brownfield preset validates each integration during capture:
+
+| Signal | SpecKit preset validates | Mechanism |
+|---|---|---|
+| Technology + version | Specific tech name with version (not "legacy system") | Preset: "The CSA extractor found [component]. What technology and version? Example: 'Oracle 19c'" |
+| Integration type | Classified as sync API / async messaging / batch / DB link / file transfer | Preset: "Is this synchronous, asynchronous, batch, database link, or file transfer?" |
+| Data flow direction | Marked read-only / write-only / bidirectional | Preset: "Does data flow in (read), out (write), or both ways (bidirectional)?" |
+| Criticality | Rated critical / high / medium / low | Preset: "If this integration goes down during migration, what's the business impact?" |
+| Coexistence | Flagged dual-read / dual-write / hard-cutover / N/A | Preset: "During migration, must this work on BOTH old and new systems?" If bidirectional → recommend dual-write. |
+| API surface | External APIs have documented contracts | Preset: "Do you have an API contract (OpenAPI, WSDL, or endpoint documentation)?" |
+
+**Brownfield RAG pipeline with both layers:**
+```
+/speckit.specify (SpecKit preset — Layer 1 local validation per integration)
+  → csa-extractor parses CSA diagram → pre-fills §4
+  → Developer completes each integration with validated signals
+  → spec.md written with migration readiness signals
+
+/speckit.plan (two-stage async plan)
+  → plan.md
+
+/catalyst.blueprint
+  → blueprint_start(spec, plan)
+    → validate_spec (Layer 2 server-side — Tech Sub Table, API Hub, ADR Store, graph analysis)
+      → BLOCK: return with guidance. WARN: continue with risk flags.
+    → map_current_to_target (per integration, using validated tech+version)
+    → recommend_architecture (pattern retrieval filtered by r-factor + target tech)
+    → adr_compliance_check (+ migration ADRs: rollback, coexistence, checkpoints)
+    → assemble_blueprint (+ migration_phases[] + csa_to_tsa_mappings[] + rollback_procedures[])
+```
+
+**Greenfield vs Brownfield validation — side by side:**
+
+| Dimension | Greenfield | Brownfield |
+|---|---|---|
+| Core question | "Enough signals to compose the RIGHT architecture?" | "Enough signals to plan a SAFE migration?" |
+| Input artifact | spec.md (blank slate) | CSA diagram + spec.md (§4 pre-filled from CSA) |
+| Pattern signals | Ordering words (first, then, parallel) | Integration type classification |
+| Platform signals | Named data systems | Named technologies with versions |
+| Partnership signals | External partners (A2A vs MCP) | API surface (backward compatibility) |
+| Logic signals | IF/THEN business rules | Coexistence constraints (dual-read/write) |
+| Risk signals | PII/PHI classification | Criticality rating |
+| Quality signals | Measurable acceptance criteria | Data volume + SLA |
+| Unique signals | — | Data flow direction, state management |
+| Block consequence | Bad architecture (redesignable) | Data loss (production impact) |
 
 ### ④ map_current_to_target — Context-filtered technology substitution
 

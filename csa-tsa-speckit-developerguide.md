@@ -48,6 +48,69 @@
 18. [Common Failure Modes & Fixes](#18-common-failure-modes--fixes)
 19. [FAQ](#19-faq)
 
+### How Migration Readiness Validation Works (Two Layers)
+
+Brownfield validation runs at two layers. This is MORE critical than greenfield because errors affect a running production system with real users and real data.
+
+**Layer 1 — Local (during `/speckit.specify` capture):** After the `csa-extractor` parses your CSA diagram and pre-fills the integration blocks, the SpecKit preset validates EACH integration as you provide details. You'll see real-time feedback per integration:
+
+```
+Agent: "The CSA extractor found 15 integrations. Let's validate each one."
+Agent: "Integration: claims-database. What technology and version?"
+You: "Some legacy database"
+Agent: ❌ I need the specific technology. Is it Oracle, PostgreSQL, DB2?
+       The Tech Substitution Table needs exact tech names to map CSA→TSA.
+You: "Oracle 19c"
+Agent: ✅ Oracle 19c → maps to Aurora PostgreSQL (confidence: 0.90).
+
+Agent: "Data flow direction for claims-database?"
+You: "Both ways"
+Agent: ✅ Bidirectional — this will need dual-write coexistence in Phase 2.
+       "What coexistence mode? dual-read, dual-write, hard-cutover?"
+You: "dual-write"
+Agent: ✅ Flagged: dual-write during Phase 2. Rollback = stop writes to new system.
+```
+
+**Layer 2 — Server-side (inside `blueprint_start`):** When you run `/catalyst.blueprint`, the Blueprint Advisor runs `validate_spec` as Step 0 with access to the Tech Substitution Table (are ALL tech mappings approved?), Apigee API Hub (are A2A agents actually deployed?), ADR Store (do migration decisions comply with architecture decisions?), and cross-integration graph analysis (circular dependencies? conflicting coexistence constraints?).
+
+**Why both layers:** Layer 1 catches missing tech names, unclassified integrations, and missing coexistence flags DURING capture — you fix each one in real time. Layer 2 catches cross-integration conflicts and verifies against live data sources. Without Layer 1, you'd discover that 5 of your 15 integrations are missing coexistence flags only AFTER waiting for the Blueprint Advisor to process — and the resulting blueprint would have data loss risks built in.
+
+### Writing Brownfield Specs That Pass Migration Readiness Validation
+
+The Blueprint Advisor validates your spec for **migration readiness** before running the RAG pipeline. Brownfield validation is different from greenfield — it checks whether you have enough information to plan a SAFE migration, not just a correct architecture.
+
+**CSA Completeness — Name specific technologies with versions (BLOCK if missing):**
+- ✅ GOOD: "Oracle 19c (claims database), IBM MQ 9.3 (async messaging), Tomcat 8.5 + JSP (frontend), F5 BIG-IP (load balancer)"
+- ❌ BAD: "Legacy database, some messaging, old web frontend"
+- WHY: The Tech Substitution Table needs exact tech names to find approved CSA→TSA mappings. "Legacy database" has no mapping; "Oracle 19c" maps to "Aurora PostgreSQL (confidence 0.90)".
+
+**Integration Type Classification — Classify every integration (BLOCK if <50%):**
+- ✅ GOOD: "policy-lookup: synchronous REST API. claims-queue: async IBM MQ. nightly-recon: batch PL/SQL job. reinsurer-feed: file transfer (CSV via SFTP)."
+- ❌ BAD: "policy-lookup connects to claims-queue somehow"
+- WHY: Each type needs a different migration approach. Sync APIs → Strangler-Fig proxy. Async → message bridge. Batch → scheduled job migration. DB links → data migration scripts.
+
+**Data Flow Direction — Mark read/write/bidirectional (BLOCK if <50%):**
+- ✅ GOOD: "policy-lookup: **read-only**. claims-db: **bidirectional** (agents read and write). payment-gateway: **write-only**."
+- ❌ BAD: "Data goes back and forth between systems"
+- WHY: Read-only integrations go to Phase 1 (safest — proxy routes reads to new system). Write-only and bidirectional go to Phase 2 (needs dual-write coexistence). This determines migration phase assignment.
+
+**Criticality Rating — Rate every integration (WARN if <50%):**
+- ✅ GOOD: "claims-db: **critical** (zero-downtime required, <5 min rollback). policy-lookup: **high**. dashboard-api: **low**."
+- ❌ BAD: "Everything is important"
+- WHY: Migration ORDER: low-risk first (build confidence), critical last (after patterns proven). Critical integrations need verified rollback procedures before migration starts.
+
+**Coexistence Constraints — Flag every integration (BLOCK if zero flags):**
+- ✅ GOOD: "claims-db: **dual-write** (both old and new must receive writes during Phase 2). policy-lookup: **dual-read** (both must return same data during Phase 1). auth-ldap: **hard-cutover** (switch all at once, rollback = revert DNS)."
+- ❌ BAD: No coexistence information provided
+- WHY: This is the #1 brownfield risk. Missing dual-write flags → data inconsistency during migration. Data written to the new system but not the old (or vice versa) creates split-brain scenarios that are extremely difficult to recover from.
+
+**API Surface — Document external API contracts (WARN if missing):**
+- ✅ GOOD: "payment-gateway: OpenAPI spec at /docs/payment-api-v2.yaml, consumed by billing-system and reinsurer-portal. Must maintain backward compatibility."
+- ❌ BAD: "Payment API exists but no one documented it"
+- WHY: The Strangler-Fig proxy routes existing API calls to the new system. Without documented contracts, the proxy can't be configured correctly → external consumers break during migration.
+
+
+
 ---
 
 ## 1. Quick Start (TL;DR)

@@ -127,6 +127,88 @@ The markdown file describes WHAT to build: 5 agents (Coordinator + Sequential + 
 
 She reviews the markdown in her editor — the component diagram renders inline in VSCode's markdown preview, the sequence diagrams render as mermaid, and all tables are readable. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the table directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the markdown **and regenerates `app-blueprint.json`** from the edited sections (the JSON is always derived from the `.md` — never edited directly). If she needs to edit the component diagram, she can open the `.eraser` file in the Eraser.io VSCode extension, the `.drawio.xml` in the Draw.io extension, or import the `.svg` into Canva — whichever tool she prefers. Updated diagrams are picked up automatically on her next `/catalyst.assess` run.
 
+
+### Spec Signal Validation (Quality Gate in Blueprint Advisor)
+
+Before the RAG pipeline runs, the Blueprint Advisor validates that the spec contains the signals needed for high-quality architecture retrieval. This is the first step inside `blueprint_start` — a quality gate, not a reasoning step.
+
+**Greenfield Signal Validation Matrix:**
+
+| Section | Signal checked | Why it matters | Pass | Warn | Block |
+|---|---|---|---|---|---|
+| §2 Workflow | Ordering words: "first", "then", "in parallel", "loop until", "route to human" | Determines pattern retrieval (Sequential, Parallel, Loop, HITL). Without ordering words, the RAG pipeline can't select the right patterns. | ≥3 ordering words | 1-2 ordering words | 0 ordering words |
+| §4 Data Systems | Named systems: "Cloud SQL", "BigQuery", "AlloyDB", "existing REST API" | Determines data platform retrieval and MCP server matching. "A database" matches everything; "Cloud SQL" matches one pattern. | All systems named specifically | Some vague references | §4 empty or all vague |
+| §5 External Partners | "They operate their own system" signal | Determines A2A vs MCP decision. Missing this → pipeline defaults to MCP when A2A is correct. | Each partner has own-system flag | Partners listed but no flag | §5 empty (may be legitimate) |
+| §7 Business Rules | IF/THEN format | Seeds FunctionTool first-drafts. Prose like "handle complex claims" can't be converted to code. | All rules in IF/THEN | Mixed format | §7 empty or all prose |
+| §8 Sensitive Data | PII/PHI/financial classification | Triggers Model Armor callback generation. Missing → agents handle PII without screening. | Specific classifications | Vague "some sensitive data" | §8 empty when §4 has user-facing systems |
+| §10 Acceptance Criteria | Measurable metrics: "< 5 min", "> 95% accuracy" | Seeds golden dataset for EvalOps. "Make it faster" is unmeasurable. | ≥3 measurable criteria | 1-2 measurable + vague | 0 measurable criteria |
+
+**Validation output:** A `spec_quality_score` (0-100) with per-section status (PASS/WARN/BLOCK). If any section is BLOCK, `blueprint_start` returns immediately with specific guidance ("§2 has no ordering words — add 'first', 'then', 'in parallel' to describe the workflow sequence"). If WARN, the pipeline continues but attaches warnings to the blueprint output with a lower confidence score. If all PASS, the pipeline runs at full confidence.
+
+**Two-layer validation architecture (local + server-side):**
+
+Signal validation runs at TWO layers — a fast local layer during spec capture, and a thorough server-side layer before the RAG pipeline:
+
+```
+Layer 1: LOCAL (SpecKit Preset — during /specify capture)
+  ┌─────────────────────────────────────────────────────────┐
+  │ SpecKit preset template includes inline validation       │
+  │ instructions. The coding agent validates EACH section    │
+  │ as the developer responds — catching issues in real time.│
+  │                                                          │
+  │ §2 captured → check ordering words → ✅/⚠️/❌            │
+  │ §4 captured → check specific system names → ✅/⚠️       │
+  │ §5 captured → check "own system" flags → ✅/⚠️          │
+  │ §7 captured → check IF/THEN format → ✅/⚠️/❌           │
+  │ §10 captured → check measurable criteria → ✅/⚠️/❌     │
+  │                                                          │
+  │ Summary validation → score → write spec.md               │
+  └─────────────────────────────────────────────────────────┘
+                         ↓ spec.md
+Layer 2: SERVER-SIDE (Blueprint Advisor — Step 0 of blueprint_start)
+  ┌─────────────────────────────────────────────────────────┐
+  │ validate_spec runs inside the MCP Server with access to: │
+  │ - Vertex AI Search (verify data systems have patterns)   │
+  │ - Apigee API Hub (verify A2A agents exist and are active)│
+  │ - ADR Store (verify spec decisions comply with ADRs)     │
+  │ - Cross-section consistency checks                       │
+  │                                                          │
+  │ Returns: spec_quality_score + per-section status          │
+  │ BLOCK → return immediately. WARN → continue with flags.  │
+  └─────────────────────────────────────────────────────────┘
+                         ↓
+  RAG pipeline (recommend_architecture → search_a2a → adr_compliance → assemble)
+```
+
+**Why two layers:** Local validation catches OBVIOUS issues during capture (missing ordering words, vague system names, prose business rules) — the developer fixes them immediately instead of discovering them 20 minutes later when `blueprint_start` returns a low-quality result. Server-side validation catches COMPLEX issues that require data access (does the named data system have a pattern in the catalog? is the A2A agent actually deployed? does the spec violate an ADR?).
+
+**SpecKit preset template — inline validation instructions:**
+
+The `/specify` SpecKit preset includes validation rules directly in its template. The coding agent reads these rules and executes them during capture:
+
+| Section | SpecKit preset validates | Mechanism |
+|---|---|---|
+| §2 Workflow | Ordering words present (≥3 required: "first", "then", "in parallel", "loop until", "route to human") | Preset template instructs coding agent to scan response for ordering words and report findings immediately |
+| §4 Data Systems | Specific system names (not "a database") | Preset template instructs: "If the developer says 'a database' or 'some storage', ask which specific system" |
+| §5 External Partners | "Own system" flag per partner | Preset template instructs: "For each partner, ask: does [partner] operate their own system?" |
+| §7 Business Rules | IF/THEN format | Preset template instructs: "If rules are prose, ask to rephrase as IF condition THEN action" |
+| §8 Sensitive Data | Cross-check with §4 | Preset template instructs: "If §4 has user-facing systems but §8 is empty, warn" |
+| §10 Acceptance Criteria | Measurable metrics | Preset template instructs: "If criteria like 'fast' or 'accurate', ask for measurable: '< 5 min', '> 95%'" |
+
+**RAG pipeline with validation (both layers):**
+```
+/specify (SpecKit preset — Layer 1 local validation during capture)
+  → spec.md written with validated signals
+  
+/catalyst.blueprint
+  → blueprint_start(spec, plan)
+    → validate_spec (Layer 2 server-side — checks against catalogs, API Hub, ADR Store)
+    → recommend_architecture (RAG retrieval — quality depends on signal quality)
+    → search_a2a_agents (API Hub query)
+    → adr_compliance_check
+    → assemble_blueprint
+```
+
 Before generating code, she runs the governance check. She types `/catalyst.assess`. The coding agent reads `app-blueprint.md` (NOT `app-blueprint.json` — the Governance Guardian assesses the human-readable architecture, not the machine-readable JSON) and extracts all 7 artifact types directly from it — the component diagram PNG from the `![...]()` reference in §4, HA/DR views from §13, sequence diagrams from the inline mermaid in §14, NFRs from the table in §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as a **solution_package** (an ephemeral JSON transport payload sent over MCP — this is NOT the same as the persisted `app-blueprint.json` file), and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). The `app-blueprint.json` file in the workspace is not read, not sent, and not modified during governance assessment — it exists solely for `/catalyst.generate` to consume later. While the EA assessment engine evaluates her solution (a black box to AgentCatalyst — the EA office owns all the assessment logic), she sees progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...".
 
 The assessment returns a scorecard and findings. One showstopper: her Aurora PostgreSQL has no cross-region DR strategy, violating ADR-205. Two non-critical findings: WAF rules not using the enterprise managed rule group, and Angular 17 not yet on the approved tech radar. She fixes the showstopper — adds Aurora Global Database with a us-west-2 read replica to her Terraform and updates the HA/DR view in her drawio. She runs `/catalyst.assess` again. This time: no showstoppers, score 88/100. The two remaining findings are flagged as acceptable tech debt.
@@ -161,7 +243,7 @@ The Blueprint Advisor reads phrases like "EXISTING REST API" and "MUST use these
 
 **Architecture infographic:**
 
-![AgentCatalyst Component Architecture](AgentCatalyst-Architecture-Diagram-Detailed.png)
+![AgentCatalyst Component Architecture](AgentCatalyst-GA-Architecture-Infographic.png)
 
 ---
 
