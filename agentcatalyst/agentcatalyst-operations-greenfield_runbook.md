@@ -22,7 +22,7 @@
 | 2. Search Quality Regression | Layer 2 — Blueprint Advisor | Section 8 — Reading Confidence Scores |
 | 3. Acceptance Telemetry | Layer 2 — Blueprint Advisor | Section 9 — When the Blueprint Advisor Gets It Wrong |
 | 4. Catalog Quality | Layer 2 — Vertex AI Search data stores | Section 4 — Writing Effective Specs |
-| 5. Tool Lifecycle | Layer 2 — Tool Registry | Section 11 — Reporting Issues |
+| 5. Tool Lifecycle | Layer 2 — Apigee API Hub (integration catalog) | Section 11 — Reporting Issues |
 | 6. Failure Modes | Layer 2 — Blueprint Advisor MCP Server | Section 14 — Troubleshooting |
 | 7. Composition Validator | Layer 2 — Pattern composition | Section 6 — Iterating on the Design |
 | 8. EvalOps Operations | Layer 4 — EvalOps 3-layer lifecycle | Section 4b — EvalOps Workflow |
@@ -103,7 +103,7 @@ POST https://discoveryengine.googleapis.com/v1/projects/{PROJECT}/locations/{LOC
 |---|---|---|
 | `search_patterns()` | `agentcatalyst-patterns` | 11 agentic patterns (8 sections each) |
 | `search_skills()` | `agentcatalyst-skills` | Reusable skills with use_when/do_not_use_when |
-| `search_tools()` | `agentcatalyst-tools` | MCP servers, A2A Agent Cards, FunctionTool defs |
+| `discover_integrations()` | Apigee API Hub (not Vertex AI Search) | MCP servers, A2A agents, REST APIs — single discovery surface |
 
 ### Performance
 
@@ -116,7 +116,7 @@ POST https://discoveryengine.googleapis.com/v1/projects/{PROJECT}/locations/{LOC
 | `blueprint_start` latency | < 2 seconds | > 5 seconds |
 | `blueprint_status` latency | < 500ms | > 2 seconds |
 | `blueprint_result` latency | < 1 second | > 3 seconds |
-| Full pipeline (3 RAG + LLM + validate + assemble) | 15–60 seconds | > 120 seconds |
+| Full pipeline (2 RAG + API Hub + LLM + validate + assemble) | 15–60 seconds | > 120 seconds |
 
 ### Troubleshooting
 
@@ -322,7 +322,7 @@ Re-ingest on: document content change (automatic via CI), Vertex AI Search model
 
 ## 4a. Catalog Backup and Disaster Recovery
 
-> **Architecture context:** The Blueprint Advisor's intelligence depends on three Vertex AI Search data stores (patterns, skills, tools). Its async task lifecycle depends on the AlloyDB Task Store. If the Vertex AI Search data stores are corrupted or deleted, the platform is non-functional. If the Task Store is unavailable, in-flight blueprint tasks fail (but are recoverable by re-running). This section covers backup, restore, and failover for both.
+> **Architecture context:** The Blueprint Advisor's intelligence depends on two Vertex AI Search data stores (patterns, skills). Its async task lifecycle depends on the AlloyDB Task Store. If the Vertex AI Search data stores are corrupted or deleted, the platform is non-functional. If the Task Store is unavailable, in-flight blueprint tasks fail (but are recoverable by re-running). This section covers backup, restore, and failover for both.
 
 ### Source of truth
 
@@ -332,7 +332,7 @@ All catalog content is version-controlled in GitHub:
 |---|---|---|
 | Pattern Catalog | `github.com/[company]/agentcatalyst-patterns` | Markdown + YAML frontmatter per pattern |
 | Skill Catalog | `github.com/[company]/agentcatalyst-skills` | SKILL.md files with frontmatter |
-| Tool Registry | `github.com/[company]/agentcatalyst-tools` | YAML manifests per tool |
+| Integration Catalog | Apigee API Hub | MCP servers + A2A agents + REST APIs (source of truth for all integrations) |
 
 The GitHub repos are the source of truth. Vertex AI Search data stores are derived indexes — they can always be rebuilt from the repos.
 
@@ -404,7 +404,7 @@ The AlloyDB Task Store holds transient async task records (taskId, status, stage
 
 ## 5. Tool Lifecycle Management
 
-> **Architecture context:** Architecture Document, Layer 2 (Tool Registry). **Developer Guide context:** Developer Guide, Section 11 (reporting missing tools).
+> **Architecture context:** Architecture Document, Layer 2 (Apigee API Hub — integration discovery). **Developer Guide context:** Developer Guide, Section 11 (reporting missing tools).
 
 ### Tool states
 
@@ -773,7 +773,7 @@ Apigee proxy routes, per-agent Workload Identity IAM bindings, and API Hub regis
 | API Hub entry not created | Post-deployment check fails | Run the `apihub register` step manually from the CI/CD pipeline definition. |
 | Stale entry (agent retired but still listed as active) | API Hub shows `active` but Cloud Run has no instances | Update API Hub lifecycle to `retired`. Run cleanup. |
 
-**The flywheel:** Every agent deployed via AgentCatalyst registers in API Hub. Future Blueprint Advisor runs query API Hub via `search_a2a_agents()` and discover these agents for A2A delegation — reusing deployed agents instead of rebuilding. The more agents deployed, the richer the API Hub catalog, the more the Blueprint Advisor can recommend A2A reuse.
+**The flywheel:** Every agent deployed via AgentCatalyst registers in API Hub. Future Blueprint Advisor runs query API Hub via `discover_integrations()` and discover these agents for A2A delegation — reusing deployed agents instead of rebuilding. The more agents deployed, the richer the API Hub catalog, the more the Blueprint Advisor can recommend A2A reuse.
 
 ---
 

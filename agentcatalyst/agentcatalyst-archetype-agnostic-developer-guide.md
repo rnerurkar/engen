@@ -96,7 +96,7 @@ They've already set up everything you need. You don't configure any of this:
 | Domain skills (per archetype) | `github.com/company/agentcatalyst-skills` | Teach the coding agent how to write correct code for ADK, Spring Boot, etc. |
 | Company overlay skills (shared) | Same repo | Teach Terraform patterns, Dynatrace config, Jenkins/Harness pipelines, security standards |
 | Blueprint Advisor MCP Server | Cloud Run + Cloud Run Jobs (GCP) | LlmAgent exposed as MCP Server (async via MCP Tasks). Your coding agent calls `blueprint_start`, `blueprint_status`, `blueprint_result`, `validate_composition`, `assemble_blueprint` via MCP protocol. |
-| Approved tools registry | Apigee API Hub + `memory/approved-tools.md` | Unified catalog: MCP servers, REST APIs, and **deployed A2A agents** (registered with `type=a2a_agent`). Blueprint Advisor queries API Hub for A2A agents — reusing deployed agents instead of rebuilding. |
+| Approved tools registry | Apigee API Hub + `memory/approved-tools.md` | Single discovery surface: MCP servers, REST APIs, and **deployed A2A agents** (registered with `type=a2a_agent`). Blueprint Advisor queries API Hub via `discover_integrations()` for all integration types — tools and agents discovered in one call. |
 | Company Terraform modules | `github.com/company/tf-modules` | Pre-approved infrastructure modules |
 
 ### What you (the developer) do
@@ -299,7 +299,7 @@ Your workspace contains 4 formats per diagram. You only need to edit ONE — the
 
 → *See `app-blueprint-md-template-and-fnol-example.md` for the complete 12-section template structure and FNOL reference example.*
 
-**Why async?** VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls. The Blueprint Advisor's internal pipeline (3 RAG searches + LLM reasoning + validation + assembly) takes 15–60 seconds. A single blocking call would be killed before it completes. Instead, the coding agent uses three fast MCP tools — `blueprint_start` (< 2s), `blueprint_status` (< 1s), `blueprint_result` (< 1s) — to drive an async loop. You don't need to think about this; the prompt file handles it automatically.
+**Why async?** VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls. The Blueprint Advisor's internal pipeline (2 RAG searches + API Hub discovery + LLM reasoning + validation + assembly) takes 15–60 seconds. A single blocking call would be killed before it completes. Instead, the coding agent uses three fast MCP tools — `blueprint_start` (< 2s), `blueprint_status` (< 1s), `blueprint_result` (< 1s) — to drive an async loop. You don't need to think about this; the prompt file handles it automatically.
 
 **What you see in the Chat pane:**
 
@@ -308,7 +308,7 @@ You: /catalyst.blueprint
 
 Agent: Blueprint generation started. Checking progress...
 Agent: Searching pattern catalog...
-Agent: Searching tool registry for BigQuery, Cloud SQL, Vertex AI Search tools...
+Agent: Discovering integrations in API Hub for BigQuery, Cloud SQL, Vertex AI Search tools...
 Agent: Searching skill catalog for matching skills...
 Agent: LLM reasoning: mapping tools to agents based on co-occurrence...
 Agent: Validating composition...
@@ -334,7 +334,7 @@ Review the markdown and edit before running /catalyst.generate.
 
    - **Pattern search** — reads your Workflow section's ordering words ("First," "Simultaneously," "Refine until") and searches the pattern catalog. "First... then..." → Sequential. "Simultaneously" → Parallel. "Refine until" → Loop.
 
-   - **Tool search** — reads your Data Sources and External Integrations sections and searches the tool registry for the specific tools your agent needs. The tool registry is chunked at the **individual tool level**, not the server level — so when you write "BigQuery analytical queries," the search matches the specific `execute_query` tool on the BigQuery MCP server, not just "BigQuery" generically. MCP tools are searched in Vertex AI Search; **A2A agents are searched in Apigee API Hub** (`type=a2a_agent`) — deployed agents with matching capabilities are discovered and recommended for A2A delegation instead of building new agents.
+   - **Integration discovery** — reads your Data Sources and External Integrations sections and queries **Apigee API Hub** (`discover_integrations()`) for matching MCP servers and A2A agents. The catalog is indexed at the **individual tool level**, not the server level — so when you write "BigQuery analytical queries," the search matches the specific `execute_query` tool on the BigQuery MCP server, not just "BigQuery" generically. API Hub is the single discovery surface for all integration types. Deployed agents with matching capabilities are recommended for A2A delegation (priority: A2A > MCP > Build).
 
    - **Skill search** — finds skills that match the tools and capabilities your agent needs. Skills are automatically paired with their corresponding tools.
 
@@ -367,8 +367,8 @@ For each tool in the blueprint, verify the `assigned_to` agent makes sense:
 |---|---|---|
 | **Write tool on a leaf agent** | Spec says "extract and save" in one sentence — Blueprint Advisor assigns Cloud SQL to `extract_details` | Move `assigned_to` to the coordinator. Write operations are usually coordinator-level. |
 | **Tool on wrong parallel branch** | Spec mentions "fraud scoring" and "police report" in the same paragraph — Blueprint Advisor mixes up which goes where | Check which branch name matches the tool's purpose. Edit `assigned_to`. |
-| **Missing tool entirely** | Spec mentions a data source the tool registry doesn't have | Add the tool manually to the blueprint. Then request it be added to the registry (see `memory/approved-tools.md`). |
-| **MCP when it should be A2A (or vice versa)** | Tool registry has the integration registered as the wrong type | This is rare — the registry determines the type. Report to platform engineering. |
+| **Missing tool entirely** | Spec mentions a data source that API Hub doesn't have | Add the tool manually to the blueprint. Then request it be registered in API Hub (see `memory/approved-tools.md`). |
+| **MCP when it should be A2A (or vice versa)** | API Hub has the integration registered as the wrong type | This is rare — API Hub determines the type. Report to platform engineering. |
 | **Skill on wrong agent** | Skill's `compatible_tools` matched the wrong MCP server | Move the skill's `assigned_to` to match the agent that uses the related tool. |
 
 **Pro tip:** Read the blueprint top-to-bottom and mentally trace the FNOL workflow. For each agent, ask: "Does this agent have access to every data source it needs, and ONLY the data sources it needs?" An agent with too many tools has too much scope. An agent missing a tool will fail at runtime.
@@ -850,7 +850,7 @@ The Blueprint Advisor reads the spec and recognizes the brownfield signals. Like
 ```
 Agent: Blueprint generation started. Checking progress...
 Agent: Searching pattern catalog for microservice patterns...
-Agent: Searching tool registry — recognizing EXISTING signals for Oracle, Angular, ECS...
+Agent: Discovering integrations in API Hub — recognizing EXISTING signals for Oracle, Angular, ECS...
 Agent: Reasoning: brownfield mode — skipping infrastructure generation...
 Agent: Assembling blueprint...
 Agent: Blueprint ready! Saved app-blueprint.md.
@@ -1232,7 +1232,7 @@ The Blueprint Advisor reads your Workflow section and searches the pattern catal
 
 ### Words that trigger tool discovery
 
-The Blueprint Advisor reads your Data Sources and External Integrations sections and searches the tool registry. The tool registry is chunked at the **individual tool level** — so specific language helps it find the exact tool, not just the server:
+The Blueprint Advisor reads your Data Sources and External Integrations sections and queries API Hub. The integration catalog is chunked at the **individual tool level** — so specific language helps it find the exact tool, not just the server:
 
 | What you write | What the Blueprint Advisor searches for | What it finds |
 |---|---|---|
@@ -1250,7 +1250,7 @@ The Blueprint Advisor reads your Data Sources and External Integrations sections
 | "they operate their own" / "partner API" / "municipal system" | External partner | A2A agent (`AgentTool`) |
 | "our proprietary" / "internal model" | Company-owned logic | FunctionTool implementation (first draft from spec rules; no external connection) |
 
-You don't need to specify whether something is MCP or A2A. The tool registry knows. Just describe what it is and who operates it.
+You don't need to specify whether something is MCP or A2A. API Hub knows. Just describe what it is and who operates it.
 
 ### Words that drive correct tool-to-agent assignment
 
@@ -2055,7 +2055,7 @@ Both are essential. Jenkins ensures the agent's environment is correct. Harness 
 | Brownfield generates new infrastructure | Spec missing "EXISTING" / "DO NOT create" signals | Add explicit brownfield language to spec (see Section 4) |
 | Generated code doesn't compile | Skill version mismatch | Check ADK/Spring Boot version matches skill expectations |
 | Oracle connection fails locally | Wrong JDBC URL or missing credentials | Check `application.yml` datasource config, ensure Oracle RDS is accessible from your machine |
-| Blueprint Advisor consistently picks wrong tool for my data source | Tool registry enrichment metadata is incomplete or doesn't match your spec language | Submit feedback via platform engineering JIRA (`AGENTCATALYST-SEARCH` queue) with 3+ examples of your spec language → wrong recommendation. See Section 11. |
+| Blueprint Advisor consistently picks wrong tool for my data source | API Hub integration metadata is incomplete or doesn't match your spec language | Submit feedback via platform engineering JIRA (`AGENTCATALYST-SEARCH` queue) with 3+ examples of your spec language → wrong recommendation. See Section 11. |
 | Search returns alternatives instead of a clear winner (multiple `alternatives:` fields in blueprint) | Spec is ambiguous — multiple tools or patterns match equally well | Run the Spec Quality Self-Check (Section 10). Disambiguate the spec or pick the right alternative manually in the blueprint. |
 | Generated code fails because tool no longer exists | Tool was deprecated since the blueprint was generated | Check tool deprecation list. Run `catalyst migrate` if available, or update blueprint manually to use the replacement tool. Re-run `/catalyst.generate`. |
 | Pattern composition validator rejects YAML | YAML composes patterns that aren't compatible (e.g., LoopAgent + HITL sub-agent) | Read the validator error — it specifies which composition rule was violated. Either restructure the YAML or rewrite the spec to use compatible patterns. |
@@ -2196,7 +2196,7 @@ Your job is to produce an opinionated architecture blueprint by:
 
 1. **Compose patterns:** Read the workflow ordering words in spec §2. Select agentic patterns from the pattern catalog (Sequential, Parallel, Loop, HITL). "First... then..." → Sequential. "In parallel..." → Parallel. "Loop until..." → Loop. "Route to human..." → HITL. Validate composition rules (LoopAgent cannot nest inside ParallelAgent).
 
-2. **Discover tools and agents:** Search the tool registry (Vertex AI Search) for MCP servers matching each data source and integration in spec §4-§5. Search Apigee API Hub for deployed A2A agents (`type=a2a_agent`). Priority: A2A (reuse deployed agent) > MCP (use existing tool) > Build (create new FunctionTool).
+2. **Discover tools and agents:** Query Apigee API Hub (`discover_integrations()`) for MCP servers and A2A agents matching each data source and integration in spec §4-§5. Priority: A2A (reuse deployed agent) > MCP (use existing tool) > Build (create new FunctionTool).
 
 3. **Match skills:** For each agent in the topology, match relevant skills from the skill catalog. Attach skill references with provenance (SHA, version).
 
@@ -2418,11 +2418,11 @@ use_case: fnol-claims-intake
   ],
   "tools": {
     "mcp_servers": [
-      { "name": "claims-db-mcp", "endpoint": "mcp://claims-db.internal:8080", "auth_method": "mtls", "assigned_to": "extract_details", "timeout": "30s", "retry": 3, "discovered_via": "Vertex AI Search (tool registry)" },
-      { "name": "policy-api-mcp", "endpoint": "mcp://policy-api.internal:8080", "auth_method": "oauth2", "assigned_to": "enrich_policy", "timeout": "15s", "retry": 2, "discovered_via": "Vertex AI Search (tool registry)" },
-      { "name": "vehicle-api-mcp", "endpoint": "mcp://vehicle-api.internal:8080", "auth_method": "api_key", "assigned_to": "enrich_vehicle", "timeout": "15s", "retry": 2, "discovered_via": "Vertex AI Search (tool registry)" },
-      { "name": "weather-api-mcp", "endpoint": "https://api.weather.gov/points", "auth_method": "none", "assigned_to": "enrich_weather", "timeout": "10s", "retry": 1, "discovered_via": "Vertex AI Search (tool registry)" },
-      { "name": "review-queue-mcp", "endpoint": "mcp://review-queue.internal:8080", "auth_method": "mtls", "assigned_to": "human_review", "timeout": "60s", "retry": 1, "discovered_via": "Vertex AI Search (tool registry)" }
+      { "name": "claims-db-mcp", "endpoint": "mcp://claims-db.internal:8080", "auth_method": "mtls", "assigned_to": "extract_details", "timeout": "30s", "retry": 3, "discovered_via": "Apigee API Hub" },
+      { "name": "policy-api-mcp", "endpoint": "mcp://policy-api.internal:8080", "auth_method": "oauth2", "assigned_to": "enrich_policy", "timeout": "15s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "vehicle-api-mcp", "endpoint": "mcp://vehicle-api.internal:8080", "auth_method": "api_key", "assigned_to": "enrich_vehicle", "timeout": "15s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "weather-api-mcp", "endpoint": "https://api.weather.gov/points", "auth_method": "none", "assigned_to": "enrich_weather", "timeout": "10s", "retry": 1, "discovered_via": "Apigee API Hub" },
+      { "name": "review-queue-mcp", "endpoint": "mcp://review-queue.internal:8080", "auth_method": "mtls", "assigned_to": "human_review", "timeout": "60s", "retry": 1, "discovered_via": "Apigee API Hub" }
     ],
     "a2a_agents": [
       { "name": "body-shop-a2a", "endpoint": "https://bodyshop.partner.com/a2a", "agent_card_url": "https://bodyshop.partner.com/.well-known/agent.json", "capabilities": ["estimate", "schedule", "parts-lookup"], "assigned_to": "severity_classifier", "discovered_via": "Apigee API Hub (type=a2a_agent, v2.3, active)" }

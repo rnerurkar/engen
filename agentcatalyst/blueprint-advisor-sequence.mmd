@@ -9,10 +9,10 @@ sequenceDiagram
     participant BG as Background Job<br/>(Cloud Run Jobs)
     participant TS as Tech Substitution<br/>Decision Table
     participant PC as Pattern Catalog<br/>(Vertex AI Search)
-    participant TR as Tool Registry<br/>(Apigee API Hub)
+    participant AH as Apigee API Hub<br/>(MCP + A2A + REST discovery)
     participant ADR as ADR Constraint Store<br/>(AlloyDB)
     participant IAC as IaC Module Registry<br/>(GitHub)
-    participant ER as Eraser.io API<br/>(diagram rendering)
+    participant ER as Draw.io Headless<br/>(diagram rendering)
     participant FS as Task Store<br/>(AlloyDB)
 
     rect rgb(214, 234, 248)
@@ -39,8 +39,8 @@ sequenceDiagram
     Note over BG: validate_spec — 8-signal migration readiness gate
     BG->>TS: verify every CSA tech has approved TSA mapping + confidence score
     TS-->>BG: tech_coverage: pass/warn/block per integration
-    BG->>TR: verify A2A agents for partner integrations (Apigee API Hub)
-    TR-->>BG: a2a_availability: pass/warn/block per partner
+    BG->>AH: verify A2A agents + MCP servers for integrations (API Hub)
+    AH-->>BG: integration_availability: pass/warn/block per integration
     BG->>ADR: pre-check spec decisions against coexistence + rollback ADRs
     ADR-->>BG: adr_pre_compliance: pass/warn/block per integration
     BG->>BG: cross-integration graph analysis (circular deps, conflicting coexistence, phase ordering)
@@ -56,10 +56,8 @@ sequenceDiagram
     BG->>FS: status → "recommending"
     BG->>PC: hybrid_search (per integration)
     PC-->>BG: candidate_patterns[]
-    BG->>TR: discover_tools (MCP servers, REST APIs)
-    TR-->>BG: applicable_tools[]
-    BG->>TR: search_a2a_agents (deployed agents for A2A delegation)
-    TR-->>BG: available_a2a_agents[] (name, version, capabilities, Agent Card URL)
+    BG->>AH: discover_integrations (MCP servers + A2A agents + REST APIs)
+    AH-->>BG: integrations[] (tools + a2a_agents, priority: A2A > MCP > Build)
     BG->>BG: validate_composition
     BG->>FS: status → "checking"
     BG->>ADR: adr_compliance_check
@@ -67,13 +65,13 @@ sequenceDiagram
     BG->>FS: status → "assembling"
     BG->>IAC: resolve_modules
     IAC-->>BG: module_refs[]
-    BG->>ER: render component topology (Eraser.io DSL → .eraser + .png)
-    ER-->>BG: component-diagram.eraser + .png
-    BG->>ER: render HA/DR lifecycle views (4 scenarios)
-    ER-->>BG: hadr-*.eraser + .png
-    BG->>BG: generate .drawio.xml + .svg from Eraser.io DSL
-    BG->>BG: assemble app-blueprint.md (18 sections) + generate app-blueprint.json (derived, machine-readable)
-    BG->>BG: bundle: .md + .json + diagrams (.eraser + .drawio + .svg + .png)
+    BG->>ER: render component topology (.drawio.xml + .png)
+    ER-->>BG: component-diagram.drawio.xml + .png
+    BG->>ER: render HA/DR lifecycle views (.drawio.xml + .png)
+    ER-->>BG: hadr-*.drawio.xml + .png
+    BG->>BG: generate .drawio.xml from Draw.io export library
+    BG->>BG: assemble app-blueprint.md (12 sections: Part I §1-§7 + Part II §8-§12) + generate app-blueprint.json (derived, machine-readable)
+    BG->>BG: bundle: .md + .json + diagrams (.drawio.xml + .png)
     BG->>FS: store result, status → "completed"
     end
     end
@@ -84,5 +82,5 @@ sequenceDiagram
     MCP-->>Agent: { status: "completed" }
     Agent->>MCP: blueprint_result(taskId)
     MCP->>FS: read result
-    MCP-->>Agent: app-blueprint.md + app-blueprint.json + diagrams (.eraser + .drawio + .svg + .png)
+    MCP-->>Agent: app-blueprint.md + app-blueprint.json + diagrams (.drawio.xml + .png)
     end

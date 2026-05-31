@@ -117,7 +117,7 @@ She types `/plan` and answers a handful of technical questions — GCP region, L
 
 She types `/catalyst.blueprint`. This custom command connects to the **Blueprint Advisor MCP Server** — an LlmAgent running on Cloud Run, exposed as an MCP Server. Her coding agent calls `blueprint_start` via MCP protocol with her `spec.md` and `plan.md` as input. The call returns a task ID in under 2 seconds — the heavy work runs in the background. She doesn't need to know what happens inside the server — but here's what does:
 
-The Blueprint Advisor reads her spec's natural language signals. "First the customer calls, then the system classifies severity" tells it Sequential. "In parallel it enriches from three sources" tells it Parallel. "Loop until quality score exceeds 0.85" tells it Loop. "Route high-severity to a human adjuster" tells it HITL. It searches the company's pattern catalog, skill catalog, and tool registry via Vertex AI Search (single-pass semantic retrieval), then queries **Apigee API Hub** for deployed agents available for A2A delegation — "body shop — they operate their own" triggers an API Hub query for `type=a2a_agent, capabilities CONTAINS 'body-shop-estimate'`, finding the deployed body-shop-agent (v2.3, active). It applies LLM reasoning guided by a company-curated system prompt and assembles a recommendation. While this runs (15–60 seconds), her coding agent polls `blueprint_status` every 10 seconds and reports progress in the Chat pane: "Searching pattern catalog...", "Discovering A2A agents...", "Reasoning about architecture...", "Assembling blueprint...".
+The Blueprint Advisor reads her spec's natural language signals. "First the customer calls, then the system classifies severity" tells it Sequential. "In parallel it enriches from three sources" tells it Parallel. "Loop until quality score exceeds 0.85" tells it Loop. "Route high-severity to a human adjuster" tells it HITL. It searches the company's pattern catalog and skill catalog via Vertex AI Search (semantic retrieval), then queries **Apigee API Hub** to discover available integrations — MCP servers, A2A agents, and REST APIs — in a single call — "body shop — they operate their own" triggers an API Hub query for `type=a2a_agent, capabilities CONTAINS 'body-shop-estimate'`, finding the deployed body-shop-agent (v2.3, active). It applies LLM reasoning guided by a company-curated system prompt and assembles a recommendation. While this runs (15–60 seconds), her coding agent polls `blueprint_status` every 10 seconds and reports progress in the Chat pane: "Searching pattern catalog...", "Discovering A2A agents...", "Reasoning about architecture...", "Assembling blueprint...".
 
 When the background pipeline completes, the coding agent calls `blueprint_result` and receives a JSON response containing the markdown content, a machine-readable `app-blueprint.json`, base64-encoded diagram PNGs and editable `.drawio.xml` source files. It writes all files to the workspace:
 
@@ -182,7 +182,7 @@ Layer 2: SERVER-SIDE (Blueprint Advisor — Step 0 of blueprint_start)
   │ BLOCK → return immediately. WARN → continue with flags.  │
   └─────────────────────────────────────────────────────────┘
                          ↓
-  RAG pipeline (recommend_architecture → search_a2a → adr_compliance → assemble)
+  RAG pipeline (recommend_architecture → discover_integrations → adr_compliance → assemble)
 ```
 
 **Why two layers:** Local validation catches OBVIOUS issues during capture (missing ordering words, vague system names, prose business rules) — the developer fixes them immediately instead of discovering them 20 minutes later when `blueprint_start` returns a low-quality result. Server-side validation catches COMPLEX issues that require data access (does the named data system have a pattern in the catalog? is the A2A agent actually deployed? does the spec violate an ADR?).
@@ -209,7 +209,7 @@ The `/specify` SpecKit preset includes validation rules directly in its template
   → blueprint_start(spec, plan)
     → validate_spec (Layer 2 server-side — checks against catalogs, API Hub, ADR Store)
     → recommend_architecture (RAG retrieval — quality depends on signal quality)
-    → search_a2a_agents (API Hub query)
+    → discover_integrations (API Hub query — MCP servers + A2A agents)
     → adr_compliance_check
     → assemble_blueprint
 ```
@@ -265,7 +265,7 @@ The Blueprint Advisor reads phrases like "EXISTING REST API" and "MUST use these
 | Task Queue | Cloud Tasks (GA) — enqueues pipeline jobs from `blueprint_start` |
 | Spec Workflow | GitHub Spec Kit with AgentCatalyst preset (archetype-specific) |
 | Blueprint Advisor | LlmAgent exposed as MCP Server. API layer on Cloud Run Service (async via MCP Tasks). Pipeline on Cloud Run Jobs. Task state in AlloyDB. Enqueue via Cloud Tasks. |
-| Discovery | Vertex AI Search (archetype-specific catalogs: patterns, skills, MCP tools) + **Apigee API Hub** (unified catalog: REST APIs + MCP servers + A2A agents) |
+| Discovery | Vertex AI Search (archetype-specific catalogs: patterns, skills) + **Apigee API Hub** (single discovery surface: MCP servers + A2A agents + REST APIs) |
 | IaC | Terraform + company TF modules via GitHub MCP Server |
 | Security | Model Armor (standard), DLP, Secret Manager, SPIFFE, VPC-SC, CMEK |
 | Gateway | Apigee Runtime Gateway (GA) |
@@ -315,7 +315,7 @@ When business rules are in the spec, code generation reaches 90-95%. When omitte
 
 The Blueprint Advisor is an LlmAgent running on Cloud Run, **exposed as an MCP Server**. The coding agent connects via MCP protocol — this is the only universally compatible method (GitHub Copilot cannot make HTTP calls or run shell commands, but all major coding agents support MCP).
 
-**Async invocation via MCP Tasks:** VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls. The Blueprint Advisor's internal pipeline (3 RAG queries + LLM reasoning + validation + assembly) takes 15–60 seconds depending on spec complexity. A synchronous call would be killed by Copilot before it completes. The Blueprint Advisor therefore uses the **MCP Tasks** async primitive (spec revision 2025-11-25): the coding agent starts a background task, polls for progress, and retrieves the result when complete. Each individual MCP call completes in under 2 seconds — well within any coding agent's timeout window.
+**Async invocation via MCP Tasks:** VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls. The Blueprint Advisor's internal pipeline (2 RAG queries + API Hub discovery + LLM reasoning + validation + assembly) takes 15–60 seconds depending on spec complexity. A synchronous call would be killed by Copilot before it completes. The Blueprint Advisor therefore uses the **MCP Tasks** async primitive (spec revision 2025-11-25): the coding agent starts a background task, polls for progress, and retrieves the result when complete. Each individual MCP call completes in under 2 seconds — well within any coding agent's timeout window.
 
 **MCP Tools exposed to the coding agent:**
 
@@ -362,11 +362,10 @@ This enables reproducibility: if a developer needs to understand why a recommend
 | Blueprint Advisor LlmAgent | RAG + LLM reasoning guided by company system prompt |
 | `search_patterns()` | RAG tool — queries Pattern Catalog in Vertex AI Search |
 | `search_skills()` | RAG tool — queries Skill Catalog in Vertex AI Search |
-| `search_tools()` | RAG tool — queries Tool Registry in Vertex AI Search (MCP servers, REST APIs) |
-| `search_a2a_agents()` | Queries **Apigee API Hub** for deployed agents available for A2A delegation (`type=a2a_agent`). Returns agent name, version, capabilities, Agent Card URL, lifecycle status. Priority: A2A (reuse deployed agent) > MCP (use tool) > Build (create new). |
+| `discover_integrations()` | Queries **Apigee API Hub** for MCP servers, A2A agents, and REST APIs in a single call. Returns endpoint, auth, capabilities, Agent Card URL, lifecycle status. Priority: A2A (reuse deployed agent) > MCP (use existing tool) > Build (create new). |
 | Company system prompt | Curated best practices, constraints, preferences. → *See Developer Guide "System Prompt Template — Greenfield Blueprint Advisor" for the full system prompt.* |
-| Vertex AI Search connections | 3 archetype-specific data stores |
-| **Apigee API Hub connection** | **Unified catalog: REST APIs + MCP servers + A2A agents. Single pane for all integration types.** |
+| Vertex AI Search connections | 2 archetype-specific data stores (patterns, skills) |
+| **Apigee API Hub connection** | **Single discovery surface: MCP servers + A2A agents + REST APIs. Queried by `discover_integrations()` during the pipeline. Source of truth for all tool and agent registrations.** |
 
 **MCP protocol version:** The Blueprint Advisor MCP Server implements **MCP protocol version 2025-11-25** (which introduced the Tasks primitive for async operations). Coding agent compatibility:
 
@@ -553,7 +552,7 @@ sequenceDiagram
 
 ### Blueprint Advisor MCP Server — Capacity and Rate Limiting
 
-The Blueprint Advisor uses an async two-component architecture: a lightweight **MCP API layer** (Cloud Run Service) handles the three fast tools, and a **background pipeline** (Cloud Run Jobs) runs the LlmAgent work with no timeout constraint. Each `blueprint_start` triggers a pipeline run that takes 15–60 seconds (3 RAG queries + LLM reasoning + validation + assembly) and costs ~$0.01 (Vertex AI Search + Gemini API tokens).
+The Blueprint Advisor uses an async two-component architecture: a lightweight **MCP API layer** (Cloud Run Service) handles the three fast tools, and a **background pipeline** (Cloud Run Jobs) runs the LlmAgent work with no timeout constraint. Each `blueprint_start` triggers a pipeline run that takes 15–60 seconds (2 RAG queries + API Hub discovery + LLM reasoning + validation + assembly) and costs ~$0.01 (Vertex AI Search + Gemini API tokens).
 
 **Rate limits (enforced at the MCP API layer on `blueprint_start` only):**
 
@@ -684,7 +683,7 @@ After deployment, the CI/CD pipeline registers the agent in Apigee API Hub as a 
         --labels=lob:insurance,domain:claims
 ```
 
-Once registered, future Blueprint Advisor runs discover this agent via `search_a2a_agents()` and can recommend A2A delegation to it — reusing the deployed agent instead of rebuilding duplicate capability. This creates a flywheel: the more agents deployed via AgentCatalyst, the more agents available for A2A delegation in future projects.
+Once registered, future Blueprint Advisor runs discover this agent via `discover_integrations()` and can recommend A2A delegation to it — reusing the deployed agent instead of rebuilding duplicate capability. This creates a flywheel: the more agents deployed via AgentCatalyst, the more agents available for A2A delegation in future projects.
 
 → *See Operations Runbook §11 for Apigee proxy, per-agent Workload Identity, and API Hub A2A operational procedures, health checks, and failure modes.*
 
