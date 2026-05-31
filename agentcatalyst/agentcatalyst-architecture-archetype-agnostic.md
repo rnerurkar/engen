@@ -1087,12 +1087,12 @@ To request new patterns, skills, or tools: submit a PR to the AgentCatalyst cata
 
 ## Related Documents
 
-| Document | Audience | What it covers |
-|---|---|---|
-| **This Architecture Document** | Architects, tech leads | Architectural decisions, layer deep dives, cost model, ROI |
-| **AgentCatalyst Developer Guide** (GA) | Developers | Step-by-step walkthroughs, full preset file contents, code examples, spec writing, troubleshooting |
-| **AgentCatalyst Operations Runbook** | Platform engineering | Wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix, EvalOps operations |
-| **Governance Guardian Architecture Extension** | Architects, EA office | `/catalyst.assess` design, async assessment flow, `recordTechDebt` gate in `/catalyst.generate`, Tech Debt Registry, solution package schema, scorecard format |
+| Document | Filename | Audience | What it covers |
+|---|---|---|---|
+| **This Architecture Document** | `agentcatalyst-architecture-archetype-agnostic.md` | Architects, tech leads | Architectural decisions, layer deep dives, cost model, ROI |
+| **AgentCatalyst Developer Guide** (GA) | `agentcatalyst-archetype-agnostic-developer-guide.md` | Developers | Step-by-step walkthroughs, full preset file contents, code examples, spec writing, troubleshooting |
+| **AgentCatalyst Operations Runbook** | `agentcatalyst-operations-greenfield_runbook.md` | Platform engineering | Wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix, EvalOps operations |
+| **Governance Guardian Architecture Extension** | `governance-guardian-architecture.md` | Architects, EA office | `/catalyst.assess` design, async assessment flow, `recordTechDebt` gate in `/catalyst.generate`, Tech Debt Registry, solution package schema, scorecard format |
 
 *Operational procedures (wire-level APIs, regression testing, telemetry, tool lifecycle, failure modes) are maintained in the Operations Runbook to keep this architecture document focused on architectural decisions.*
 

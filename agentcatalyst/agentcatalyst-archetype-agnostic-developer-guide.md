@@ -2159,12 +2159,12 @@ A: The brownfield SPA example in Section 3 uses AWS (ECS Fargate + Oracle RDS). 
 
 ## Related Documents
 
-| Document | Audience | What it covers | When to consult |
-|---|---|---|---|
-| **AgentCatalyst GA Architecture Document** | Architects, tech leads | WHY — architectural decisions, Blueprint Advisor MCP Server design (3-tool architecture), preset-based archetype adaptation, 5-layer architecture, cost model, ROI | When you need to understand why something is designed the way it is |
-| **This Developer Guide** | Developers | HOW — step-by-step walkthroughs (greenfield FNOL + brownfield microservice), spec writing, business logic capture, EvalOps workflow, troubleshooting | When you need to build something |
-| **AgentCatalyst Operations Runbook** | Platform engineering | PROCEDURES — wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix | When you need to debug platform issues or maintain the Blueprint Advisor |
-| **Governance Guardian Architecture Extension** | Architects, EA office, developers | `/catalyst.assess` design, solution package schema, scorecard format, `recordTechDebt` gate, tech debt registry | When you need to understand the governance assessment flow or troubleshoot assessment findings |
+| Document | Filename | Audience | What it covers | When to consult |
+|---|---|---|---|---|
+| **AgentCatalyst GA Architecture Document** | `agentcatalyst-architecture-archetype-agnostic.md` | Architects, tech leads | WHY — architectural decisions, Blueprint Advisor MCP Server design (3-tool architecture), preset-based archetype adaptation, 5-layer architecture, cost model, ROI | When you need to understand why something is designed the way it is |
+| **This Developer Guide** | `agentcatalyst-archetype-agnostic-developer-guide.md` | Developers | HOW — step-by-step walkthroughs (greenfield FNOL + brownfield microservice), spec writing, business logic capture, EvalOps workflow, troubleshooting | When you need to build something |
+| **AgentCatalyst Operations Runbook** | `agentcatalyst-operations-greenfield_runbook.md` | Platform engineering | PROCEDURES — wire-level Vertex AI Search APIs, search quality regression suite, acceptance telemetry, catalog quality engineering, tool lifecycle management, failure modes, escalation matrix | When you need to debug platform issues or maintain the Blueprint Advisor |
+| **Governance Guardian Architecture Extension** | `governance-guardian-architecture.md` | Architects, EA office, developers | `/catalyst.assess` design, solution package schema, scorecard format, `recordTechDebt` gate, tech debt registry | When you need to understand the governance assessment flow or troubleshoot assessment findings |
 
 ### Key cross-references from this guide to the Architecture Document
 

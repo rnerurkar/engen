@@ -7,11 +7,12 @@
 
 ### Related Documents
 
-| Document | Audience | Relationship to this runbook |
-|---|---|---|
-| **AgentCatalyst Architecture Document** (GA or agents-cli) | Architects | Provides the WHY behind each system this runbook maintains. When you need to understand why the Blueprint Advisor MCP Server is designed a certain way, consult the Architecture Document (Layer 2). |
-| **AgentCatalyst Developer Guide** (GA or agents-cli) | Developers | Provides the HOW for developers. When a developer reports an issue, this runbook tells you how to diagnose it. The Developer Guide (Section 9 and Section 11) tells developers what information to include in tickets. |
-| **Governance Guardian Architecture Extension** | Architects, EA office | Provides the design for `/catalyst.assess` and `recordTechDebt` governance gate. When Governance Guardian issues arise, consult the extension document for solution package schema, scorecard format, and Tech Debt Registry. |
+| Document | Filename | Audience | Relationship to this runbook |
+|---|---|---|---|
+| **AgentCatalyst Architecture Document** (GA) | `agentcatalyst-architecture-archetype-agnostic.md` | Architects | Provides the WHY behind each system this runbook maintains. When you need to understand why the Blueprint Advisor MCP Server is designed a certain way, consult the Architecture Document (Layer 2). |
+| **AgentCatalyst Developer Guide** (GA) | `agentcatalyst-archetype-agnostic-developer-guide.md` | Developers | Provides the HOW for developers. When a developer reports an issue, this runbook tells you how to diagnose it. The Developer Guide (Section 9 and Section 11) tells developers what information to include in tickets. |
+| **This Operations Runbook** | `agentcatalyst-operations-greenfield_runbook.md` | Platform engineering | PROCEDURES — wire-level APIs, regression testing, telemetry, tool lifecycle, failure modes, escalation matrix, EvalOps operations |
+| **Governance Guardian Architecture Extension** | `governance-guardian-architecture.md` | Architects, EA office | Provides the design for `/catalyst.assess` and `recordTechDebt` governance gate. When Governance Guardian issues arise, consult the extension document for solution package schema, scorecard format, and Tech Debt Registry. |
 
 ### Cross-reference map
 
