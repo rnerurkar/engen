@@ -18,11 +18,11 @@
 
 | Core document | Filename | Consult for |
 |---|---|---|
-| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield workflows (§2–§3), spec signal words (§4), app-blueprint.md schema (§5), confidence scores (§8), troubleshooting (§14) |
+| Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield workflows (§2–§3), spec signal words (§4), app-blueprint.md schema (§5), confidence scores (§8), troubleshooting (appendix) |
 | Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Base Blueprint Advisor MCP design (Layer 2), OAuth 2.1 + Entra ID authentication (Layer 2 Security), IaC generation via GitHub MCP Server (Layer 3), EvalOps three-layer lifecycle (Layer 4) |
-| Core Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | OAuth 2.1 / Entra ID troubleshooting (§9), Governance Guardian operations (§10), Governance Guardian wire format (§10a), MCP tool wire format (§1a) |
+| Core Operations Runbook | `csa-tsa-speckit-operating-playbook.md` | OAuth 2.1 / Entra ID troubleshooting (§9), Governance Guardian operations (§10), Governance Guardian wire format (§10a), MCP tool wire format (§1a) |
 | Governance Guardian Extension | `governance-guardian-architecture.md` | `/catalyst.assess` design, assessment flow, scorecard format, `recordTechDebt` gate, tech debt registry |
-| app-blueprint.md Template | `app-blueprint-md-template-and-fnol-example.md` | 18-section template structure, FNOL reference example, workspace file layout |
+| app-blueprint.md Template | `app-blueprint-md-template-and-fnol-example.md` | 12-section template structure, FNOL reference example, workspace file layout |
 
 ---
 
@@ -108,8 +108,6 @@ The Blueprint Advisor validates your spec for **migration readiness** before run
 - ✅ GOOD: "payment-gateway: OpenAPI spec at /docs/payment-api-v2.yaml, consumed by billing-system and reinsurer-portal. Must maintain backward compatibility."
 - ❌ BAD: "Payment API exists but no one documented it"
 - WHY: The Strangler-Fig proxy routes existing API calls to the new system. Without documented contracts, the proxy can't be configured correctly → external consumers break during migration.
-
-
 
 ---
 
@@ -223,6 +221,8 @@ Verify: in Copilot Chat, Agent mode, type `/` and confirm `speckit.constitution`
 
 ## 4. Workflow Overview
 
+![AgentCatalyst Brownfield — Detailed Component Architecture](agentcatalyst-brownfield-architecture_detailed.png)
+
 | Step | Command | What happens | Time |
 |---|---|---|---|
 | 1 | `/speckit.constitution` | Confirm enterprise principles (one-time per project) | 5 min |
@@ -244,7 +244,7 @@ The plan review step (4) is async — you don't block waiting. Continue with oth
 
 ## 5. `/speckit.constitution` — Versioned Dual Constitution
 
-→ *Architecture §13 covers the versioning model. Operating Playbook §2.6 covers enterprise constitution governance.*
+→ *Architecture doc Part II §10 covers the versioning model. Operating Playbook §2.6 covers enterprise constitution governance.*
 
 Run once per project:
 
@@ -277,7 +277,7 @@ This is the brownfield-aware override of Spec Kit's default `/speckit.specify`. 
 
 ### 6.1 Before you run it
 
-Confirm your CSA diagram is in the workspace. Supported formats: `.drawio`, `.drawio.xml`, `.mmd`, `.mermaid`. If you don't have a diagram yet, return to the CSA Agent workflow first — `/speckit.specify` requires a diagram as input.
+Confirm your CSA diagram is in the workspace. Supported formats: `.drawio.xml`. If you don't have a diagram yet, return to the CSA Agent workflow first — `/speckit.specify` requires a diagram as input.
 
 ### 6.2 Run it
 
@@ -287,7 +287,7 @@ Confirm your CSA diagram is in the workspace. Supported formats: `.drawio`, `.dr
 
 ### 6.3 What the agent does
 
-1. **Scan.** Finds `*.drawio`, `*.drawio.xml`, `*.mmd`, `*.mermaid` files in the workspace. If multiple, asks which to use.
+1. **Scan.** Finds `*.drawio.xml` files in the workspace. If multiple, asks which to use.
 2. **Parse.** Extracts components (nodes), integrations (edges), cloud boundaries (group containers), and protocol hints (edge labels).
 3. **Cluster.** Groups edges by source/target and assigns INT-001, INT-002, ... IDs.
 4. **Pre-fill.** Populates the integration blocks of `spec-template.md` with what the diagram revealed.
@@ -742,7 +742,7 @@ Agent: Stage ⑤: composition validation ✓ (14 rules checked)
 Agent: Stage ⑥: ADR compliance — 4 integrations passed ✓
 Agent: Stage ⑦: assembling blueprint + contract + diagrams...
 Agent: Blueprint ready. Writing app-blueprint.md and design_contract.json
-       to your workspace. Review the 4 Mermaid diagrams inline.
+       to your workspace. Review the 4 Draw.io diagrams inline.
 ```
 
 **What happens under the hood:**
@@ -751,10 +751,10 @@ Agent: Blueprint ready. Writing app-blueprint.md and design_contract.json
 2. The prompt file polls `blueprint_status(taskId)` every 10 seconds. Each poll returns the current pipeline stage and a progress message. The agent reports these to you in the Chat pane.
 3. The background job (Cloud Run Jobs, no timeout constraint) runs the 4-stage pipeline: ④ context-filtered substitution → ⑤ semantic pattern retrieval + LLM composition → ⑥ ADR compliance check → ⑦ blueprint + contract + diagram assembly.
 4. When the poll returns `status: "completed"`, the prompt file calls `blueprint_result(taskId)` to retrieve the output and writes all files to your workspace:
-   - **`app-blueprint.md`** — PRIMARY artifact. Human-readable structured markdown (18 sections). You edit THIS file.
+   - **`app-blueprint.md`** — PRIMARY artifact. Human-readable structured markdown (12 sections (Part I: §1-§7 governance + Part II: §8-§12 technical)). You edit THIS file.
    - **`app-blueprint.json`** — DERIVED artifact. Machine-readable JSON generated from `.md` by `assemble_blueprint`. Consumed by `/catalyst.generate`. **Never edit this file directly** — it's regenerated from `.md` automatically.
    - **`design_contract.json`** — Design contract with provenance, attestations, migration phases.
-   - **Diagram files** — `.eraser` (Eraser.io VSCode extension), `.drawio.xml` (Draw.io extension), `.svg` (Canva import), `.png` (auto-rendered, inline in markdown).
+   - **Diagram files** — `.drawio.xml` (editable in Draw.io VSCode extension) + `.png` (auto-rendered, inline in markdown).
 
 If anything fails — substitution unresolved, ADR rejected, composition invalid — the poll returns `status: "failed"` with a structured error. You get the same actionable error messages as before; they just arrive via the polling mechanism.
 
@@ -772,10 +772,8 @@ If anything fails — substitution unresolved, ADR rejected, composition invalid
 
 | Tool | VSCode Extension | File to open |
 |---|---|---|
-| **Eraser.io** | `eraser.io` extension | `*.eraser` — live visual editor |
+| **Draw.io** | `hediet.vscode-drawio` extension | `*.drawio.xml` — live visual editor |
 | **Draw.io** | `hediet.vscode-drawio` extension | `*.drawio.xml` — full draw.io editor |
-| **Canva** | Browser / desktop app | Import `*.svg` — edit visually, export back |
-| **Mermaid** | Built-in VSCode preview | Edit inline in `.md` §14 |
 
 Check in this order:
 
@@ -800,7 +798,7 @@ After reviewing the blueprint and design contract, run the governance assessment
 /catalyst.assess
 ```
 
-The coding agent reads `app-blueprint.md` (NOT `app-blueprint.json` — governance assesses the human-readable architecture, not the machine-readable JSON) and extracts all 7 artifact types by section header — the TSA component diagram PNG from §4, HA/DR views from §13, sequence diagrams from §14 (inline mermaid), NFRs from §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as an ephemeral solution_package (transport JSON, not the `.json` file), and sends to the Governance Guardian MCP Server via async MCP Tasks (same pattern as Blueprint Advisor). The `app-blueprint.json` file is untouched during governance.
+The coding agent reads `app-blueprint.md` (NOT `app-blueprint.json` — governance assesses the human-readable architecture, not the machine-readable JSON) and extracts the 7 governance sections from Part I (§1-§7): §1 Executive Summary, §2 Tech Stack, §3 Architecture Decision Log, §4 NFRs, §5 Patterns & Agent Topology, §6 Component Architecture (PNG), §7 HA/DR Views (PNGs) — packages them as an ephemeral solution_package (transport JSON, not the `.json` file), and sends to the Governance Guardian MCP Server via async MCP Tasks (same pattern as Blueprint Advisor). The `app-blueprint.json` file is untouched during governance.
 
 You see progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...". When complete, you receive a scorecard (7 categories, 0–100 each) and findings (showstopper / high / medium / low).
 
@@ -812,7 +810,7 @@ You see progress in the Chat pane: "Evaluating architecture compliance...", "Che
 
 ## 14. `/catalyst.generate`
 
-→ *Architecture §14 lists every brownfield-specific skill update.*
+→ *Architecture doc Part II §11 documents brownfield-specific CI/CD and migration phase configurations.*
 
 ```
 /catalyst.generate
@@ -927,7 +925,7 @@ Defaults are restored with `specify preset reset`.
 
 ### FM-1: No diagram found in workspace
 
-**Diagnosis:** No `.drawio`, `.drawio.xml`, `.mmd`, or `.mermaid` files in the workspace.
+**Diagnosis:** No `.drawio.xml` files in the workspace.
 **Fix:** The CSA Agent (upstream, separate system) must produce the diagram first. Return to the CSA Agent workflow, then re-run `/speckit.specify` once the diagram is in the workspace. → *Architecture §7 covers the handoff boundary.*
 
 ### FM-2: Tech substitution unresolved
@@ -1018,7 +1016,7 @@ Your job is to produce an opinionated Target State Architecture (TSA) blueprint 
 
 5. **Generate migration phases:** From plan.md sequencing, generate `migration_phases[]` with scope, coexistence mode, and rollback procedure per phase. Always start with read-path migration (lowest risk).
 
-6. **Assemble blueprint:** Generate `app-blueprint.md` (PRIMARY) + `app-blueprint.json` (DERIVED) + diagrams via Eraser.io API.
+6. **Assemble blueprint:** Generate `app-blueprint.md` (PRIMARY) + `app-blueprint.json` (DERIVED) + diagrams via Draw.io headless service.
 
 CONSTRAINTS:
 - NEVER recommend technologies not in the company's approved tech radar.
@@ -1373,16 +1371,16 @@ Coding Agent: Polling blueprint_status...
   → Stage: recommending — "Discovering A2A agents in API Hub..."
   → Stage: checking — "Validating ADR compliance (6 ADR attestations)..."
   → Stage: assembling — "Generating 3 migration phases (strangler-fig)..."
-  → Stage: assembling — "Rendering diagrams via Eraser.io API..."
+  → Stage: assembling — "Rendering diagrams via Draw.io headless service..."
   → Stage: assembling — "Generating app-blueprint.json from .md..."
   → Stage: completed
 
 Coding Agent: ✓ blueprint_result retrieved. Writing to workspace:
-  → app-blueprint.md (PRIMARY — 18 sections, 412 lines, 15 integrations)
+  → app-blueprint.md (PRIMARY — 12 sections (Part I: §1-§7 governance + Part II: §8-§12 technical), 412 lines, 15 integrations)
   → app-blueprint.json (DERIVED — machine-readable, 245 lines)
   → design_contract.json (migration_phases[], coexistence_constraints[], csa_to_tsa_mappings[])
-  → portal-component-diagram.png + .eraser + .drawio.xml + .svg
-  → portal-hadr-diagram.png + .eraser + .drawio.xml + .svg
+  → portal-component-diagram.png + .drawio.xml
+  → portal-hadr-diagram.png + .drawio.xml
 
 Blueprint ready. Review app-blueprint.md — pay attention to:
   ⚠ 2 integrations flagged requires_review (LDAP: 0.80, SFTP: 0.85)

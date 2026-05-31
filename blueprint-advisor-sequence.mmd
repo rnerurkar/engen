@@ -34,10 +34,25 @@ sequenceDiagram
     end
 
     rect rgb(209, 242, 235)
-    Note over BG,FS: Background — 4-stage pipeline (1–30 min)
-    BG->>FS: status → "substituting"
-    BG->>TS: map_current_to_target (per integration)
-    TS-->>BG: tech_substitutions[]
+    Note over BG,FS: Background — Step 0 + 4-stage pipeline (1–30 min)
+    BG->>FS: status → "validating"
+    Note over BG: validate_spec — 8-signal migration readiness gate
+    BG->>TS: verify every CSA tech has approved TSA mapping + confidence score
+    TS-->>BG: tech_coverage: pass/warn/block per integration
+    BG->>TR: verify A2A agents for partner integrations (Apigee API Hub)
+    TR-->>BG: a2a_availability: pass/warn/block per partner
+    BG->>ADR: pre-check spec decisions against coexistence + rollback ADRs
+    ADR-->>BG: adr_pre_compliance: pass/warn/block per integration
+    BG->>BG: cross-integration graph analysis (circular deps, conflicting coexistence, phase ordering)
+    BG->>BG: compute migration_readiness_score (0–100) + phase_assignment_preview
+
+    alt Any signal = BLOCK
+        BG->>FS: status → "failed" (migration_readiness_score + block reason + guidance)
+    else All signals = PASS or WARN
+        Note over BG: WARN → continue with risk flags on affected integrations
+        BG->>FS: status → "substituting"
+        BG->>TS: map_current_to_target (per integration)
+        TS-->>BG: tech_substitutions[]
     BG->>FS: status → "recommending"
     BG->>PC: hybrid_search (per integration)
     PC-->>BG: candidate_patterns[]
@@ -60,6 +75,7 @@ sequenceDiagram
     BG->>BG: assemble app-blueprint.md (18 sections) + generate app-blueprint.json (derived, machine-readable)
     BG->>BG: bundle: .md + .json + diagrams (.eraser + .drawio + .svg + .png)
     BG->>FS: store result, status → "completed"
+    end
     end
 
     rect rgb(213, 245, 227)

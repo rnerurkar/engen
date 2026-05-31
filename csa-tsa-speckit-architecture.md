@@ -23,7 +23,7 @@ The brownfield document set extends (does not replace) the core AgentCatalyst pl
 |---|---|---|
 | Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Blueprint Advisor MCP wire format (Layer 2), MCP Tasks async protocol design, base overlay skill architecture (Layer 3), EvalOps three-layer lifecycle (Layer 4) |
 | Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield agentic/microservice workflows (§2–§3), spec signal words (§4), app-blueprint.md schema (§5), confidence scores (§8) |
-| Core Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | Vertex AI Search wire-level API calls (§1), MCP tool wire format (§1a), search quality regression suite (§2), acceptance telemetry (§3), catalog backup/DR (§4a), shared MCP Server operations (§9) |
+| Core Operations Runbook | `csa-tsa-speckit-operating-playbook.md` | Vertex AI Search wire-level API calls (§1), MCP tool wire format (§1a), search quality regression suite (§2), acceptance telemetry (§3), catalog backup/DR (§4a), shared MCP Server operations (§9) |
 
 ---
 
@@ -54,7 +54,7 @@ The brownfield document set extends (does not replace) the core AgentCatalyst pl
 
 This document is the architectural specification for AgentCatalyst Brownfield. Its audience is enterprise architects, platform engineers, and senior developers who need to understand *why* the design is shaped the way it is before they implement, extend, or operate it.
 
-AgentCatalyst Brownfield is an additive extension on top of the existing AgentCatalyst platform. The existing platform (greenfield archetypes, skill mechanism, constitution, EvalOps three-layer architecture, GitHub→Harness CI/CD path) remains in place with specific brownfield adaptations cataloged in §14. The brownfield extension adds: a CSA diagram-based integration extractor, a new spec template oriented around integration inventory, a new plan template with async review, a four-tool Blueprint Advisor, a design-contract lifecycle with refresh, runtime compliance verification, and five peripheral data stores.
+AgentCatalyst Brownfield is an additive extension on top of the existing AgentCatalyst platform. The existing platform (greenfield archetypes, skill mechanism, constitution, EvalOps three-layer architecture, GitHub→Harness CI/CD path) remains in place with specific brownfield adaptations documented inline in Part I §5 (Patterns & Agent Topology) and Part II §11 (CI/CD & EvalOps). The brownfield extension adds: a CSA diagram-based integration extractor, a new spec template oriented around integration inventory, a new plan template with async review, a four-tool Blueprint Advisor, a design-contract lifecycle with refresh, runtime compliance verification, and five peripheral data stores.
 
 ---
 
@@ -68,7 +68,7 @@ Spec Kit is GitHub's open-source toolkit for Spec-Driven Development. It owns th
 
 AgentCatalyst Brownfield pins to a specific Spec Kit version. The pinned version is declared in `preset.yml` under `speckit_version`. Upgrades are gated through the preset release pipeline (Operating Playbook §2.2) — a Spec Kit upgrade is treated identically to a major-version preset change, requiring full CI/CD validation and manual platform-engineering approval before rollout.
 
-**Contingency:** If Spec Kit introduces a breaking change that cannot be accommodated, the preset can operate in "pinned-fork" mode, referencing an internal fork of the Spec Kit CLI for up to 6 months while the platform team resolves the incompatibility. This fork is maintained in `github.company.com/platform/speckit-fork` and is a designated technical-debt item reviewed at every quarterly governance cycle (Operating Playbook §14).
+**Contingency:** If Spec Kit introduces a breaking change that cannot be accommodated, the preset can operate in "pinned-fork" mode, referencing an internal fork of the Spec Kit CLI for up to 6 months while the platform team resolves the incompatibility. This fork is maintained in `github.company.com/platform/speckit-fork` and is a designated technical-debt item reviewed at every quarterly governance cycle (Operating Playbook troubleshooting section).
 
 → *§16 details the framework dependency risk assessment and contingency plan.*
 
@@ -93,22 +93,22 @@ AgentCatalyst Brownfield (Spec Kit preset — this document)
 ├── overrides: /speckit.plan with /speckit.plan.draft + /speckit.plan.review
 ├── adds: /catalyst.blueprint (4-tool brownfield Blueprint Advisor)
 ├── adds: /catalyst.assess (Governance Guardian assessment — see Governance Guardian Architecture Extension)
-├── adds: /catalyst.generate (brownfield-aware, updated skills + governance gate — see §14)
+├── adds: /catalyst.generate (brownfield-aware, updated skills + governance gate — see Part II §11)
 ├── adds: /catalyst.refresh (design-contract lifecycle refresh — see §11)
-└── reuses: Spec Kit CLI, helper scripts, constitution mechanism (versioned — see §13)
+└── reuses: Spec Kit CLI, helper scripts, constitution mechanism (versioned — see Part II §10 Security & Identity)
 ```
 
 ### Command-namespace mapping
 
 | Command | Source | Brownfield behavior |
 |---|---|---|
-| `/speckit.constitution` | Spec Kit built-in | Preset ships versioned dual constitution (§13) |
+| `/speckit.constitution` | Spec Kit built-in | Preset ships versioned dual constitution (Part II §10 Security & Identity) |
 | `/speckit.specify` | Spec Kit built-in, preset override | csa-extractor agent parses CSA diagram + CSA-inventory template |
 | `/speckit.plan.draft` | AgentCatalyst Brownfield custom | Developer's first-pass r-factor + cutover decisions |
 | `/speckit.plan.review` | AgentCatalyst Brownfield custom | Async EA/architect review with structured comments |
 | `/catalyst.blueprint` | AgentCatalyst custom | 4-tool brownfield Blueprint Advisor (§9) |
 | `/catalyst.assess` | AgentCatalyst custom | Governance Guardian assessment — extracts artifacts from app-blueprint.md, returns scorecard + findings (see Governance Guardian Architecture Extension) |
-| `/catalyst.generate` | AgentCatalyst custom, brownfield-updated | Governance gate (recordTechDebt → stop/resume) + skill-guided generation with migration-phase awareness (§14) |
+| `/catalyst.generate` | AgentCatalyst custom, brownfield-updated | Governance gate (recordTechDebt → stop/resume) + skill-guided generation with migration-phase awareness (Part II §11 CI/CD & EvalOps) |
 | `/catalyst.refresh` | AgentCatalyst Brownfield custom | Re-runs Blueprint Advisor, diffs design contract (§11) |
 | `/speckit.clarify` | Spec Kit built-in | Reused unchanged |
 | `/speckit.analyze` | Spec Kit built-in | Reused unchanged |
@@ -146,7 +146,7 @@ The transformation problem — moving an existing on-prem application onto AWS �
 
 **P4 — Multi-label functional categorization.** The spec captures `functional_category[]` as a multi-label tag set plus a capability vector.
 
-**P5 — Transition is a first-class artifact.** The Blueprint Advisor emits both an end-state and a transition sequence diagram. Migration phases are explicit in the design contract. → *§9.5 details `assemble_blueprint` diagram generation via Eraser.io API.*
+**P5 — Transition is a first-class artifact.** The Blueprint Advisor emits both an end-state and a transition sequence diagram. Migration phases are explicit in the design contract. → *§9.5 details `assemble_blueprint` diagram generation via Draw.io headless service.*
 
 **P6 — Audit attestation is generated, not added later.** Every `csa_to_tsa_mappings[]` entry carries `adr_attestations[]`. Verified at design time (§9.4), at commit time (§11), and at runtime (§12).
 
@@ -160,9 +160,11 @@ The transformation problem — moving an existing on-prem application onto AWS �
 
 ![AgentCatalyst Brownfield — End-to-End Component Architecture](agentcatalyst-brownfield-architecture.png)
 
+![AgentCatalyst Brownfield — Detailed Component Architecture](agentcatalyst-brownfield-architecture_detailed.png)
+
 The diagram above shows the complete flow from CSA Agent through Blueprint Advisor (OAuth 2.1 + Entra ID), Governance Guardian (assess-fix-reassess loop), governance gate (recordTechDebt → stop/resume), to brownfield-aware code generation via GitHub MCP Server, Harness CI/CD, and runtime compliance.
 
-**Read this diagram top-down.** The CSA Agent (⓪, upstream, separate system) produces a validated CSA diagram and places it in the workspace. The coding agent's `csa-extractor` parses the diagram and pre-fills `spec.md` (①). The developer completes a two-stage plan (②), then invokes the Blueprint Advisor (③). Inside the MCP server, four tools run in a fixed order: ④ deterministic context-filtered substitution, ⑤ semantic pattern retrieval and LLM composition (the only LLM stage), ⑥ deterministic ADR compliance enforcement, and ⑦ deterministic blueprint assembly (markdown + `app-blueprint.json` + Eraser.io diagrams: `.eraser` + `.drawio.xml` + `.svg` + PNG + mermaid). The output (⑧) is an `app-blueprint.md` (PRIMARY) plus `app-blueprint.json` (DERIVED, machine-readable) plus a design contract with attestations and inline diagrams. The developer reviews (⑧) using Eraser.io / Draw.io / Canva for diagram editing, runs `/catalyst.assess` for governance assessment (⑧a — reads `.md` NOT `.json`, iterative until no showstoppers), then generates brownfield-aware code with a governance gate (⑨ — recordTechDebt → stop/resume, auto-regenerates `.json` from `.md` if changed, reads `.json` for code generation), and can refresh the contract (🔄) at any time if peripherals have changed. The IaC generation reads company Terraform module repos via the GitHub MCP Server. Runtime compliance closes the loop between deployment and attestation. The peripheral systems band is maintained by Platform Engineering and consumed read-only at runtime.
+**Read this diagram top-down.** The CSA Agent (⓪, upstream, separate system) produces a validated CSA diagram and places it in the workspace. The coding agent's `csa-extractor` parses the diagram and pre-fills `spec.md` (①). The developer completes a two-stage plan (②), then invokes the Blueprint Advisor (③). Inside the MCP server, four tools run in a fixed order: ④ deterministic context-filtered substitution, ⑤ semantic pattern retrieval and LLM composition (the only LLM stage), ⑥ deterministic ADR compliance enforcement, and ⑦ deterministic blueprint assembly (markdown + `app-blueprint.json` + Draw.io diagrams: `.drawio.xml` (editable) + `.png` (rendered) ). The output (⑧) is an `app-blueprint.md` (PRIMARY) plus `app-blueprint.json` (DERIVED, machine-readable) plus a design contract with attestations and inline diagrams. The developer reviews (⑧) using Draw.io VSCode extension for diagram editing, runs `/catalyst.assess` for governance assessment (⑧a — reads Part I (§1-§7) only, NOT .json, NOT Part II, iterative until no showstoppers), then generates brownfield-aware code with a governance gate (⑨ — recordTechDebt → stop/resume, auto-regenerates `.json` from `.md` if changed, reads `.json` for code generation), and can refresh the contract (🔄) at any time if peripherals have changed. The IaC generation reads company Terraform module repos via the GitHub MCP Server. Runtime compliance closes the loop between deployment and attestation. The peripheral systems band is maintained by Platform Engineering and consumed read-only at runtime.
 
 ---
 
@@ -190,7 +192,7 @@ The developer invokes `/catalyst.blueprint`. The command packages `spec.md` and 
 
 VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls. A synchronous call that blocks for the full blueprint generation (1–30 minutes depending on integration count) would be killed immediately. The Blueprint Advisor therefore exposes three MCP tools — `blueprint_start`, `blueprint_status`, `blueprint_result` — instead of one blocking call. The prompt file orchestrates the polling loop: start the task, poll for status at the server-recommended interval, report progress to the developer in the Chat pane, and retrieve the result when complete. Each individual MCP call completes in under 2 seconds. The coding agent never touches Vertex AI Search, the ADR store, or the LlmAgent directly. The MCP server remains the single point of governance. → *§9 details the three-tool async interface and the internal 4-stage pipeline.*
 
-### ③a validate_spec — Brownfield Migration Readiness Gate
+### ③a validate_spec — 8-Signal Brownfield Migration Readiness Gate
 
 Before the RAG pipeline runs, the Blueprint Advisor validates that the spec contains the signals needed for a SAFE migration. Brownfield validation is fundamentally different from greenfield — the core question is not "do we have enough signals to compose the right architecture?" but "do we have enough signals to plan a safe migration with rollback at every stage?"
 
@@ -236,7 +238,7 @@ Layer 1: LOCAL (SpecKit Preset — during /speckit.specify capture)
                           ↓ spec.md
 Layer 2: SERVER-SIDE (Blueprint Advisor — Step 0 of blueprint_start)
   ┌──────────────────────────────────────────────────────────┐
-  │ validate_spec runs inside MCP Server with access to:      │
+  │ validate_spec (8-signal migration readiness matrix) runs inside MCP Server with access to:      │
   │ - Tech Substitution Table (verify EVERY tech has approved │
   │   TSA mapping with confidence score)                      │
   │ - Apigee API Hub (verify A2A agents for partners)         │
@@ -325,15 +327,15 @@ The composed pattern tree from ⑤ is checked against the ADR Constraint Store. 
 
 ### ⑦ assemble_blueprint — Deterministic blueprint and diagram generation
 
-The final tool takes the substitutions, composed patterns, compliance attestations, and matched IaC modules, and assembles two artifacts: **`app-blueprint.md`** (PRIMARY — structured markdown with inline PNG references and mermaid code) and **`app-blueprint.json`** (DERIVED — machine-readable JSON generated from the `.md` sections, consumed by `/catalyst.generate`). It also produces base64-encoded component and HA/DR diagram PNGs, Eraser.io source files (`.eraser`, editable in the Eraser.io VSCode extension), drawio XML files (`.drawio.xml`, editable in the Draw.io VSCode extension), SVG vector exports (`.svg`, importable into Canva), and `design_contract.json` with full provenance. Component and HA/DR diagrams are rendered via **Eraser.io API**. Sequence diagrams (end-state, transition) are inline mermaid. When cross-cloud topology is selected, it injects a Phase-0 entry with an external-team coordination checklist. All assembly is deterministic — no LLM. → *§9.5 details the assembly logic and diagram generation. See `app-blueprint-md-template-and-fnol-example.md` for the complete 18-section template structure and FNOL reference example.*
+The final tool takes the substitutions, composed patterns, compliance attestations, and matched IaC modules, and assembles two artifacts: **`app-blueprint.md`** (PRIMARY — structured markdown with inline PNG references for governance diagrams) and **`app-blueprint.json`** (DERIVED — machine-readable JSON generated from the `.md` sections, consumed by `/catalyst.generate`). It also produces base64-encoded component and HA/DR diagram PNGs, Draw.io source files (`.drawio.xml`, editable in the Draw.io VSCode extension), and `design_contract.json` with full provenance. Component and HA/DR diagrams are rendered via **Draw.io headless service**.  When cross-cloud topology is selected, it injects a Phase-0 entry with an external-team coordination checklist. All assembly is deterministic — no LLM. → *§9.5 details the assembly logic and diagram generation. See `app-blueprint-md-template-and-fnol-example.md` for the complete 12-section template structure and FNOL reference example.*
 
 ### ⑧ Developer reviews `app-blueprint.md` + `design_contract.json`
 
-The developer reviews the blueprint and the design contract in VSCode. Mermaid diagrams render inline in VSCode markdown preview. Component diagrams are inline PNGs with editable source files alongside — `.eraser` (Eraser.io VSCode extension), `.drawio.xml` (Draw.io extension), or `.svg` (Canva import). The developer edits whichever format they prefer. Confidence scores, alternatives, and `requires_review` flags are visible per integration. The developer edits the blueprint `.md` if needed (the `.json` is auto-regenerated from `.md` by `assemble_blueprint` — never edit `.json` directly). The developer may re-invoke `/catalyst.blueprint` to regenerate after spec or plan edits. The design contract is emitted with `lifecycle: "LIVE"`. → *Developer Guide §13 covers the review checklist.*
+The developer reviews the blueprint and the design contract in VSCode. Draw.io diagrams render inline in VSCode markdown preview. Component diagrams are inline PNGs with editable source files alongside — `.drawio.xml` (editable in the Draw.io VSCode extension). The developer edits whichever format they prefer. Confidence scores, alternatives, and `requires_review` flags are visible per integration. The developer edits the blueprint `.md` if needed (the `.json` is auto-regenerated from `.md` by `assemble_blueprint` — never edit `.json` directly). The developer may re-invoke `/catalyst.blueprint` to regenerate after spec or plan edits. The design contract is emitted with `lifecycle: "LIVE"`. → *Developer Guide covers the review checklist in the blueprint review section.*
 
 ### ⑧a /catalyst.assess — Governance assessment (iterative)
 
-After reviewing the blueprint, the developer runs `/catalyst.assess`. The coding agent reads `app-blueprint.md` (NOT `app-blueprint.json` — the Governance Guardian assesses the human-readable architecture, not the machine-readable JSON) and extracts all 7 artifact types directly from it — the TSA component diagram PNG from §4, HA/DR views from §13, sequence diagrams from §14 (inline mermaid), NFRs from §10, architecture decisions log from §11, tech stack from §12, and patterns from §2 — packages them as an ephemeral **solution_package** (transport JSON sent over MCP — not the same as the persisted `app-blueprint.json` file), and sends to the **Governance Guardian MCP Server** via the same async MCP Tasks pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). The `app-blueprint.json` file in the workspace is not read, not sent, and not modified during governance assessment — it exists solely for `/catalyst.generate` to consume later. The EA assessment engine evaluates the solution against enterprise standards (black box to AgentCatalyst). The developer sees progress in the Chat pane and receives a scorecard (7 categories) + findings (showstopper / high / medium / low).
+After reviewing the blueprint, the developer runs `/catalyst.assess`. The coding agent reads `app-blueprint.md` (NOT `app-blueprint.json` — the Governance Guardian assesses the human-readable architecture, not the machine-readable JSON) and extracts the 7 governance sections from Part I (§1-§7) — the 7 governance sections: §1 Executive Summary, §2 Tech Stack, §3 Architecture Decision Log, §4 NFRs, §5 Patterns & Agent Topology, §6 Component Architecture (PNG diagram), §7 HA/DR Views (PNG diagrams) — packages them as an ephemeral **solution_package** (transport JSON sent over MCP — not the same as the persisted `app-blueprint.json` file), and sends to the **Governance Guardian MCP Server** via the same async MCP Tasks pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). The `app-blueprint.json` file in the workspace is not read, not sent, and not modified during governance assessment — it exists solely for `/catalyst.generate` to consume later. The EA assessment engine evaluates the solution against enterprise standards (black box to AgentCatalyst). The developer sees progress in the Chat pane and receives a scorecard (7 categories) + findings (showstopper / high / medium / low).
 
 If showstoppers exist, the developer fixes them (e.g., adds cross-region DR for Aurora PostgreSQL per ADR-205) and re-runs `/catalyst.assess`. This assess-fix-reassess loop continues until no showstoppers remain. Non-showstopper findings are acceptable and will be recorded as tech debt at the next step.
 
@@ -341,11 +343,11 @@ If showstoppers exist, the developer fixes them (e.g., adds cross-region DR for 
 
 ### ⑨ /catalyst.generate — Brownfield-aware skill-guided generation (with governance gate)
 
-→ *§14 lists every skill updated and every greenfield asset modified for brownfield.*
+→ *Part II §11 documents every brownfield-specific CI/CD and migration phase configuration.*
 
 **Governance gate (Step 0):** Before the generation pipeline runs, the coding agent calls `recordTechDebt` on the Governance Guardian MCP Server. This tool looks up the latest assessment findings and classifies each as showstopper or tech_debt. If any showstoppers remain → `{ signal: "stop" }` — generation is blocked, the developer must fix and re-assess. If no showstoppers → `{ signal: "resume", tech_debt_id: "TD-2026-0142" }` — remaining findings are recorded as tech debt and generation proceeds. If no assessment exists, the developer is warned but can skip.
 
-**Auto-regeneration (Step 0a):** After the governance gate passes, the coding agent checks whether `app-blueprint.md` was modified since the last `assemble_blueprint` call (by comparing the `.md` file's hash against `blueprint_hash` stored in `app-blueprint.json`). If the hashes differ, the coding agent calls `assemble_blueprint` first to regenerate `app-blueprint.json` from the edited `.md` + re-render diagrams via Eraser.io API. This ensures the JSON always reflects the latest `.md` edits.
+**Auto-regeneration (Step 0a):** After the governance gate passes, the coding agent checks whether `app-blueprint.md` was modified since the last `assemble_blueprint` call (by comparing the `.md` file's hash against `blueprint_hash` stored in `app-blueprint.json`). If the hashes differ, the coding agent calls `assemble_blueprint` first to regenerate `app-blueprint.json` from the edited `.md` + re-render diagrams via Draw.io headless service. This ensures the JSON always reflects the latest `.md` edits.
 
 **Generation (Steps 1–18):** Skills read `app-blueprint.json` (machine-readable) and consume `migration_phases[]` and `coexistence_constraints[]` from the design contract. Generated code includes feature-flag scaffolding for strangler-fig and dual-publish patterns, Phase-0 cross-cloud plumbing checklists when PrivateLink+PSC is selected, and AWS Config rules derived from ADR attestations for runtime compliance verification. The IaC generation skill reads company Terraform module interfaces from GitHub repos via the **GitHub MCP Server**, maps blueprint fields to module variables deterministically, and generates compliant Terraform that references company modules (never raw `aws_*` resources). → *See greenfield Architecture Document, Layer 3 for the full IaC generation flow via GitHub MCP Server.*
 
@@ -367,7 +369,7 @@ The CSA Agent and AgentCatalyst Brownfield are separate systems with a clean han
 
 | Responsibility | Owner | Deliverable |
 |---|---|---|
-| Produce an accurate CSA diagram from source code, infra configs, manifests, and human interviews | **CSA Agent** (separate system) | `.drawio.xml` or `.mmd` file in the workspace |
+| Produce an accurate CSA diagram from source code, infra configs, manifests, and human interviews | **CSA Agent** (separate system) | `.drawio.xml` file in the workspace |
 | Extract integration points from the diagram and pre-fill `spec.md` | **AgentCatalyst Brownfield** (`csa-extractor` agent via `/speckit.specify`) | `spec.md` |
 
 AgentCatalyst Brownfield does NOT perform source-code scanning, infra-config analysis, or structured interviews. Those are CSA Agent responsibilities. If the CSA Agent has not yet run, or has produced a diagram the developer considers incomplete, the developer must return to the CSA Agent workflow before running `/speckit.specify`.
@@ -456,7 +458,7 @@ The MCP interface exposes **three async tools** using the MCP Tasks primitive (s
 |---|---|---|
 | `blueprint_start` | Validates input, creates a background task, returns `taskId` | < 2 seconds |
 | `blueprint_status` | Returns current pipeline stage and progress message | < 1 second |
-| `blueprint_result` | Returns JSON: `markdown` (app-blueprint.md), `blueprint_json` (app-blueprint.json — derived, machine-readable), `diagrams` (base64 PNGs + `.eraser` source + `.drawio.xml` + `.svg`), `design_contract`, hashes | < 1 second |
+| `blueprint_result` | Returns JSON: `markdown` (app-blueprint.md), `blueprint_json` (app-blueprint.json — derived, machine-readable), `diagrams` (base64 PNGs + `.drawio.xml` source), `design_contract`, hashes | < 1 second |
 
 Internally, the background task runs the 4-stage pipeline described in §9.4–§9.7. The background work executes on **Cloud Run Jobs** (no request-timeout constraint), triggered by `blueprint_start` via Cloud Tasks. Task state (taskId, status, progress, result) is stored in AlloyDB with a 24-hour retention enforced by a scheduled Cloud Scheduler cleanup job (hourly: `DELETE FROM blueprint_tasks WHERE created_at < NOW() - INTERVAL '24 hours'`).
 
@@ -482,7 +484,7 @@ sequenceDiagram
     participant PC as Pattern Catalog
     participant ADR as ADR Constraint Store
     participant IAC as IaC Module Registry
-    participant ER as Eraser.io API
+    participant ER as Draw.io headless service
     participant FS as Task Store (AlloyDB)
 
     Note over Agent,MCP: Phase 1 — Start (< 2s, within Copilot timeout)
@@ -514,11 +516,11 @@ sequenceDiagram
     BG->>FS: status → "assembling"
     BG->>IAC: resolve_modules
     IAC-->>BG: module_refs[]
-    BG->>ER: render component + HA/DR diagrams (Eraser.io DSL → .eraser + .png)
-    ER-->>BG: diagram PNGs + .eraser source files
-    BG->>BG: generate .drawio.xml + .svg from Eraser.io DSL
-    BG->>BG: assemble app-blueprint.md (18 sections) + generate app-blueprint.json (derived)
-    BG->>BG: bundle: .md + .json + contract + diagrams (.eraser + .drawio + .svg + .png) + mermaid
+    BG->>ER: render component + HA/DR diagrams (Draw.io diagram source → .drawio.xml + .png)
+    ER-->>BG: diagram PNGs + .drawio.xml source files
+    BG->>BG: generate .drawio.xml from Draw.io diagram source
+    BG->>BG: assemble app-blueprint.md (12 sections (Part I: §1-§7 governance + Part II: §8-§12 technical)) + generate app-blueprint.json (derived)
+    BG->>BG: bundle: .md + .json + contract + diagrams (.drawio.xml + .png) 
     BG->>FS: store result, status → "completed"
 
     Note over Agent,MCP: Phase 3 — Retrieve (< 1s)
@@ -527,7 +529,7 @@ sequenceDiagram
     Agent->>MCP: blueprint_result(taskId)
     MCP->>FS: read result
     FS-->>MCP: result bundle
-    MCP-->>Agent: app-blueprint.md + app-blueprint.json + design_contract.json + diagrams (.eraser + .drawio + .svg + .png)
+    MCP-->>Agent: app-blueprint.md + app-blueprint.json + design_contract.json + diagrams (.drawio.xml + .png)
 ```
 
 ### 9.3.1 Prompt-file orchestration
@@ -775,10 +777,10 @@ The design contract is emitted with `lifecycle: "LIVE"` and version stamps for a
     "compliance_regimes": ["SOX", "internal-data-protection-v3"]
   },
   "diagrams": {
-    "component_endstate": "<mermaid>",
-    "sequence_endstate": "<mermaid>",
-    "sequence_transition": "<mermaid>",
-    "infrastructure": "<mermaid>"
+    "component_diagram": "diagrams/component-architecture.png",
+    "hadr_diagrams": ["diagrams/hadr-provision.png", "diagrams/hadr-ha.png"],
+    "migration_phases_diagram": "diagrams/migration-phases.png",
+    "coexistence_diagram": "diagrams/coexistence-topology.png"
   }
 }
 ```
@@ -1214,11 +1216,11 @@ The per-call compute cost (~$0.11/blueprint) represents ~2% of total platform TC
 | Composition validation fails | Tool ⑤ sub-step | Re-architect plan | Dev Guide §18 FM-5 |
 | Design contract stale | Pre-commit hook detects peripheral version drift | `/catalyst.refresh` | Dev Guide §15 |
 | Design contract expired | Pre-commit hook blocks; Harness gate blocks | Mandatory refresh | Dev Guide §15 |
-| Runtime compliance violation | AWS Config rule fires | Pager → investigation | Playbook §13 |
+| Runtime compliance violation | AWS Config rule fires | Pager → investigation | Playbook troubleshooting section |
 | Cross-cloud plumbing incomplete | Phase-0 exit criteria not met | Integration blocked until verified | Dev Guide §18 FM-6 |
 | Spec Kit breaking change | Preset CI fails after upgrade | Pin to previous version; activate fork | Playbook §2.3 |
 | Blueprint task timeout | `blueprint_status` returns `working` for >30 min | Developer cancels and re-runs with simplified spec; investigate slow pipeline stage | Dev Guide §18 FM-9 |
-| Task store unavailable | `blueprint_start` fails with AlloyDB connection error | Failover to DR region; AlloyDB cross-region replica auto-promotes | Playbook §13 |
+| Task store unavailable | `blueprint_start` fails with AlloyDB connection error | Failover to DR region; AlloyDB cross-region replica auto-promotes | Playbook troubleshooting section |
 | Constitution drift | Pre-commit hook detects contradiction | Developer resolves project rule | Dev Guide §5 |
 
 ---
@@ -1265,7 +1267,7 @@ This appendix contains every template file in the `agentcatalyst-brownfield` pre
 └── constitution.md                         ← C1: Non-negotiable rules (brownfield-specific additions)
 ```
 
-→ *`app-blueprint.md` template (F1) is shared with the greenfield preset — see `app-blueprint-md-template-and-fnol-example.md`. Brownfield blueprints use the same 18 sections with brownfield-specific content (migration_phases[], coexistence_constraints[], Strangler-Fig patterns).*
+→ *`app-blueprint.md` template (F1) is shared with the greenfield preset — see `app-blueprint-md-template-and-fnol-example.md`. Brownfield blueprints use the same 12 sections (Part I: §1-§7 governance + Part II: §8-§12 technical) with brownfield-specific content (migration_phases[], coexistence_constraints[], Strangler-Fig patterns).*
 
 ---
 
@@ -1485,10 +1487,10 @@ description: Parse CSA diagram and extract current-state integrations into spec.
 # /speckit.specify
 
 ## What this command does
-Reads a CSA diagram (.drawio.xml or .mmd) from the workspace, parses it to extract current-state integrations, and pre-fills spec.md §4 with the integration inventory.
+Reads a CSA diagram (.drawio.xml) from the workspace, parses it to extract current-state integrations, and pre-fills spec.md §4 with the integration inventory.
 
 ## Steps
-1. Find the CSA diagram in the workspace (`.drawio.xml` or `.mmd` file).
+1. Find the CSA diagram in the workspace (`.drawio.xml` file).
 2. Parse the diagram to extract: system names, connection types (sync/async/batch), protocols (SOAP/REST/MQ/file), owning teams.
 3. Read `spec-template.md` and create `spec.md` with §4 pre-filled:
    ```
@@ -1503,7 +1505,7 @@ Reads a CSA diagram (.drawio.xml or .mmd) from the workspace, parses it to extra
 ## Rules
 - Extract ALL connections from the CSA diagram — do not filter.
 - Mark each with `requires_review: true` for developer verification.
-- If the diagram format is unrecognized, ask the developer to provide a drawio or mermaid version.
+- If the diagram format is unrecognized, ask the developer to provide a .drawio.xml version.
 ```
 
 ---
@@ -1768,7 +1770,7 @@ The overlay skills (`company-terraform`, `company-observability`, `company-cicd`
 
 ## Supported formats
 - `.drawio.xml` — parse XML for `<mxCell>` elements with `style="shape=..."` and `source`/`target` edges
-- `.mmd` (mermaid) — parse flowchart/sequence nodes and edges
+- `.drawio.xml` — parse Draw.io XML nodes and edges
 
 ## Common CSA element types
 | Element | Drawio style | Mermaid syntax | Maps to |

@@ -9,7 +9,7 @@
 |---|---|---|
 | Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Layer 2 async MCP Tasks pattern (same pattern used here), Layer 2 Security (OAuth 2.1 + Entra ID authentication — shared by both MCP Servers), Layer 3 IaC generation flow, Task Store tenant isolation |
 | Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | §2.7a `/catalyst.assess` (developer-facing experience), §2.8 governance gate in `/catalyst.generate`, troubleshooting |
-| Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | §10 Governance Guardian Operations (health checks, deployment, Cloud Tasks queue, AlloyDB maintenance, EA assessment engine SLA), §10a wire format, authentication troubleshooting |
+| Operations Runbook | `csa-tsa-speckit-operating-playbook.md` | §10 Governance Guardian Operations (health checks, deployment, Cloud Tasks queue, AlloyDB maintenance, EA assessment engine SLA), §10a wire format, authentication troubleshooting |
 | app-blueprint.md Template | `app-blueprint-md-template-and-fnol-example.md` | Template structure (18 sections), FNOL example, how `/catalyst.assess` extracts artifacts from each section |
 
 ---

@@ -19,7 +19,6 @@
 
 | Core document | Filename | Consult for |
 |---|---|---|
-| Core Operations Runbook | `agentcatalyst-operations-runbook-both-options.md` | Vertex AI Search wire-level API (§1), MCP tool wire format (§1a), search quality regression suite (§2), shared MCP Server operations (§9), authentication troubleshooting (§9 OAuth 2.1 / Entra ID), Governance Guardian operations (§10), Governance Guardian wire format (§10a) |
 | Core Architecture | `agentcatalyst-architecture-archetype-agnostic.md` | Base Blueprint Advisor design (Layer 2), OAuth 2.1 + Entra ID authentication (Layer 2 Security), IaC generation via GitHub MCP Server (Layer 3), overlay skill architecture (Layer 3), EvalOps (Layer 4) |
 | Core Developer Guide | `agentcatalyst-archetype-agnostic-developer-guide.md` | Greenfield workflows (§2–§3), spec signal words (§4), app-blueprint.md schema (§5), `/catalyst.assess` (§2.7a), governance gate (§2.8) |
 
@@ -79,7 +78,7 @@ github.company.com/platform/agentcatalyst-brownfield-preset/
 ├── scripts/
 │   └── package_blueprint_request.py
 ├── tests/
-│   ├── fixtures/                     ← sample drawio/mermaid + expected spec output
+│   ├── fixtures/                     ← sample drawio + expected spec output
 │   └── e2e/
 └── CHANGELOG.md
 ```
@@ -89,7 +88,7 @@ github.company.com/platform/agentcatalyst-brownfield-preset/
 | Stage | What | Gate |
 |---|---|---|
 | Lint | Validate frontmatter in all .prompt.md, .agent.md, .instructions.md | Schema pass |
-| Fixture tests | Diagram extractor against test drawio/mermaid files | Match expected spec fields |
+| Fixture tests | Diagram extractor against test drawio files | Match expected spec fields |
 | Compatibility | `specify init` against copilot, claude-code, gemini, cursor | All 4 succeed |
 | Spec Kit version | Verify pinned Spec Kit version matches preset.yml | Exact match |
 | E2E | Full pipeline against staging Blueprint Advisor | Blueprint produced |
@@ -125,7 +124,7 @@ Semantic versioning:
 
 ### 2.6 Enterprise constitution governance
 
-→ *Architecture §13 covers the dual-file model. Developer Guide §5 covers developer usage.*
+→ *Architecture doc Part II §10 covers the dual-file model. Developer Guide §5 covers developer usage.*
 
 `constitution-enterprise.md` is maintained in the preset repo. Changes follow the same release pipeline as the preset itself. Version tag convention: `v<year>Q<quarter>` (e.g. `v2026Q2`). Changes require EA office sign-off.
 
@@ -238,7 +237,7 @@ At month 6 of platform operation, the EA office runs a mandatory consolidation a
 - Rules with high override rate evaluated for refinement
 - DSL identifier usage analyzed; underused identifiers candidates for removal
 
-→ *§14 schedules this in the governance cycle.*
+→ *The governance cycle schedule is in the quarterly review section.*
 
 ---
 
@@ -455,12 +454,12 @@ Platform engineering maintains the Lambda functions that back the Config rules i
 | `assemble_blueprint` | Known selections | 5 min |
 | Task Store | AlloyDB `SELECT 1` connection check | 60s |
 | Cross-user access blocked | `blueprint_result` with wrong `owner_id` → 403 | 15 min |
-| Eraser.io API reachable | HTTP health check to Eraser.io API endpoint | 5 min |
-| Diagram rendering | Golden spec → verify `.eraser` + `.drawio.xml` + `.svg` + `.png` all generated | 4 hours |
+| Draw.io headless service reachable | HTTP health check to Draw.io headless service endpoint | 5 min |
+| Diagram rendering | Golden spec → verify `.drawio.xml` + `.png` all generated | 4 hours |
 
 The pipeline completion check uses a lightweight golden spec (1 integration, minimal RAG) that completes in <30 seconds, so a 3-minute interval adds negligible load while ensuring failures are detected within 3 minutes.
 
-**Eraser.io failure mode:** If the Eraser.io API is unreachable, `assemble_blueprint` falls back to generating `.drawio.xml` and `.png` only (via internal drawio-to-PNG rendering). The `.eraser` source and `.svg` export will be missing — **Eraser.io users** should use Draw.io (`.drawio.xml`) as a temporary alternative, and **Canva users** should also use Draw.io until Eraser.io recovers. The blueprint and `app-blueprint.json` are still valid. Alert the ops team.
+**Draw.io headless failure mode:** If the Draw.io headless service is unreachable, `assemble_blueprint` cannot render `.png` from `.drawio.xml`. The `.drawio.xml` source files are still valid and editable in the Draw.io VSCode extension (local, no cloud dependency). `.png` rendering resumes when Draw.io headless recovers. The blueprint `.md` and `.json` are unaffected — only `.png` rendering is blocked.
 
 **`app-blueprint.json` failure modes:**
 
@@ -662,8 +661,8 @@ JIRA project: `AGENTCATALYST`.
 | Queue | Purpose | SLA |
 |---|---|---|
 | `AGENTCATALYST-SUBSTITUTIONS` | Missing tech substitutions | 5 business days |
-| `AGENTCATALYST-PATTERNS` | Wrong pattern, missing pattern | EA review (see §14) |
-| `AGENTCATALYST-ADR` | ADR exception, rule clarification | EA review (see §14) |
+| `AGENTCATALYST-PATTERNS` | Wrong pattern, missing pattern | EA review (quarterly governance cycle) |
+| `AGENTCATALYST-ADR` | ADR exception, rule clarification | EA review (quarterly governance cycle) |
 | `AGENTCATALYST-TOOLS` | Tool registry gaps | 1–2 weeks |
 | `AGENTCATALYST-IAC` | IaC module gaps/bugs | 2 business days |
 | `AGENTCATALYST-ADVISOR` | Blueprint Advisor bugs/outages | Sev-driven |
@@ -831,7 +830,59 @@ After onboarding: `#agentcatalyst` channel, escalation queues, office hours. Mon
 
 ---
 
+## Migration Readiness Validation — Troubleshooting
+
+The Blueprint Advisor validates brownfield specs for migration readiness before running the RAG pipeline. When teams report "migration plan looks wrong" or "phases don't make sense," check the spec signal quality first.
+
+| Symptom | Likely cause | Resolution |
+|---|---|---|
+| "blueprint_start returned BLOCK error" | Critical migration signal missing | Read error: CSA completeness (<3 integrations), integration types (<50% classified), data flow direction (<50% marked), or coexistence constraints (0 flags). Fix the specific gap. |
+| "Tech Substitution returned no mappings" | CSA has vague technology names | Check each integration: "Oracle 19c" maps to Aurora. "Legacy database" has no mapping. Add specific tech + version for every component. |
+| "Phase assignment is wrong — critical system in Phase 1" | Missing criticality ratings | Check: are all integrations rated critical/high/medium/low? Without ratings, phase assignment defaults to alphabetical — which is wrong. Rate by business impact. |
+| "Dual-write not generated for bidirectional integration" | Missing coexistence flag | Check: does the bidirectional integration have `coexistence: dual-write`? Missing flag → hard-cutover assumed → data loss risk during migration. |
+| "Strangler-Fig proxy routes are incomplete" | Missing API contracts | Check: do external-facing APIs have documented contracts (OpenAPI/WSDL)? Without contracts, the proxy can't route correctly. Document API surface before migration. |
+| "Session loss during Phase 1 cutover" | Stateful component not identified | Check: are sticky sessions, server-side state, distributed transactions documented in the spec? Missing → proxy switches without session migration → users lose sessions. |
+| "Phase 2 takes too long" | Too many bidirectional integrations in Phase 2 | Review data flow direction: can any bidirectional integrations be split into separate read + write phases? Reducing Phase 2 scope reduces dual-write coexistence duration. |
+| "migration_readiness_score < 50" | Multiple BLOCK or WARN signals | Review validation output — each signal includes specific guidance. Fix BLOCKs first (they prevent pipeline execution), then WARNs (they reduce confidence). Target score ≥ 80 before proceeding. |
+
+**Key principle:** Brownfield validation prevents DATA LOSS. Unlike greenfield (where bad architecture is redesignable), brownfield errors affect a RUNNING production system. Invest the time to get the spec signals right before running the Blueprint Advisor.
+
+---
+
 *End of operating playbook.*
 
 *→ Architecture: `csa-tsa-speckit-architecture.md`*
 *→ Developer Guide: `csa-tsa-speckit-developerguide.md`*
+
+## /catalyst.refresh — Operations Guide
+
+The `/catalyst.refresh` command validates edited files and regenerates derived artifacts. Also auto-triggered by `/catalyst.assess` and `/catalyst.generate` when stale files are detected.
+
+### What /catalyst.refresh Does
+
+| Step | Action | Server resource | Failure mode |
+|---|---|---|---|
+| 0. validate_spec | Check 8 brownfield 8-signal migration readiness signals (PASS/WARN/BLOCK) | CPU only | BLOCK → abort with guidance |
+| 1. Validate Part I | Parse §1-§7 completeness | CPU only | Missing section → WARN |
+| 2. .md↔.drawio consistency | Parse .drawio.xml, compare with §5 topology | CPU only | Mismatch → report differences |
+| 3. Sync Part II | Generate/update §8-§12 from Part I + API Hub + Tech Sub Table | API Hub, Tech Sub Table | API timeout → use cached defaults |
+| 4. Regenerate .json | Parse all 12 sections → JSON | CPU only | Parse error → report line |
+| 5. Regenerate .png | Draw.io headless export | Draw.io headless | Timeout → keep existing .png |
+
+### Skip-Refresh Safety
+
+Both `/catalyst.assess` and `/catalyst.generate` auto-detect stale files:
+1. Compare .md/.drawio timestamps with .json timestamp
+2. If source newer → auto-refresh before proceeding
+3. If auto-refresh fails → STOP with error
+
+### Troubleshooting
+
+| Symptom | Cause | Resolution |
+|---|---|---|
+| "validate_spec BLOCK — missing coexistence flags" | Integration missing dual-read/dual-write/hard-cutover flag | Add coexistence flag to each integration in §5. See Developer Guide "Writing Brownfield Specs That Pass Migration Readiness Validation". |
+| "Part I section missing" | Developer deleted governance section | Restore section. All 7 governance sections required. Part II sections auto-regenerate if deleted. |
+| ".md↔.drawio mismatch" | Conflicting edits to .md and .drawio | Pick one source: update §5 to match diagram or update diagram to match §5. Re-run refresh. |
+| ".json parse error" | Malformed markdown table | Fix table formatting (pipe characters, column alignment). Re-run refresh. |
+| "Part II rows not updating for new integration" | Tech Substitution Table lookup failed | Check connectivity. If tech not in table, manually add §8 row. |
+

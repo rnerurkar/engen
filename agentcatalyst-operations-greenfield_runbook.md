@@ -438,7 +438,7 @@ The AlloyDB Task Store holds transient async task records (taskId, status, stage
 | Governance Guardian unreachable | MCP health check (60s) | Check Cloud Run health for Governance Guardian service. Same OAuth as Blueprint Advisor. |
 | Governance assessment stuck | Assessment health check (3 min) | Check Cloud Tasks `governance-assess` queue. Flush if jammed. EA assessment engine may be down — contact EA office. |
 | Tech Debt Registry unavailable | AlloyDB health (60s) | Same database as Blueprint Advisor Task Store. Check connection pool. |
-| `app-blueprint.json` out of sync with `.md` | `/catalyst.generate` hash check detects mismatch | Auto-resolved: `/catalyst.generate` calls `assemble_blueprint` to regenerate `.json` from `.md`. If `assemble_blueprint` fails, check Eraser.io API health (diagrams), AlloyDB connection (task store), and `.md` parse errors (malformed section headers). |
+| `app-blueprint.json` out of sync with `.md` | `/catalyst.generate` hash check detects mismatch | Auto-resolved: `/catalyst.generate` calls `assemble_blueprint` to regenerate `.json` from `.md`. If `assemble_blueprint` fails, check Draw.io headless service health, AlloyDB connection (task store), and `.md` parse errors (malformed section headers). |
 | `app-blueprint.json` corrupted or missing | `/catalyst.generate` fails to parse `.json` | Delete `app-blueprint.json` from workspace. Run `assemble_blueprint` manually (via coding agent MCP call) to regenerate from `.md`. The `.md` is always the source of truth — `.json` can always be regenerated. |
 | `app-blueprint.json` edited directly by developer | Hash mismatch on next `/catalyst.generate` | Auto-resolved: `/catalyst.generate` detects `.md` hash differs from stored hash, regenerates `.json` from `.md` (overwriting manual edits). Warn developer: **never edit `.json` directly** — edits will be overwritten. |
 
@@ -498,7 +498,7 @@ Starts as first-draft entries from acceptance criteria (see Developer Guide, Sec
 
 ## 9. Blueprint Advisor MCP Server Operations
 
-> **Architecture context:** Architecture Document, Layer 2 (MCP Server with 5 tools, async via MCP Tasks). **Developer Guide context:** Developer Guide, Section 2.5 (how the blueprint is created asynchronously). **Blueprint template:** `app-blueprint-md-template-and-fnol-example.md` (18-section template structure and FNOL reference example).
+> **Architecture context:** Architecture Document, Layer 2 (MCP Server with 5 tools, async via MCP Tasks). **Developer Guide context:** Developer Guide, Section 2.5 (how the blueprint is created asynchronously). **Blueprint template:** `app-blueprint-md-template-and-fnol-example.md` (12-section template structure and FNOL reference example).
 
 The Blueprint Advisor has two deployment components: the **MCP API layer** (Cloud Run Service) handling the three fast tools plus two deterministic tools, and the **background pipeline** (Cloud Run Jobs) running the LlmAgent work. A **AlloyDB Task Store** connects them.
 
@@ -513,12 +513,12 @@ The Blueprint Advisor has two deployment components: the **MCP API layer** (Clou
 | `assemble_blueprint` | Known selections | 5 min |
 | Task Store | AlloyDB `SELECT 1` connection check | 60s |
 | Cross-user access blocked | `blueprint_result` with wrong owner_id → 403 | 15 min |
-| Eraser.io API reachable | HTTP health check to Eraser.io API endpoint | 5 min |
-| Diagram rendering | Golden FNOL → verify `.eraser` + `.drawio.xml` + `.svg` + `.png` all generated | 4 hours |
+| Draw.io headless reachable | HTTP health check to Draw.io headless service | 5 min |
+| Diagram rendering | Golden FNOL → verify `.drawio.xml` + `.png` all generated | 4 hours |
 
 The pipeline completion check uses a lightweight golden spec (1 integration) that completes in <30 seconds, so a 3-minute interval adds negligible load while ensuring pipeline failures are detected within 3 minutes rather than 15.
 
-**Eraser.io failure mode:** If the Eraser.io API is unreachable, `assemble_blueprint` falls back to generating `.drawio.xml` and `.png` only (via internal drawio-to-PNG rendering). The `.eraser` source and `.svg` export will be missing from the workspace — **Eraser.io users** should use Draw.io (`.drawio.xml`) as a temporary alternative, and **Canva users** should also use Draw.io until Eraser.io recovers (Canva requires `.svg` which depends on Eraser.io rendering). The blueprint and `.json` are still valid — diagrams are still rendered and editable via Draw.io. Alert the ops team. Service recovers automatically when Eraser.io comes back online.
+**Draw.io headless failure mode:** If the Draw.io headless service is unreachable, `/catalyst.refresh` and `assemble_blueprint` cannot render `.png` from `.drawio.xml`. The `.drawio.xml` source files are still valid and editable. The developer can still edit diagrams in the Draw.io VSCode extension (local, no cloud dependency). `.png` rendering will resume when Draw.io headless recovers. The blueprint `.md` and `.json` are unaffected — only `.png` rendering is blocked.
 
 ### Versioning
 
@@ -773,6 +773,108 @@ Apigee proxy routes, per-agent Workload Identity IAM bindings, and API Hub regis
 | Stale entry (agent retired but still listed as active) | API Hub shows `active` but Cloud Run has no instances | Update API Hub lifecycle to `retired`. Run cleanup. |
 
 **The flywheel:** Every agent deployed via AgentCatalyst registers in API Hub. Future Blueprint Advisor runs query API Hub via `search_a2a_agents()` and discover these agents for A2A delegation — reusing deployed agents instead of rebuilding. The more agents deployed, the richer the API Hub catalog, the more the Blueprint Advisor can recommend A2A reuse.
+
+---
+
+## /catalyst.refresh — Operations Guide
+
+The `/catalyst.refresh` command validates edited files and regenerates derived artifacts. It's also auto-triggered by `/catalyst.assess` and `/catalyst.generate` when stale files are detected.
+
+### What /catalyst.refresh Does (Server-Side)
+
+| Step | Action | Server resource used | Failure mode |
+|---|---|---|---|
+| 0. validate_spec | Check 6 signal categories (ordering words, data systems, partners, IF/THEN, sensitive data, acceptance criteria). PASS/WARN/BLOCK. | CPU only (regex + pattern matching) | BLOCK → pipeline aborts with specific guidance per signal. WARN → continues with risk flags. |
+| 1. Validate Part I | Parse §1-§7, check completeness | CPU only (no external calls) | Missing section → WARN with guidance |
+| 2. .md↔.drawio consistency | Parse .drawio.xml, extract agent nodes, compare with §5 | CPU only | Mismatch → report specific differences |
+| 3. Sync Part II | Generate/update §8-§12 rows from Part I changes | API Hub (for MCP configs), company standards API | API Hub timeout → use cached defaults |
+| 4. Regenerate .json | Parse all 12 sections → emit JSON | CPU only | Parse error → report line number |
+| 5. Regenerate .png | Draw.io headless export from .drawio.xml | Draw.io headless service | Render timeout → keep existing .png, warn |
+
+### Troubleshooting
+
+| Symptom | Likely cause | Resolution |
+|---|---|---|
+| "blueprint_start returned BLOCK — validate_spec failed" | Spec missing critical signals | Check the specific BLOCK signal: §2 no ordering words → add "first/then/parallel". §4 vague systems → name specific tech. §7 prose rules → use IF/THEN. See Developer Guide "Writing Specs That Pass Signal Validation". |
+| "/catalyst.refresh returns 'Section missing'" | Developer deleted a governance section (§1-§7) from Part I | Restore the section. All 7 governance sections are required. Part II sections (§8-§12) are auto-regenerated if deleted. |
+| ".md↔.drawio mismatch won't resolve" | Developer edited .md AND .drawio with conflicting changes | Pick one source of truth: update §5 to match diagram, or update diagram to match §5. Then re-run refresh. |
+| "Part II rows not updating for new agent" | API Hub lookup failed for the new agent's MCP server | Check API Hub connectivity. If the MCP server isn't registered in API Hub yet, manually add the §8 row with connection details. |
+| ".json not regenerating" | Table parse error — malformed markdown table in .md | Check the .md tables for missing pipe characters, misaligned columns, or special characters. Fix and re-run. |
+| ".png not regenerating" | Draw.io headless service unavailable | Check Draw.io headless service health. The .drawio.xml is still valid — .png will regenerate on next successful refresh. |
+| "Auto-refresh slowing down /catalyst.assess" | Large .drawio files causing slow .png rendering | Pre-run `/catalyst.refresh` manually before `/catalyst.assess` so the auto-refresh is a no-op (files already current). |
+| "Stale .json detected but auto-refresh fails" | .md has structural errors that block parsing | Run `/catalyst.refresh` manually for detailed error messages. Fix .md errors, then re-run `/catalyst.assess`. |
+
+### Skip-Refresh Safety Mechanism
+
+Both `/catalyst.assess` and `/catalyst.generate` auto-detect stale files before proceeding:
+
+```
+Staleness check (runs as Step 0 of /catalyst.assess and /catalyst.generate):
+  1. Compare app-blueprint.md modified_time with app-blueprint.json modified_time
+  2. Compare diagrams/*.drawio.xml modified_times with diagrams/*.png modified_times
+  3. If ANY source file is newer than its derived file:
+     → Auto-run refresh (validate + sync + regenerate)
+     → If refresh succeeds: proceed with assessment/generation
+     → If refresh fails: STOP with error, ask developer to fix and run /catalyst.refresh manually
+```
+
+This ensures the developer can NEVER accidentally assess or generate code from stale files — even if they forget to run `/catalyst.refresh` after editing.
+
+## Spec Signal Validation — Troubleshooting
+
+The Blueprint Advisor validates specs before running the RAG pipeline. When developers report "my blueprint quality is low" or "the Blueprint Advisor returned generic results," check the spec signal quality first.
+
+| Symptom | Likely cause | Resolution |
+|---|---|---|
+| "blueprint_start returned immediately with an error" | BLOCK — one or more critical signals missing | Read the error message — it identifies the specific section and signal. Guide developer to add ordering words (§2), specific data systems (§4), or IF/THEN business rules (§7). |
+| "Blueprint has wrong patterns" | §2 missing ordering words | Check §2: does it use "first", "then", "in parallel", "loop until"? Without these, pattern retrieval is random. |
+| "Blueprint suggests MCP but should be A2A" | §5 missing "own system" flag | Check §5: does each external partner specify whether "they operate their own system"? Missing → defaults to MCP wrapping. |
+| "FunctionTools are empty stubs" | §7 has prose instead of IF/THEN | Check §7: are rules in "IF condition THEN action" format? Prose rules can't be converted to code. |
+| "No Model Armor callbacks generated" | §8 missing or empty | Check §8: are PII/PHI/financial classifications listed? If §4 has user-facing systems but §8 is empty, it's likely an oversight. |
+| "EvalOps pipeline has no golden dataset entries" | §10 has unmeasurable criteria | Check §10: are criteria measurable? "Fast" → no. "< 5 min" → yes. Each measurable criterion becomes a golden dataset entry. |
+| "spec_quality_score is < 60" | Multiple WARN signals | Review the validation output — each WARN includes a specific recommendation. Fix warnings for better blueprint quality. |
+
+---
+
+## /catalyst.refresh — Operational Procedures
+
+### Health Checks
+
+| Check | Method | Expected |
+|---|---|---|
+| `refresh` tool available | Call refresh with empty .md | Returns validation error (not connection error) |
+| Draw.io headless rendering | Submit test .drawio.xml | Returns .png base64 |
+| Staleness detection | Modify .md, call assess | Auto-refresh triggers before assessment |
+
+### Troubleshooting
+
+| Symptom | Likely cause | Resolution |
+|---|---|---|
+| "/catalyst.refresh returns connection error" | Blueprint Advisor MCP Server unreachable | Check MCP Server health. Refresh uses the same server as blueprint_start. |
+| ".json not regenerated after refresh" | .md has unparseable tables | Check refresh validation report — it identifies which table failed to parse. Fix table markdown syntax. |
+| ".png not regenerated after refresh" | Draw.io headless export failed | Check server logs for Draw.io rendering errors. Verify .drawio.xml is valid XML. |
+| "Part II sections have wrong defaults for new agent" | API Hub lookup failed for new tool | Check API Hub connectivity. If API Hub is down, refresh uses fallback defaults (30s timeout, 3x retry). Developer can override in §8. |
+| "/catalyst.assess says 'Auto-refreshing' every time" | Developer never runs /catalyst.refresh | Normal behavior — assess auto-detects stale .json. No action needed, but running refresh explicitly is faster. |
+| "/catalyst.generate blocked with 'stale .json'" | Developer edited .md but didn't refresh or assess | Run /catalyst.refresh (or /catalyst.assess which auto-refreshes). Then re-run /catalyst.generate. |
+| "Part II overrides were lost after refresh" | Bug — refresh should preserve overrides | Check if the developer edited §5 (Part I) in a way that changed the agent that had overrides. If the agent_id changed, Part II can't match the override to the old row. |
+| ".md↔.drawio consistency warning but both are correct" | Diagram has labels that don't exactly match §5 agent_id | Ensure agent node labels in .drawio exactly match agent_id values in §5 topology table. Case-sensitive. |
+
+### Staleness Detection — How It Works
+
+Every refresh writes `.blueprint-hashes` to the workspace:
+```json
+{
+  "blueprint_md_hash": "sha256:...",
+  "blueprint_json_source_md_hash": "sha256:...",
+  "drawio_hashes": { "component-architecture.drawio.xml": "sha256:..." },
+  "png_source_drawio_hashes": { "component-architecture.png": "sha256:..." },
+  "last_refresh": "2026-05-28T14:30:00Z"
+}
+```
+
+- `/catalyst.assess` compares current .md hash with `blueprint_json_source_md_hash`. If different → auto-refresh.
+- `/catalyst.generate` does the same check but BLOCKS instead of auto-refreshing.
+- Hashes are SHA-256 of file content. Whitespace-only changes still trigger staleness (intentional — any edit should be validated).
 
 ---
 
