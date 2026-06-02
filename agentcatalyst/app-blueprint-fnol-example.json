@@ -1,0 +1,426 @@
+{
+  "metadata": {
+    "solution_id": "fnol-claims-agent",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "use_case": "First Notice of Loss claims intake automation for auto insurance",
+    "team": "claims-engineering",
+    "generated_by": "assemble_blueprint",
+    "generated_at": "2026-05-20T14:30:00Z",
+    "source_hashes": {
+      "spec_hash": "sha256:a1b2c3d4e5f6...",
+      "plan_hash": "sha256:f6e5d4c3b2a1...",
+      "blueprint_hash": "sha256:7890abcdef12..."
+    },
+    "blueprint_version": "9-section",
+    "catalyst_version": "2.0"
+  },
+
+  "pattern_composition": {
+    "primary_pattern": "SequentialAgent",
+    "composition": [
+      { "pattern": "SequentialAgent", "role": "root_orchestrator", "confidence": 0.95, "source_signal": "First... then... then... finally ordering in spec §2" },
+      { "pattern": "ParallelAgent", "role": "parallel_enrichment", "nesting": "inside SequentialAgent (step 2)", "confidence": 0.90, "source_signal": "In parallel, it enriches from three sources" },
+      { "pattern": "LoopAgent", "role": "retry_on_failure", "nesting": "inside ParallelAgent (per source)", "confidence": 0.88, "source_signal": "If any enrichment fails, retry up to 3 times" },
+      { "pattern": "CustomAgent_HITL", "role": "human_review", "nesting": "inside SequentialAgent (step 4)", "confidence": 0.85, "source_signal": "A human reviews high-severity claims" }
+    ],
+    "adjacency_validation": "PASSED",
+    "adjacency_notes": "LoopAgent inside ParallelAgent is valid. LoopAgent does NOT nest inside another LoopAgent."
+  },
+
+  "adk_agent_tree": {
+    "root": {
+      "name": "fnol_coordinator",
+      "type": "SequentialAgent",
+      "role": "Root orchestrator — 4-step sequential chain with parallel sub-step",
+      "model": null,
+      "children": [
+        {
+          "name": "extract_details",
+          "type": "LlmAgent",
+          "role": "Extract claimant details from unstructured input",
+          "model": "gemini-2.0-flash",
+          "tools": ["claims-db-mcp", "coverage_calculator_fn"],
+          "children": []
+        },
+        {
+          "name": "parallel_enrichment",
+          "type": "ParallelAgent",
+          "role": "Concurrent enrichment from 3 independent sources",
+          "model": null,
+          "children": [
+            {
+              "name": "enrich_policy",
+              "type": "LlmAgent",
+              "role": "Policy enrichment with retry",
+              "model": "gemini-2.0-flash",
+              "tools": ["policy-api-mcp"],
+              "retry": { "type": "LoopAgent", "max_attempts": 3, "backoff": "exponential" },
+              "children": []
+            },
+            {
+              "name": "enrich_vehicle",
+              "type": "LlmAgent",
+              "role": "Vehicle history enrichment with retry",
+              "model": "gemini-2.0-flash",
+              "tools": ["vehicle-api-mcp"],
+              "retry": { "type": "LoopAgent", "max_attempts": 3, "backoff": "exponential" },
+              "children": []
+            },
+            {
+              "name": "enrich_weather",
+              "type": "LlmAgent",
+              "role": "Weather conditions at incident location with retry",
+              "model": "gemini-2.0-flash",
+              "tools": ["weather-api-mcp"],
+              "retry": { "type": "LoopAgent", "max_attempts": 3, "backoff": "exponential" },
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "severity_classifier",
+          "type": "LlmAgent",
+          "role": "Classify claim severity using business rules + A2A delegation",
+          "model": "gemini-2.0-flash",
+          "tools": ["severity_classifier_fn", "body-shop-a2a"],
+          "children": []
+        },
+        {
+          "name": "human_review",
+          "type": "CustomAgent",
+          "role": "Route high-severity claims to human adjuster",
+          "model": "gemini-2.0-flash",
+          "tools": ["review-queue-mcp"],
+          "hitl": true,
+          "children": []
+        }
+      ]
+    }
+  },
+
+  "tool_bindings": [
+    {
+      "name": "claims-db-mcp",
+      "type": "mcp_server",
+      "endpoint": "mcp://claims-db.company.internal:8443",
+      "auth_method": "OAuth 2.1 + Workload Identity",
+      "assigned_to": "extract_details",
+      "capabilities": ["claim_lookup", "claim_create", "claim_update", "history_query"],
+      "discovered_via": "Vertex AI Search (Tool Catalog)",
+      "confidence": 0.95
+    },
+    {
+      "name": "policy-api-mcp",
+      "type": "mcp_server",
+      "endpoint": "mcp://policy-api.company.internal:8443",
+      "auth_method": "OAuth 2.1 + mTLS",
+      "assigned_to": "enrich_policy",
+      "capabilities": ["policy_lookup", "coverage_check", "deductible_calc"],
+      "discovered_via": "Vertex AI Search (Tool Catalog)",
+      "confidence": 0.92
+    },
+    {
+      "name": "vehicle-api-mcp",
+      "type": "mcp_server",
+      "endpoint": "mcp://vehicle-api.company.internal:8443",
+      "auth_method": "OAuth 2.1 + mTLS",
+      "assigned_to": "enrich_vehicle",
+      "capabilities": ["vin_decode", "vehicle_history", "recall_check"],
+      "discovered_via": "Vertex AI Search (Tool Catalog)",
+      "confidence": 0.90
+    },
+    {
+      "name": "weather-api-mcp",
+      "type": "mcp_server",
+      "endpoint": "mcp://weather-api.external.com:443",
+      "auth_method": "API Key (Secret Manager)",
+      "assigned_to": "enrich_weather",
+      "capabilities": ["historical_weather", "conditions_at_location"],
+      "discovered_via": "Vertex AI Search (Tool Catalog)",
+      "confidence": 0.88
+    },
+    {
+      "name": "review-queue-mcp",
+      "type": "mcp_server",
+      "endpoint": "mcp://review-queue.company.internal:8443",
+      "auth_method": "OAuth 2.1 + Workload Identity",
+      "assigned_to": "human_review",
+      "capabilities": ["enqueue_review", "assign_adjuster", "get_decision"],
+      "discovered_via": "Vertex AI Search (Tool Catalog)",
+      "confidence": 0.93
+    },
+    {
+      "name": "body-shop-a2a",
+      "type": "a2a_agent",
+      "endpoint": "a2a://bodyshop-partner.com/agent/v2",
+      "auth_method": "mTLS + Agent Card",
+      "assigned_to": "severity_classifier",
+      "capabilities": ["estimate", "schedule", "parts-lookup"],
+      "agent_card_url": "https://bodyshop-partner.com/.well-known/agent-card.json",
+      "agent_version": "v2.3",
+      "discovered_via": "Apigee API Hub (discover_integrations)",
+      "confidence": 0.80
+    },
+    {
+      "name": "severity_classifier_fn",
+      "type": "function_tool",
+      "assigned_to": "severity_classifier",
+      "discovered_via": "spec §7 (business rules)",
+      "confidence": 0.95
+    },
+    {
+      "name": "coverage_calculator_fn",
+      "type": "function_tool",
+      "assigned_to": "extract_details",
+      "discovered_via": "spec §7 (business rules)",
+      "confidence": 0.90
+    }
+  ],
+
+  "data_flows": [
+    { "from": "(external)", "to": "fnol_coordinator", "data": "inbound claim (phone/web)", "protocol": "HTTP" },
+    { "from": "fnol_coordinator", "to": "extract_details", "data": "raw claim data", "protocol": "internal" },
+    { "from": "extract_details", "to": "claims-db-mcp", "data": "claim_id, claimant details", "protocol": "MCP" },
+    { "from": "fnol_coordinator", "to": "parallel_enrichment", "data": "claim_context", "protocol": "internal" },
+    { "from": "enrich_policy", "to": "policy-api-mcp", "data": "policy_number", "protocol": "MCP" },
+    { "from": "enrich_vehicle", "to": "vehicle-api-mcp", "data": "vin", "protocol": "MCP" },
+    { "from": "enrich_weather", "to": "weather-api-mcp", "data": "incident_location, date", "protocol": "MCP" },
+    { "from": "parallel_enrichment", "to": "fnol_coordinator", "data": "enriched_claim", "protocol": "internal" },
+    { "from": "fnol_coordinator", "to": "severity_classifier", "data": "enriched_claim", "protocol": "internal" },
+    { "from": "severity_classifier", "to": "body-shop-a2a", "data": "estimate_request", "protocol": "A2A" },
+    { "from": "fnol_coordinator", "to": "human_review", "data": "classified_claim (if critical/high)", "protocol": "internal" },
+    { "from": "fnol_coordinator", "to": "(external)", "data": "claim confirmation", "protocol": "HTTP" }
+  ],
+
+  "sequence_summary": [
+    "Customer submits claim → fnol_coordinator receives inbound claim via Apigee Gateway",
+    "fnol_coordinator → extract_details extracts claimant info from claims-db-mcp",
+    "fnol_coordinator → parallel_enrichment fans out to 3 sources in parallel",
+    "enrich_policy queries policy-api-mcp | enrich_vehicle queries vehicle-api-mcp | enrich_weather queries weather-api-mcp (each with LoopAgent retry, max 3 attempts)",
+    "parallel_enrichment consolidates → returns enriched_claim to fnol_coordinator",
+    "fnol_coordinator → severity_classifier applies business rules (severity_classifier_fn)",
+    "IF severity ≥ critical AND damage_estimate > $10K → severity_classifier delegates to body-shop-a2a via A2A for estimate",
+    "IF severity = critical OR high → fnol_coordinator routes to human_review via review-queue-mcp",
+    "fnol_coordinator returns claim confirmation to customer via Apigee Gateway"
+  ],
+
+  "business_rules": [
+    {
+      "id": "BR-001",
+      "source": "spec §7",
+      "rule": "IF damage_description CONTAINS 'total loss' OR damage_estimate > $15,000 THEN severity = 'critical'",
+      "implemented_by": "severity_classifier_fn"
+    },
+    {
+      "id": "BR-002",
+      "source": "spec §7",
+      "rule": "IF injuries_reported = true THEN severity = MIN('high', current_severity)",
+      "implemented_by": "severity_classifier_fn"
+    },
+    {
+      "id": "BR-003",
+      "source": "spec §7",
+      "rule": "IF police_report_filed = false AND damage_estimate > $5,000 THEN flag = 'fraud_review'",
+      "implemented_by": "severity_classifier_fn"
+    },
+    {
+      "id": "BR-004",
+      "source": "spec §7",
+      "rule": "IF severity IN ('critical', 'high') THEN route_to_human = true",
+      "implemented_by": "fnol_coordinator (conditional step 4)"
+    },
+    {
+      "id": "BR-005",
+      "source": "spec §7",
+      "rule": "IF severity >= 'critical' AND damage_estimate > $10,000 THEN delegate_body_shop = true",
+      "implemented_by": "severity_classifier (A2A delegation to body-shop-a2a)"
+    }
+  ],
+
+  "infra_modules": [
+    {
+      "module": "tf-cloud-run-agent",
+      "source": "github.com/company/tf-cloud-run-agent",
+      "version": "v2.1.0",
+      "purpose": "Agent runtime with VPC-SC + CMEK + auto-scaling",
+      "variables": { "region": "us-east1", "min_instances": 1, "max_instances": 20, "cmek_key": "projects/PROJECT/locations/us-east1/keyRings/agents/cryptoKeys/cloud-run" }
+    },
+    {
+      "module": "tf-apigee-gateway",
+      "source": "github.com/company/tf-apigee-gateway",
+      "version": "v1.8.0",
+      "purpose": "API Gateway with OAuth 2.1 + rate limiting",
+      "variables": { "environment": "prod", "rate_limit": "500/hour" }
+    },
+    {
+      "module": "tf-cloud-sql",
+      "source": "github.com/company/tf-cloud-sql",
+      "version": "v3.0.0",
+      "purpose": "Claims database — HA auto-failover + cross-region read replica",
+      "variables": { "region": "us-east1", "tier": "db-custom-4-16384", "ha_enabled": true, "read_replica_region": "us-west1", "cmek_key": "projects/PROJECT/locations/us-east1/keyRings/data/cryptoKeys/cloud-sql" }
+    },
+    {
+      "module": "tf-pilot-cold",
+      "source": "github.com/company/tf-pilot-cold",
+      "version": "v1.2.0",
+      "purpose": "Pilot Light — Cold Standby DR with Cloud SQL read replica promotion + Cloud Run scale-up",
+      "variables": { "primary_region": "us-east1", "dr_region": "us-west1", "rto_target_minutes": 60, "rpo_target_hours": 1 }
+    }
+  ],
+
+  "gateway_routes": [
+    { "path": "/api/v1/claims", "source": "(external)", "target": "fnol_coordinator", "auth": "OAuth 2.1", "rate_limit": "500/hour" },
+    { "path": "/mcp/claims-db", "source": "extract_details", "target": "claims-db-mcp", "auth": "Workload Identity + mTLS", "rate_limit": "1000/hour" },
+    { "path": "/mcp/policy-api", "source": "enrich_policy", "target": "policy-api-mcp", "auth": "OAuth 2.1 + mTLS", "rate_limit": "600/hour" },
+    { "path": "/mcp/vehicle-api", "source": "enrich_vehicle", "target": "vehicle-api-mcp", "auth": "OAuth 2.1 + mTLS", "rate_limit": "600/hour" },
+    { "path": "/mcp/weather-api", "source": "enrich_weather", "target": "weather-api-mcp", "auth": "API Key + mTLS", "rate_limit": "600/hour" },
+    { "path": "/mcp/review-queue", "source": "human_review", "target": "review-queue-mcp", "auth": "Workload Identity", "rate_limit": "200/hour" },
+    { "path": "/a2a/body-shop", "source": "severity_classifier", "target": "body-shop-a2a", "auth": "mTLS + Agent Card", "rate_limit": "100/hour" }
+  ],
+
+  "screening_config": {
+    "model_armor_level": "standard",
+    "agents_with_input_screening": ["extract_details", "enrich_policy", "enrich_vehicle", "enrich_weather", "severity_classifier", "human_review"],
+    "agents_with_output_screening": ["extract_details", "severity_classifier", "human_review"],
+    "pii_categories_monitored": ["name", "address", "phone", "ssn_last4", "policy_number", "vin", "claim_id"],
+    "blocked_output_patterns": ["SSN", "full credit card", "medical records"]
+  },
+
+  "agent_identity_config": [
+    {
+      "agent": "fnol_coordinator",
+      "service_account": "sa-fnol-coordinator@PROJECT.iam.gserviceaccount.com",
+      "capabilities": ["delegation-only"],
+      "denied": ["claims-db-mcp", "policy-api-mcp", "vehicle-api-mcp", "weather-api-mcp", "review-queue-mcp", "body-shop-a2a"],
+      "delegation": ["extract_details", "parallel_enrichment", "severity_classifier", "human_review"]
+    },
+    {
+      "agent": "extract_details",
+      "service_account": "sa-extract-details@PROJECT.iam.gserviceaccount.com",
+      "capabilities": ["claims-db-mcp:read", "claims-db-mcp:write", "coverage_calculator_fn:invoke"],
+      "denied": ["policy-api-mcp", "vehicle-api-mcp", "weather-api-mcp", "review-queue-mcp", "body-shop-a2a"],
+      "delegation": []
+    },
+    {
+      "agent": "enrich_policy",
+      "service_account": "sa-enrich-policy@PROJECT.iam.gserviceaccount.com",
+      "capabilities": ["policy-api-mcp:read"],
+      "denied": ["claims-db-mcp", "vehicle-api-mcp", "weather-api-mcp", "review-queue-mcp", "body-shop-a2a"],
+      "delegation": []
+    },
+    {
+      "agent": "enrich_vehicle",
+      "service_account": "sa-enrich-vehicle@PROJECT.iam.gserviceaccount.com",
+      "capabilities": ["vehicle-api-mcp:read"],
+      "denied": ["claims-db-mcp", "policy-api-mcp", "weather-api-mcp", "review-queue-mcp", "body-shop-a2a"],
+      "delegation": []
+    },
+    {
+      "agent": "enrich_weather",
+      "service_account": "sa-enrich-weather@PROJECT.iam.gserviceaccount.com",
+      "capabilities": ["weather-api-mcp:read"],
+      "denied": ["claims-db-mcp", "policy-api-mcp", "vehicle-api-mcp", "review-queue-mcp", "body-shop-a2a"],
+      "delegation": []
+    },
+    {
+      "agent": "severity_classifier",
+      "service_account": "sa-severity-classifier@PROJECT.iam.gserviceaccount.com",
+      "capabilities": ["severity_classifier_fn:invoke", "body-shop-a2a:estimate"],
+      "denied": ["claims-db-mcp", "policy-api-mcp", "vehicle-api-mcp", "weather-api-mcp", "review-queue-mcp"],
+      "delegation": []
+    },
+    {
+      "agent": "human_review",
+      "service_account": "sa-human-review@PROJECT.iam.gserviceaccount.com",
+      "capabilities": ["review-queue-mcp:read", "review-queue-mcp:write"],
+      "denied": ["claims-db-mcp", "policy-api-mcp", "vehicle-api-mcp", "weather-api-mcp", "body-shop-a2a"],
+      "delegation": []
+    }
+  ],
+
+  "pipeline_configs": {
+    "ci_cd": {
+      "infra_tool": "Jenkins",
+      "deploy_tool": "Harness",
+      "pipeline_stages": [
+        { "stage": "terraform_plan", "tool": "Jenkins", "environment": "non-prod" },
+        { "stage": "terraform_apply", "tool": "Jenkins", "environment": "non-prod" },
+        { "stage": "docker_build", "tool": "Jenkins", "registry": "Artifact Registry" },
+        { "stage": "deploy_canary", "tool": "Harness", "canary_percent": 10, "environment": "pre-prod" },
+        { "stage": "deploy_full", "tool": "Harness", "environment": "production" },
+        { "stage": "register_agent", "tool": "Harness", "target": "Agent Registry (Apigee API Hub)" }
+      ]
+    },
+    "evalops": {
+      "phases": [
+        { "phase": 1, "name": "pre-commit", "tool": "pre-commit hooks", "trigger": "git commit", "pass_threshold": 0.95 },
+        { "phase": 2, "name": "autosxs", "tool": "Vertex AI Eval SDK + AutoSxS", "trigger": "CI pipeline", "comparison": "current vs candidate" },
+        { "phase": 3, "name": "hitl", "tool": "manual review", "reviewers": 2, "sample_size": 10 }
+      ],
+      "golden_dataset": {
+        "target_size": 50,
+        "seeded_entries": 10,
+        "coverage_requirement": "100% agent coverage, ≥3 edge cases, ≥1 negative test per agent"
+      }
+    }
+  },
+
+  "observability_config": {
+    "apm": { "tool": "Dynatrace", "config": "OneAgent on Cloud Run, auto-instrumented" },
+    "logging": { "tool": "Splunk", "format": "structured JSON", "forwarding": "Cloud Logging → Splunk", "pii_masking": true },
+    "tracing": { "tool": "OTel → Cloud Trace", "span_attributes": ["agent.name", "tool.name", "llm.model", "llm.token_count", "claim.severity"] },
+    "dashboards": { "tool": "Dynatrace", "panels": ["intake volume", "latency P50/P95/P99", "error rates per agent", "enrichment source availability", "A2A delegation latency"] },
+    "alerting": { "tool": "Splunk → PagerDuty", "rules": [
+      { "condition": "P95 latency > 30s", "severity": "warning", "channel": "#fnol-alerts" },
+      { "condition": "error rate > 5%", "severity": "critical", "channel": "#fnol-alerts + PagerDuty" },
+      { "condition": "availability < 99.9%", "severity": "critical", "channel": "PagerDuty" }
+    ]}
+  },
+
+  "hadr_config": {
+    "strategy": "pilot_light_cold",
+    "primary_region": "us-east1",
+    "dr_region": "us-west1",
+    "aggregate_rto_minutes": 60,
+    "aggregate_rpo_hours": 1,
+    "components": [
+      { "service": "Cloud Run", "ha": "auto-restart, multi-zone", "dr": "cold standby, scale-up on failover", "rpo": "0 (stateless)", "rto_minutes": 10 },
+      { "service": "Cloud SQL", "ha": "auto-failover to zonal standby", "dr": "cross-region read replica, promote", "rpo_hours": 1, "rto_minutes": 30 },
+      { "service": "Apigee Gateway", "ha": "multi-zone LB", "dr": "multi-region, DNS failover", "rpo": "0 (stateless)", "rto_minutes": 5 },
+      { "service": "Secret Manager", "ha": "regional replication", "dr": "global replication", "rpo": "0 (global)", "rto_minutes": 0 }
+    ],
+    "failover_scenarios": [
+      { "scenario": "single_container_crash", "trigger": "health check", "action": "auto-restart", "duration_seconds": 30 },
+      { "scenario": "zone_failure", "trigger": "regional health check", "action": "redistribute to healthy zones", "duration_minutes": 2 },
+      { "scenario": "region_failure", "trigger": "manual or automated alert", "action": "promote DR replica + scale up + DNS failover", "duration_minutes": 60 },
+      { "scenario": "region_recovery", "trigger": "manual verification", "action": "reverse replication + scale down DR + restore primary", "duration_minutes": 120 }
+    ]
+  },
+
+  "nfr_targets": {
+    "availability": { "target": "99.95%", "measurement": "Dynatrace synthetic monitor" },
+    "rto": { "target_minutes": 60, "measurement": "DR failover drill (quarterly)" },
+    "rpo": { "target_hours": 1, "measurement": "Cloud SQL replication lag monitor" },
+    "throughput": { "target": "500 claims/hour", "measurement": "Apigee Analytics" },
+    "latency_e2e_p95": { "target_seconds": 30, "measurement": "Cloud Trace span duration" },
+    "latency_per_agent_p95": { "target_seconds": 5, "measurement": "Per-agent OTel span" },
+    "data_classification": "Confidential PII",
+    "compliance": ["SOC 2", "PCI-DSS"],
+    "concurrent_users": 50,
+    "data_retention_years": 7,
+    "encryption_transit": "TLS 1.3",
+    "encryption_rest": "CMEK (AES-256)"
+  },
+
+  "confidence_scores": {
+    "pattern_composition": 0.95,
+    "tool_bindings_overall": 0.91,
+    "a2a_discovery": 0.80,
+    "infra_modules": 0.93,
+    "business_rules": 0.95,
+    "agent_identity": 0.92,
+    "overall": 0.91,
+    "notes": "A2A confidence lower (0.80) — body-shop-agent version v2.3 discovered but partner SLA not independently verified. Recommend SA confirm partner endpoint availability."
+  }
+}
