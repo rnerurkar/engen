@@ -107,7 +107,7 @@ They've already set up everything you need. You don't configure any of this:
 | 2 | `/specify` — describe your problem in structured English | 15 min |
 | 3 | `/plan` — answer technical questions | 5 min |
 | 4 | `/catalyst.blueprint` — get AI architecture advice | 1–5 min (async, progress in chat) |
-| 4a | Review + edit app-blueprint.md (Part I) and diagrams | 15–30 min (HITL) |
+| 4a | Review + edit app-blueprint.md (§1-§9) and diagrams | 15–30 min (HITL) |
 | 4b | `/catalyst.refresh` — validate edits + regenerate .json + .png | < 10 sec |
 | 5 | Review and edit the markdown blueprint | 10 min |
 | 5a | **`/catalyst.assess` — governance assessment (auto-refreshes if stale)** | **1–5 min per assessment** |
@@ -272,17 +272,17 @@ Type `/catalyst.blueprint`. The coding agent connects to the **Blueprint Advisor
 
 > **First-time authentication:** The first time you run `/catalyst.blueprint` or `/catalyst.assess`, your coding agent opens a browser for company SSO login (Microsoft Entra ID). After authenticating once (including MFA), tokens are cached securely in your OS keychain. Subsequent commands use silent token refresh — no browser popup. Both the Blueprint Advisor and Governance Guardian share the same OAuth 2.1 authentication, so you authenticate once for both. Tokens last 1 hour with automatic refresh. See Architecture Document, Layer 2 Security for the full OAuth 2.1 flow with Entra ID. You see progress in the Chat pane as the pipeline runs (typically 1–5 minutes). When complete, the coding agent writes several files to your workspace:
 
-- **`app-blueprint.md`** — the PRIMARY artifact. Human-readable structured markdown (12 sections). You edit THIS file.
+- **`app-blueprint.md`** — the PRIMARY artifact. 9-section governance document. You edit THIS file. Every section is genuinely editable.
 - **`app-blueprint.json`** — the DERIVED artifact. Machine-readable JSON generated from the `.md`. Consumed by `/catalyst.generate` for code generation. **Never edit this file directly** — it's regenerated from `.md` automatically.
-- **Diagram files** — `.drawio.xml` (editable in Draw.io VSCode extension) + `.png` (rendered by Draw.io headless, inline in markdown)
+- **Diagram files** — `.drawio.xml` (editable in Draw.io VSCode extension) + `.png` (rendered by Eraser.io headless, inline in markdown)
 
-Edit `app-blueprint.md` (Part I for architecture changes, Part II to override defaults) and `diagrams/*.drawio.xml` (in Draw.io VSCode extension) with whichever tool you prefer.
+Edit `app-blueprint.md` (all 9 sections are editable governance decisions) and `diagrams/*.drawio.xml` (in Draw.io VSCode extension) with whichever tool you prefer.
 
-**After editing, run `/catalyst.refresh`:** This validates .md structure (12 sections), checks .md↔.drawio consistency (agents in diagram match §5 topology), syncs Part II from Part I changes (new agents get config rows in §8, §10, §12 with company defaults — existing developer overrides are preserved), and regenerates `app-blueprint.json` + diagram `.png` files.
+**After editing, run `/catalyst.refresh`:** This validates .md structure (9 sections), checks .md↔.drawio consistency (agents in diagram match §2 topology), and regenerates `app-blueprint.json` (from .md + spec.md + plan.md) + diagram `.png` files.
 
 **If you skip `/catalyst.refresh`:** `/catalyst.assess` auto-refreshes for you (detects stale .json, refreshes before assessing). But `/catalyst.generate` BLOCKS on stale .json — requires explicit refresh or assess first. This prevents code generation from outdated blueprints.
 
-When you run `/catalyst.assess`, the Governance Guardian reads Part I of your `.md` — all 7 governance sections: §1 Executive Summary, §2 Tech Stack, §3 Architecture Decision Log, §4 NFRs, §5 Patterns & Agent Topology, §6 Component Architecture (+ PNG diagram), §7 HA/DR Views (+ PNG diagrams). It does NOT read Part II (§8-§12) — those are technical configs for code generation, not governance concerns.
+When you run `/catalyst.assess`, the Governance Guardian reads all 9 sections of your `.md`: §1 Application Overview, §2 Component Topology Diagram, §3 Architecture Patterns, §4 Tech Stack, §5 DevSecOps Stack, §6 HA/DR Guidance, §7 HA/DR Diagrams, §8 Architecture Decision Log, §9 NFRs. Technical config (agent topology, tool bindings, business rules) is in .json only — the Guardian doesn't assess implementation details.
 
 ### Editing diagrams — choose your tool
 
@@ -293,11 +293,11 @@ Your workspace contains 4 formats per diagram. You only need to edit ONE — the
 
 | **Draw.io** | `hediet.vscode-drawio` extension | `*.drawio.xml` | Full draw.io editor in a VSCode tab. Standard diagramming UI. |
 
-**After editing a diagram:** Run `/catalyst.refresh` — it validates .md↔.drawio consistency (catches mismatches like "diagram shows 8 agents but §5 has 7"), regenerates `.png` from edited `.drawio.xml` (Draw.io headless), and regenerates `.json` from `.md`.
+**After editing a diagram:** Run `/catalyst.refresh` — it validates .md↔.drawio consistency (catches mismatches like "diagram shows 8 agents but §5 has 7"), regenerates `.png` from edited `.drawio.xml` (Eraser.io headless), and regenerates `.json` from `.md`.
 
 > **Tip:** Draw.io has a VSCode extension (`hediet.vscode-drawio`) that works fully offline — no cloud dependency. Edit `.drawio.xml` visually, save, run `/catalyst.refresh` to regenerate `.png`.
 
-→ *See `app-blueprint-md-template-and-fnol-example.md` for the complete 12-section template structure and FNOL reference example.*
+→ *See `app-blueprint-md-template-and-fnol-example.md` for the complete 9-section template structure and FNOL reference example.*
 
 **Why async?** VS Code Copilot enforces a hard 10–15 second timeout on MCP tool calls. The Blueprint Advisor's internal pipeline (2 RAG searches + API Hub discovery + LLM reasoning + validation + assembly) takes 15–60 seconds. A single blocking call would be killed before it completes. Instead, the coding agent uses three fast MCP tools — `blueprint_start` (< 2s), `blueprint_status` (< 1s), `blueprint_result` (< 1s) — to drive an async loop. You don't need to think about this; the prompt file handles it automatically.
 
@@ -375,7 +375,7 @@ For each tool in the blueprint, verify the `assigned_to` agent makes sense:
 
 ### 2.6a `/catalyst.refresh` — Validate edits + regenerate derived files
 
-After editing `app-blueprint.md` (Part I or Part II) or `diagrams/*.drawio.xml`, run:
+After editing `app-blueprint.md` (any section) or `diagrams/*.drawio.xml`, run:
 
 ```
 /catalyst.refresh
@@ -384,30 +384,30 @@ After editing `app-blueprint.md` (Part I or Part II) or `diagrams/*.drawio.xml`,
 This does 3 things in < 10 seconds:
 
 **1. VALIDATE structure:**
-- Part I completeness: are all 7 governance sections (§1-§7) present?
-- .md↔.drawio consistency: do agents in the diagram match §5 topology?
+- Completeness: are all 9 sections (§1-§9) present?
+- .md↔.drawio consistency: do agents in the diagram match §2 component topology?
 - If mismatch: "Diagram has 8 agents, §5 has 7. Missing: fraud-check-agent."
 
-**2. SYNC Part II from Part I changes:**
-- New agent added to §5 → new rows auto-generated in §8 (tool config), §10 (security), §12 (observability)
-- Developer's previous overrides in Part II are PRESERVED (only new rows added)
-- Deleted agent from §5 → stale rows flagged in Part II for removal
+**2. REGENERATE .json from .md + spec.md + plan.md:**
+- New agent added → technical config (tool bindings, security, observability) re-derived into .json from .md + spec.md + plan.md
+- .json is fully regenerated from current .md + spec.md + plan.md
+- All technical config (agent tree, tool bindings, infra modules) derived fresh
 
 **3. REGENERATE derived files:**
-- `app-blueprint.json` — parsed from all 12 sections of .md
-- `diagrams/*.png` — re-rendered from `.drawio.xml` via Draw.io headless (only if .drawio was modified)
+- `app-blueprint.json` — derived from .md + spec.md + plan.md
+- `diagrams/*.png` — re-rendered from `.drawio.xml` via Eraser.io headless (only if .drawio was modified)
 
 **Output:**
 ```
 /catalyst.refresh
-  Validating Part I (§1-§7)... ✅ All 7 sections present
+  Validating §1-§9... ✅ All 7 sections present
   Checking .md↔.drawio consistency... ✅ 8 agents in both
-  Syncing Part II from Part I...
-    §8: +1 row (fraud-check-agent tool config from API Hub defaults)
-    §10: +1 row (fraud-check-agent security: Model Armor level_2)
+  Regenerating .json from .md + spec.md + plan.md...
+    .json: agent tree updated (fraud-check-agent added with tool bindings from API Hub)
+    .json: security config updated (fraud-check-agent: Model Armor standard)
     §12: +1 row (fraud-check-agent OTel span: fnol.fraud_check)
     §9, §11: no changes needed
-  Regenerating app-blueprint.json... ✅ (12 sections → JSON)
+  Regenerating app-blueprint.json... ✅ (.md + spec.md + plan.md → JSON)
   Regenerating diagrams/component-architecture.png... ✅ (from .drawio.xml)
   
   ✅ Refresh complete. .json and .png are current.
@@ -1453,7 +1453,7 @@ This shows you exactly which agent failed, which tool returned bad data, and whe
 
 > **If the Blueprint Advisor is unavailable:** You can author `app-blueprint.md` manually using the template schema below and the FNOL example in the Architecture Document (Appendix A.10) as a template. The `/catalyst.generate` command only needs the `app-blueprint.md` file — it does not require the MCP Server. You lose the AI-guided recommendation but are not blocked from generating code.
 
-> **How the blueprint is created:** Your coding agent calls `blueprint_start(spec, plan)` on the Blueprint Advisor MCP Server, which returns a task ID immediately. The background pipeline runs the Blueprint Advisor LlmAgent internally (RAG search + LLM reasoning + company system prompt) and stores the result when complete. Your coding agent polls `blueprint_status(taskId)` for progress and retrieves the result via `blueprint_result(taskId)`. After reviewing and editing, your coding agent calls `refresh(blueprint_md, drawio_files[])` to validate edits, sync Part II, and regenerate .json + .png. All calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document for the full MCP Server tool table.
+> **How the blueprint is created:** Your coding agent calls `blueprint_start(spec, plan)` on the Blueprint Advisor MCP Server, which returns a task ID immediately. The background pipeline runs the Blueprint Advisor LlmAgent internally (RAG search + LLM reasoning + company system prompt) and stores the result when complete. Your coding agent polls `blueprint_status(taskId)` for progress and retrieves the result via `blueprint_result(taskId)`. After reviewing and editing, your coding agent calls `refresh(blueprint_md, drawio_files[])` to validate edits and regenerate .json + .png. All calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document for the full MCP Server tool table.
 
 ### Agentic blueprint — key fields
 
@@ -1504,11 +1504,11 @@ The Blueprint Advisor generates diagrams as `.drawio.xml` (editable) + `.png` (r
 | Diagram | Where in .md | .drawio.xml source | What to check |
 |---|---|---|---|
 | **Component Architecture** | §6: `![Component Architecture](diagrams/component-architecture.png)` | `diagrams/component-architecture.drawio.xml` | "Does each agent connect to the right tools? Are any tools orphaned or assigned to the wrong agent?" |
-| **HA/DR Lifecycle** (4 scenarios) | §7: `![HA Failover](diagrams/hadr-ha.png)` etc. | `diagrams/hadr-*.drawio.xml` | "Are all agents covered in each scenario? Are RTO/RPO values consistent with §4 NFRs?" |
+| **HA/DR Lifecycle** (4 scenarios) | §7: `![HA Failover](diagrams/hadr-ha.png)` etc. | `diagrams/hadr-*.drawio.xml` | "Are all agents covered in each scenario? Are RTO/RPO values consistent with §9 NFRs?" |
 
 **How to view them:** Open `app-blueprint.md` in VSCode — the `.png` images render inline in markdown preview. You see the architecture visually alongside the text.
 
-**How to edit them:** Install the Draw.io VSCode extension (`hediet.vscode-drawio`). Open any `.drawio.xml` file — drag agents, reroute connections, resize boxes. Save. Run `/catalyst.refresh` to regenerate the `.png` and validate consistency with `.md` §5 topology.
+**How to edit them:** Install the Draw.io VSCode extension (`hediet.vscode-drawio`). Open any `.drawio.xml` file — drag agents, reroute connections, resize boxes. Save. Run `/catalyst.refresh` to regenerate the `.png` and validate consistency with `.md` §2 component topology.
 
 **Pro tip:** After editing diagrams, always run `/catalyst.refresh` before `/catalyst.assess`. Or skip it — `/catalyst.assess` auto-detects stale diagrams and refreshes automatically.
 
@@ -2208,7 +2208,7 @@ Your job is to produce an opinionated architecture blueprint by:
 
 7. **Derive Agent Identity:** For each agent in the topology, compute the minimal capability set from tool bindings. Generate per-agent identity config (capabilities[], denied[], delegation[]).
 
-8. **Assemble blueprint:** Generate `app-blueprint.md` (PRIMARY — 12-section structured markdown) + `app-blueprint.json` (DERIVED — machine-readable) + diagrams via Draw.io headless export (.drawio.xml + .png).
+8. **Assemble blueprint:** Generate `app-blueprint.md` (PRIMARY — 9-section governance document) + `app-blueprint.json` (DERIVED — machine-readable) + diagrams via Eraser.io headless export (.drawio.xml + .png).
 
 CONSTRAINTS:
 - NEVER recommend technologies not in the company's approved tech radar.
@@ -2216,7 +2216,7 @@ CONSTRAINTS:
 - ALWAYS flag selections with confidence < 0.85 as `requires_review: true`.
 - ALWAYS discover A2A agents in API Hub before recommending building a new agent.
 - ALWAYS generate Apigee proxy routes, per-agent Workload Identity, and API Hub registration entry.
-- ALWAYS generate diagrams via Draw.io headless export in 2 formats (.drawio.xml + .png).
+- ALWAYS generate diagrams via Eraser.io headless export in 2 formats (.drawio.xml + .png).
 ```
 
 ---
@@ -2781,12 +2781,12 @@ Coding Agent: Polling blueprint_status...
   → Stage: recommending — "Searching pattern catalog for Sequential + Parallel + Loop + HITL..."
   → Stage: recommending — "Discovering A2A agents in API Hub..."
   → Stage: checking — "Validating ADR compliance..."
-  → Stage: assembling — "Rendering diagrams via Draw.io headless export..."
+  → Stage: assembling — "Rendering diagrams via Eraser.io headless export..."
   → Stage: assembling — "Generating app-blueprint.json from .md..."
   → Stage: completed
 
 Coding Agent: ✓ blueprint_result retrieved. Writing to workspace:
-  → app-blueprint.md (PRIMARY — 12 sections, 347 lines)
+  → app-blueprint.md (PRIMARY — 9 sections, 347 lines)
   → app-blueprint.json (DERIVED — machine-readable, 189 lines)
   → fnol-component-diagram.png + .drawio.xml
   → fnol-hadr-diagram.png + .drawio.xml
@@ -2802,7 +2802,7 @@ Blueprint ready. Review app-blueprint.md in your editor.
 Developer: /catalyst.assess
 
 Coding Agent: Reading app-blueprint.md (NOT app-blueprint.json)...
-Coding Agent: Extracting 7 artifact types from .md sections...
+Coding Agent: Extracting 7 artifact types from 9 .md sections...
   → TSA component diagram: fnol-component-diagram.png (§4)
   → HA/DR views: fnol-hadr-diagram.png (§13)
   
