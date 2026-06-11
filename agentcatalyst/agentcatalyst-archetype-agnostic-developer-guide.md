@@ -108,7 +108,7 @@ They've already set up everything you need. You don't configure any of this:
 | 3 | `/plan` — answer technical questions | 5 min |
 | 4 | `/catalyst.blueprint` — get AI architecture advice | 1–5 min (async, progress in chat) |
 | 4a | Review + edit app-blueprint.md (§1-§9) and diagrams | 15–30 min (HITL) |
-| 4b | `/catalyst.refresh` — validate edits + regenerate .json + .png | < 10 sec |
+| 4b | `/catalyst.refresh` — bidirectional sync (.md↔.drawio) + regenerate .json + .png | < 15 sec |
 | 5 | Review and edit the markdown blueprint | 10 min |
 | 5a | **`/catalyst.assess` — governance assessment (auto-refreshes if stale)** | **1–5 min per assessment** |
 | 6 | `/catalyst.generate` — coding agent generates the project (with governance gate) | 5–10 min |
@@ -276,9 +276,13 @@ Type `/catalyst.blueprint`. The coding agent connects to the **Blueprint Advisor
 - **`app-blueprint.json`** — the DERIVED artifact. Machine-readable JSON generated from the `.md`. Consumed by `/catalyst.generate` for code generation. **Never edit this file directly** — it's regenerated from `.md` automatically.
 - **Diagram files** — `.drawio.xml` (editable in Draw.io VSCode extension) + `.png` (rendered by Eraser.io headless, inline in markdown)
 
-Edit `app-blueprint.md` (all 9 sections are editable governance decisions) and `diagrams/*.drawio.xml` (in Draw.io VSCode extension) with whichever tool you prefer.
+Edit `app-blueprint.md` (all 9 sections are editable governance decisions) and `diagrams/*.drawio.xml` (in Draw.io VSCode extension) with whichever tool you prefer. You can edit EITHER artifact — `/catalyst.refresh` syncs them bidirectionally:
 
-**After editing, run `/catalyst.refresh`:** This validates .md structure (9 sections), checks .md↔.drawio consistency (agents in diagram match §2 topology), and regenerates `app-blueprint.json` (from .md + spec.md + plan.md) + diagram `.png` files.
+- **Edit only .md** (e.g., add an agent in §2 narrative) → `/catalyst.refresh` regenerates .drawio.xml + .png to match
+- **Edit only .drawio** (e.g., add a box in Draw.io) → `/catalyst.refresh` updates .md §2 narrative + mermaid to match
+- **Edit both** → `/catalyst.refresh` reconciles, auto-merging consistent changes and surfacing conflicts for you to resolve
+
+**After editing, run `/catalyst.refresh`:** This detects which artifact changed, syncs the other one to match, validates consistency, and regenerates `app-blueprint.json` (from .md + spec.md + plan.md) + diagram `.png` files.
 
 **If you skip `/catalyst.refresh`:** `/catalyst.assess` auto-refreshes for you (detects stale .json, refreshes before assessing). But `/catalyst.generate` BLOCKS on stale .json — requires explicit refresh or assess first. This prevents code generation from outdated blueprints.
 
@@ -293,9 +297,9 @@ Your workspace contains 4 formats per diagram. You only need to edit ONE — the
 
 | **Draw.io** | `hediet.vscode-drawio` extension | `*.drawio.xml` | Full draw.io editor in a VSCode tab. Standard diagramming UI. |
 
-**After editing a diagram:** Run `/catalyst.refresh` — it validates .md↔.drawio consistency (catches mismatches like "diagram shows 8 agents but §5 has 7"), regenerates `.png` from edited `.drawio.xml` (Eraser.io headless), and regenerates `.json` from `.md`.
+**After editing a diagram:** Run `/catalyst.refresh` — it detects that only .drawio changed (Case B), parses the new/removed nodes and edges from the diagram, updates `app-blueprint.json` with the topology changes, uses the Blueprint Advisor LLM to update §2 narrative + mermaid in the .md to reflect the edits, and regenerates `.png` via Eraser.io headless. You drew a box — the prose auto-updated.
 
-> **Tip:** Draw.io has a VSCode extension (`hediet.vscode-drawio`) that works fully offline — no cloud dependency. Edit `.drawio.xml` visually, save, run `/catalyst.refresh` to regenerate `.png`.
+> **Tip:** Draw.io has a VSCode extension (`hediet.vscode-drawio`) that works fully offline — no cloud dependency. Edit `.drawio.xml` visually, save, run `/catalyst.refresh` — it syncs the .md narrative to match your diagram changes AND regenerates `.png`. You never need to manually update both files.
 
 → *See `app-blueprint-md-template-and-fnol-example.md` for the complete 9-section template structure and FNOL reference example.*
 
@@ -373,49 +377,94 @@ For each tool in the blueprint, verify the `assigned_to` agent makes sense:
 
 **Pro tip:** Read the blueprint top-to-bottom and mentally trace the FNOL workflow. For each agent, ask: "Does this agent have access to every data source it needs, and ONLY the data sources it needs?" An agent with too many tools has too much scope. An agent missing a tool will fail at runtime.
 
-### 2.6a `/catalyst.refresh` — Validate edits + regenerate derived files
+### 2.6a `/catalyst.refresh` — Bidirectional sync + validate + regenerate
 
-After editing `app-blueprint.md` (any section) or `diagrams/*.drawio.xml`, run:
+![/catalyst.refresh — Bidirectional Sync Flow](refresh-sync-flow.png)
+
+After editing `app-blueprint.md` and/or `diagrams/*.drawio.xml`, run:
 
 ```
 /catalyst.refresh
 ```
 
-This does 3 things in < 10 seconds:
+The coding agent automatically reads `spec.md` and `plan.md` from your workspace — you don't pass them as parameters.
 
-**1. VALIDATE structure:**
-- Completeness: are all 9 sections (§1-§9) present?
-- .md↔.drawio consistency: do agents in the diagram match §2 component topology?
-- If mismatch: "Diagram has 8 agents, §5 has 7. Missing: fraud-check-agent."
+This does 4 things in < 15 seconds:
 
-**2. REGENERATE .json from .md + spec.md + plan.md:**
-- New agent added → technical config (tool bindings, security, observability) re-derived into .json from .md + spec.md + plan.md
-- .json is fully regenerated from current .md + spec.md + plan.md
-- All technical config (agent tree, tool bindings, infra modules) derived fresh
+**Step 0. DETECT what changed** (timestamp comparison against `.blueprint-hashes`):
+- Case A: Only .md changed → sync diagram FROM .md
+- Case B: Only .drawio changed → sync .md FROM diagram
+- Case C: Both changed → reconcile differences
 
-**3. REGENERATE derived files:**
-- `app-blueprint.json` — derived from .md + spec.md + plan.md
-- `diagrams/*.png` — re-rendered from `.drawio.xml` via Eraser.io headless (only if .drawio was modified)
+**Step 1. SYNC the unchanged artifact to match the changed one:**
 
-**Output:**
+**Case A — You edited only the .md** (e.g., added a fraud-check agent in §2 narrative):
 ```
 /catalyst.refresh
-  Validating §1-§9... ✅ All 7 sections present
-  Checking .md↔.drawio consistency... ✅ 8 agents in both
+  Detected: .md changed, .drawio unchanged (Case A)
+  Extracting topology from edited .md...
   Regenerating .json from .md + spec.md + plan.md...
-    .json: agent tree updated (fraud-check-agent added with tool bindings from API Hub)
-    .json: security config updated (fraud-check-agent: Model Armor standard)
-    §12: +1 row (fraud-check-agent OTel span: fnol.fraud_check)
-    §9, §11: no changes needed
-  Regenerating app-blueprint.json... ✅ (.md + spec.md + plan.md → JSON)
-  Regenerating diagrams/component-architecture.png... ✅ (from .drawio.xml)
-  
-  ✅ Refresh complete. .json and .png are current.
+    .json: agent tree updated (fraud-check-agent added)
+  Generating Eraser.io DSL from .json topology...
+  Calling Eraser.io API → new .drawio.xml + .png
+  ✅ Diagram auto-updated to match your .md edits
 ```
+You edited prose — the diagram auto-updated.
 
-> **Can I skip this?** Yes — `/catalyst.assess` and `/catalyst.generate` both auto-detect stale files (by comparing .md/.drawio timestamps with .json timestamp) and run a lightweight refresh as Step 0 before proceeding. You'll see: "Stale .json detected — auto-refreshing..." So `/catalyst.refresh` is OPTIONAL as a standalone command but gives you detailed validation feedback. The auto-refresh in `/catalyst.assess` and `/catalyst.generate` is silent — it just ensures files are current.
+**Case B — You edited only the .drawio** (e.g., added a box in Draw.io):
+```
+/catalyst.refresh
+  Detected: .drawio changed, .md unchanged (Case B)
+  Parsing .drawio.xml → found new node: fraud-check-agent
+  Diffing against .json → new agent + new edge (fraud-check-agent → fraud-db-mcp)
+  Updating .json with new topology...
+  Updating .md §2 narrative + mermaid via Blueprint Advisor...
+    §2: Added "After severity classification, a fraud-check agent validates
+         claim patterns against the fraud database (fraud-db-mcp)."
+  Regenerating .png from .drawio.xml...
+  ✅ .md narrative auto-updated to match your diagram edits
+```
+You drew a box — the prose auto-updated.
 
-> **What if .md and .drawio conflict?** `/catalyst.refresh` reports the mismatch: "§5 shows 7 agents, diagram shows 8. Missing from §5: fraud-check-agent." It does NOT auto-resolve — you must fix the conflict (add the agent to §5 or remove it from the diagram) and re-run `/catalyst.refresh`.
+**Case C — You edited both** (e.g., added agent in §2 AND added box in diagram):
+```
+/catalyst.refresh
+  Detected: .md AND .drawio both changed (Case C)
+  Extracting topology from .md... found: +fraud-check-agent
+  Parsing .drawio.xml... found: +fraud-check-agent
+  Diffing both against last-known .json:
+    AGREE: fraud-check-agent added in both → auto-merged ✅
+    No conflicts detected.
+  Syncing both artifacts through .json...
+  Regenerating .drawio.xml + .png + .md §2 mermaid...
+  ✅ Both artifacts reconciled and synced
+```
+If there IS a conflict (e.g., .md says agent→tool-A, diagram says agent→tool-B):
+```
+  ⚠️ CONFLICT: fraud-check-agent tool binding
+    .md says: fraud-check-agent → fraud-db-mcp
+    diagram says: fraud-check-agent → claims-db-mcp
+    Which should I keep? [.md / diagram / let me edit]
+```
+You resolve the conflict, then refresh completes the sync.
+
+**Step 2. VALIDATE** (post-sync consistency):
+- .md completeness: all 9 sections present?
+- .md↔.drawio node parity: agent count matches?
+- .md↔.drawio name matching: agent names match?
+- Pattern composition: adjacency rules valid?
+- .json consistency: adk_agent_tree matches both .md and .drawio?
+
+**Step 3. REGENERATE derived files:**
+- `app-blueprint.json` — derived from synced .md + spec.md + plan.md
+- `diagrams/*.png` — re-rendered from synced `.drawio.xml` via Eraser.io headless
+- `.blueprint-hashes` — updated with new SHA-256 values
+
+> **Can I skip this?** Yes — `/catalyst.assess` auto-refreshes for you (detects stale files, runs a lightweight bidirectional sync as Step 0). But `/catalyst.generate` BLOCKS on stale .json — requires explicit refresh or assess first. `/catalyst.refresh` gives you detailed sync and validation feedback; the auto-refresh is silent.
+
+> **How does it know which file changed?** The `.blueprint-hashes` file stores SHA-256 hashes of all artifacts from the last refresh. On the next refresh, it compares current file hashes against stored hashes to determine Case A, B, or C.
+
+> **What if I only edited §4 (Tech Stack) in the .md?** Non-topology changes (§3-§9) don't affect the diagram. Refresh detects that .md changed, but the topology diff against .json shows no agent/connection changes — so the diagram is NOT regenerated. Only .json is regenerated (to pick up the tech stack change). This is efficient: diagram regeneration only happens when topology changes.
 
 ### 2.7 `/tasks` — See the breakdown
 
@@ -424,7 +473,7 @@ Type `/tasks`. See the 80/20 split:
 **Auto-generated:** Agent classes, MCP connections, A2A clients, Model Armor callbacks, Terraform, **Apigee proxy routes** (one per tool binding), **per-agent Workload Identity** IAM bindings (least-privilege from topology), **API Hub registration entry** (agent card for future A2A discovery), Dynatrace, CI/CD pipelines
 
 > **What the new generated artifacts do for you:**
-> - **Apigee proxy routes** — each tool binding in your blueprint (§5) generates one Apigee proxy route with the correct authentication (mTLS, OAuth, API Key from §7). A2A agent connections discovered via API Hub generate A2A-specific proxy routes. You don't configure Apigee manually.
+> - **Apigee proxy routes** — each tool binding in your blueprint topology (§2, derived into app-blueprint.json) generates one Apigee proxy route with the correct authentication (mTLS, OAuth, API Key). A2A agent connections discovered via API Hub generate A2A-specific proxy routes. You don't configure Apigee manually.
 > - **Per-agent Workload Identity** — each agent in your topology (§3) gets its own GCP service account with IAM bindings ONLY for the tools assigned to it in §5. If `extract_details` is assigned to `claims-db-mcp`, it gets `roles/cloudsql.client` but cannot access `policy-api-mcp`. Least-privilege by default.
 > - **API Hub registration** — after deployment, the CI/CD pipeline registers your agent in Apigee API Hub with capabilities and an Agent Card URL. Future Blueprint Advisor runs discover your agent and can recommend A2A delegation to it — reusing your agent instead of rebuilding.
 > See Architecture Document Layer 3 for Terraform examples and derivation logic. See Operations Runbook §11 for health checks and failure modes.

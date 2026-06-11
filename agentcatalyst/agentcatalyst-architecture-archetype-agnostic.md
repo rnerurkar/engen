@@ -131,7 +131,7 @@ When the background pipeline completes, the coding agent calls `blueprint_result
 
 The markdown file describes WHAT to build: 5 agents (Coordinator + Sequential + Parallel + Loop + HITL), 3 MCP servers (BigQuery, Cloud SQL, Vertex AI Search), 3 A2A agents (body shop, rental car, police report), 3 FunctionTool implementations (severity classifier, coverage calculator, notification sender — with her IF/THEN business rules included), infrastructure settings, EvalOps configuration, and a golden dataset derived from her acceptance criteria. Component diagrams are rendered as inline PNG images with editable `.drawio.xml` alongside.  NFRs, ADL, and tech stack are tables. Each recommendation is tagged with a confidence level (high/medium/low).
 
-She reviews the markdown in her editor — the component diagram renders inline in VSCode's markdown preview, all tables are readable. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the table directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the markdown **and regenerates `app-blueprint.json`** from the edited sections (the JSON is always derived from the `.md` — never edited directly). If she needs to edit the component diagram, she opens the `.drawio.xml` file in the Draw.io VSCode extension — edits visually, saves, and runs `/catalyst.refresh` to regenerate the `.png` and validate consistency with the `.md`. Updated diagrams are picked up automatically on her next `/catalyst.assess` run.
+She reviews the markdown in her editor — the component diagram renders inline in VSCode's markdown preview, all tables are readable. The Blueprint Advisor assigned Cloud SQL to the wrong agent — she edits the table directly, changing `assigned_to: extract_details` to `assigned_to: fnol_coordinator`. She saves. Her coding agent calls `validate_composition` via MCP — a deterministic check that her edited pattern tree is valid (e.g., LoopAgent cannot nest inside ParallelAgent). It passes. Then `assemble_blueprint` finalizes the markdown **and regenerates `app-blueprint.json`** from the edited sections (the JSON is always derived from the `.md` — never edited directly). If she needs to edit the component diagram, she opens the `.drawio.xml` file in the Draw.io VSCode extension — adds a fraud-check agent box, draws a connection to the fraud-db MCP server, saves. She types `/catalyst.refresh`. The refresh detects that only the .drawio.xml changed (Case B), parses the new node and edge from the diagram, updates `app-blueprint.json` with the new agent and tool binding, and uses the Blueprint Advisor LLM to update §2's narrative and mermaid sequence in the .md to reflect the addition — all automatically. She can also edit in the opposite direction: add an agent in the .md prose, and `/catalyst.refresh` regenerates the .drawio.xml to match (Case A). If she edited both files, refresh detects conflicts and asks her to resolve them (Case C). Updated files are picked up automatically on her next `/catalyst.assess` run.
 
 ### Spec Signal Validation (Quality Gate in Blueprint Advisor)
 
@@ -146,7 +146,7 @@ Before the RAG pipeline runs, the Blueprint Advisor validates that the spec cont
 | §5 External Partners | "They operate their own system" signal | Determines A2A vs MCP decision. Missing this → pipeline defaults to MCP when A2A is correct. | Each partner has own-system flag | Partners listed but no flag | §5 empty (may be legitimate) |
 | §7 Business Rules | IF/THEN format | Seeds FunctionTool first-drafts. Prose like "handle complex claims" can't be converted to code. | All rules in IF/THEN | Mixed format | §7 empty or all prose |
 | §8 Sensitive Data | PII/PHI/financial classification | Triggers Model Armor callback generation. Missing → agents handle PII without screening. | Specific classifications | Vague "some sensitive data" | §8 empty when §4 has user-facing systems |
-| §10 Acceptance Criteria | Measurable metrics: "< 5 min", "> 95% accuracy" | Seeds golden dataset for EvalOps. "Make it faster" is unmeasurable. | ≥3 measurable criteria | 1-2 measurable + vague | 0 measurable criteria |
+| spec.md §10 Acceptance Criteria | Measurable metrics: "< 5 min", "> 95% accuracy" | Seeds golden dataset for EvalOps. "Make it faster" is unmeasurable. | ≥3 measurable criteria | 1-2 measurable + vague | 0 measurable criteria |
 
 **Validation output:** A `spec_quality_score` (0-100) with per-section status (PASS/WARN/BLOCK). If any section is BLOCK, `blueprint_start` returns immediately with specific guidance ("§2 has no ordering words — add 'first', 'then', 'in parallel' to describe the workflow sequence"). If WARN, the pipeline continues but attaches warnings to the blueprint output with a lower confidence score. If all PASS, the pipeline runs at full confidence.
 
@@ -165,7 +165,7 @@ Layer 1: LOCAL (SpecKit Preset — during /specify capture)
   │ §4 captured → check specific system names → ✅/⚠️       │
   │ §5 captured → check "own system" flags → ✅/⚠️          │
   │ §7 captured → check IF/THEN format → ✅/⚠️/❌           │
-  │ §10 captured → check measurable criteria → ✅/⚠️/❌     │
+  │ spec §10 captured → check measurable criteria → ✅/⚠️/❌     │
   │                                                          │
   │ Summary validation → score → write spec.md               │
   └─────────────────────────────────────────────────────────┘
@@ -198,7 +198,7 @@ The `/specify` SpecKit preset includes validation rules directly in its template
 | §5 External Partners | "Own system" flag per partner | Preset template instructs: "For each partner, ask: does [partner] operate their own system?" |
 | §7 Business Rules | IF/THEN format | Preset template instructs: "If rules are prose, ask to rephrase as IF condition THEN action" |
 | §8 Sensitive Data | Cross-check with §4 | Preset template instructs: "If §4 has user-facing systems but §8 is empty, warn" |
-| §10 Acceptance Criteria | Measurable metrics | Preset template instructs: "If criteria like 'fast' or 'accurate', ask for measurable: '< 5 min', '> 95%'" |
+| spec.md §10 Acceptance Criteria | Measurable metrics | Preset template instructs: "If criteria like 'fast' or 'accurate', ask for measurable: '< 5 min', '> 95%'" |
 
 **RAG pipeline with validation (both layers):**
 ```
@@ -214,7 +214,7 @@ The `/specify` SpecKit preset includes validation rules directly in its template
     → assemble_blueprint
 ```
 
-Before generating code, she runs the governance check. She edits §5 (adds a fraud-check agent) and opens `component-architecture.drawio.xml` in Draw.io to add the box. She types `/catalyst.refresh` — it validates .md↔.drawio consistency, regenerates .json (from .md + spec.md + plan.md) + .png. **Skip-refresh safety:** If `/catalyst.assess` detects that `app-blueprint.md` or any `.drawio.xml` file has been modified since the last `/catalyst.refresh` (by comparing file timestamps with `.json` timestamp), it auto-triggers a lightweight refresh as Step 0 — validating .md structure, checking .md↔.drawio consistency, and regenerating `.json` + `.png`. The developer sees: "Stale .json detected — auto-refreshing before assessment..." This means `/catalyst.refresh` is OPTIONAL as a standalone command (for detailed validation feedback) but AUTOMATIC before assessment and code generation. The developer can never accidentally assess or generate from stale files.
+Before generating code, she runs the governance check. She edits §2 (adds a fraud-check agent to the topology) and opens `component-architecture.drawio.xml` in Draw.io to add the box. She types `/catalyst.refresh` — it detects that both .md and .drawio.xml changed (Case C: she edited §2 in the .md AND added the box in Draw.io). It auto-merges the consistent changes, and since both agree on the fraud-check-agent addition, no conflict. It regenerates .json (from synced .md + spec.md + plan.md) + .drawio.xml + .png, with the .md §2 narrative updated to include the new agent. **Skip-refresh safety:** If `/catalyst.assess` detects that `app-blueprint.md` or any `.drawio.xml` file has been modified since the last `/catalyst.refresh` (by comparing file timestamps with `.json` timestamp), it auto-triggers a lightweight refresh as Step 0 — validating .md structure, checking .md↔.drawio consistency, and regenerating `.json` + `.png`. The developer sees: "Stale .json detected — auto-refreshing before assessment..." This means `/catalyst.refresh` is OPTIONAL as a standalone command (for detailed validation feedback) but AUTOMATIC before assessment and code generation. The developer can never accidentally assess or generate from stale files.
 
 She types `/catalyst.assess`. The coding agent reads `app-blueprint.md` (NOT `app-blueprint.json` — the Governance Guardian assesses the human-readable architecture, not the machine-readable JSON) and extracts all 9 governance sections — §1 Application Overview, §2 Component Topology Diagram (+ PNG from `![...]()` reference), §3 Architecture Patterns, §4 Tech Stack, §5 DevSecOps Stack, §6 HA/DR Guidance, §7 HA/DR Lifecycle Diagrams (+ PNG from `![...]()` reference), §8 Architecture Decision Log, §9 NFRs — packages them as a **solution_package** (an ephemeral JSON transport payload sent over MCP — this is NOT the same as the persisted `app-blueprint.json` file), and sends them to the **Governance Guardian MCP Server** using the same async pattern as the Blueprint Advisor (`assess_start` → poll `assess_status` → `assess_result`). The `app-blueprint.json` file in the workspace is not read, not sent, and not modified during governance assessment — it exists solely for `/catalyst.generate` to consume later. While the EA assessment engine evaluates her solution (a black box to AgentCatalyst — the EA office owns all the assessment logic), she sees progress in the Chat pane: "Evaluating architecture compliance...", "Checking pattern adherence...", "Scoring HA/DR readiness...".
 
@@ -324,7 +324,7 @@ The Blueprint Advisor is an LlmAgent running on Cloud Run, **exposed as an MCP S
 | `blueprint_start(spec, plan)` | **ASYNC START** | < 2 seconds | Validates input, creates a background task in the Task Store, enqueues the pipeline via Cloud Tasks, returns `taskId` + `pollInterval` immediately |
 | `blueprint_status(taskId)` | **POLL** | < 1 second | Returns current pipeline stage (searching / reasoning / validating / assembling) and a progress message for display to the developer |
 | `blueprint_result(taskId)` |
-| `refresh(blueprint_md, drawio_files[])` | **SYNCHRONOUS** | < 10 seconds | NEW — Called after developer edits `.md` and/or `.drawio.xml`. Does 2 things: (1) VALIDATE: .md completeness (§1-§9) + .md↔.drawio consistency (agents in diagram match §2 topology). (2) REGENERATE: `.json` from .md + spec.md + plan.md + `.png` from `.drawio.xml` via Eraser.io headless. Returns: structural_report, updated .json + .png files. Also auto-triggered as Step 0 of `/catalyst.assess` and `/catalyst.generate` if stale files detected. |
+| `refresh(blueprint_md, drawio_files[], spec, plan)` | **SYNCHRONOUS** | < 15 seconds | Called after developer edits `.md` and/or `.drawio.xml`. **Bidirectional sync:** (1) DETECT which artifact changed via timestamp comparison against `.blueprint-hashes`. (2) SYNC the unchanged artifact to match the changed one — if only .md changed, regenerate .drawio.xml + .png from topology extracted from .md via `app-blueprint.json` as structured intermediate; if only .drawio changed, parse .drawio.xml and update .md §2 narrative + mermaid via LLM; if both changed, reconcile via diff against last-known .json with conflict detection. (3) VALIDATE .md↔.drawio consistency post-sync. (4) REGENERATE `.json` from synced .md + spec.md + plan.md + `.png` from synced .drawio.xml via Eraser.io headless. Returns: sync_report (what changed, what was synced, any conflicts), structural_report, updated .md and/or .drawio.xml + .json + .png. Also auto-triggered as Step 0 of `/catalyst.assess` and `/catalyst.generate` if stale files detected. |
 | `blueprint_result(taskId)` | **RETRIEVE** | < 1 second | Returns JSON with: `markdown` (full app-blueprint.md content, 9 sections), `diagrams` (array of base64-encoded PNGs + `.drawio.xml` source), `spec_hash`, `plan_hash`, `blueprint_hash`. The prompt file writes the .md and all diagram files to the workspace. |
 | `validate_composition(pattern_tree)` | **DETERMINISTIC** | < 1 second | Checks developer's edited pattern selections against adjacency matrix. Returns valid/invalid + reason. Called after developer edits the blueprint |
 | `assemble_blueprint(selections, spec, plan)` | **DETERMINISTIC** | < 1 second | Rebuilds final `app-blueprint.md` from validated selections + **regenerates `app-blueprint.json`** from the `.md` sections (machine-readable derived artifact). Diagram rendering via **Eraser.io headless export** (→ `.drawio.xml` source + `.png` rendered). No LLM involved. Called after validation passes, and auto-called by `/catalyst.generate` if `.md` was edited since last assembly. |
@@ -428,6 +428,155 @@ The Developer Guide (Section 5) includes the complete schema and an annotated ex
 | Supervisor | LlmAgent + delegation | "Oversee" or "quality check" |
 | Critic / Evaluator | LlmAgent | "Validate" or "score quality" |
 | Custom Tool Agent | LlmAgent + FunctionTool | Proprietary logic — domain-specific |
+### ADK 2.0 Migration Path — Graph-Based Workflows, Skills, and Task API
+
+**Status:** ADK Python 2.0 is GA. The 11 template patterns above are still supported but are now one layer in a three-layer workflow hierarchy.
+
+**What ADK 2.0 adds:**
+
+| ADK 2.0 Feature | What it does | Impact on Pattern Catalog |
+|---|---|---|
+| **Graph-based workflows** | Directed graph with conditional branching, fan-out/fan-in, loops, retry, state management, HITL | Subsumes Sequential, Parallel, Loop, HITL as graph topologies — one pattern instead of four. |
+| **Dynamic workflows** | Compose agents using full programmatic code logic | Enables code-driven orchestration the template patterns can't express. |
+| **Collaborative workflows** | Coordinator agent dynamically delegates to sub-agents via LLM reasoning | Adds a "team coordinator" pattern distinct from Sequential orchestration. |
+| **Task API** | Structured agent-to-agent delegation with multi-turn task mode | Enriches A2A delegation with multi-turn negotiation and controlled output. |
+| **Skills (SkillToolset)** | Runtime-loadable, self-contained units of functionality with progressive disclosure | Formalizes the skill concept as a cross-platform standard. |
+
+**MVP strategy: Option A (template patterns) with documented path to Option C (hybrid).**
+
+| Option | Description | Risk | When |
+|---|---|---|---|
+| **A (current)** | Stay on template patterns. 11 patterns in catalog remain as-is. | Low | Current phase |
+| **B (not recommended)** | Full migration to graph-based. Replace all 11 patterns. | High — ADK 2.0 just shipped GA | Not recommended |
+| **C (recommended)** | Hybrid. Keep template patterns for simple compositions. Add graph-based for complex. Blueprint Advisor decides which layer based on spec complexity. | Medium | Future phase |
+
+**Backward compatibility:** ADK 2.0 is backward-compatible with template patterns. SequentialAgent, ParallelAgent, and LoopAgent still work. The migration is additive, not destructive.
+
+
+
+### End-to-End Call Sequence (All 4 Phases)
+
+The following sequence diagram shows the complete developer workflow across all 4 phases: `/catalyst.blueprint` (async MCP Tasks), HITL Edit + `/catalyst.refresh` (bidirectional sync with Case A/B/C), `/catalyst.assess` (Governance Guardian), and `/catalyst.generate` (code generation).
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer (IDE)
+    participant CA as Coding Agent
+    participant BA as Blueprint Advisor<br/>MCP Server
+    participant BG as Background Job<br/>(Cloud Run Job)
+    participant VS as Vertex AI Search
+    participant AH as Apigee API Hub
+    participant ER as Eraser.io Headless
+    participant TS as Task Store (AlloyDB)
+    participant GG as Governance Guardian<br/>MCP Server
+
+    Note over Dev,GG: Phase 1 — /catalyst.blueprint (Async MCP Tasks)
+
+    Dev->>CA: /catalyst.blueprint
+    CA->>BA: blueprint_start(spec, plan)
+    BA->>TS: Create task (status: queued)
+    BA->>BG: Enqueue via Cloud Tasks
+    BA-->>CA: { taskId, pollInterval: 5s }
+
+    loop Poll until complete
+        CA->>BA: blueprint_status(taskId)
+        BA->>TS: Read task status
+        BA-->>CA: { status: running, stage: "reasoning..." }
+    end
+
+    BG->>VS: search_patterns(spec signals)
+    VS-->>BG: matched patterns + confidence
+    BG->>AH: discover_integrations(spec §4-§5)
+    AH-->>BG: MCP servers + A2A agents + REST APIs
+    BG->>BG: recommend_architecture (LlmAgent)
+    BG->>BG: validate_composition (adjacency)
+    BG->>BG: adr_compliance_check (deterministic)
+    BG->>BG: Construct Eraser.io DSL from topology
+    BG->>ER: render component topology
+    ER-->>BG: component-diagram.drawio.xml + .png
+    BG->>ER: render HA/DR lifecycle views
+    ER-->>BG: hadr-lifecycle.drawio.xml + .png
+    BG->>BG: assemble_blueprint (.md + .json)
+    BG->>TS: Update task (completed)
+
+    CA->>BA: blueprint_result(taskId)
+    BA->>TS: Read completed task
+    BA-->>CA: { markdown, diagrams[], json }
+    CA->>Dev: Write .md + .json + .drawio.xml + .png
+
+    Note over Dev,GG: Phase 2 — HITL Edit + /catalyst.refresh (Bidirectional Sync)
+
+    Dev->>Dev: Edit .md and/or .drawio.xml
+    Dev->>CA: /catalyst.refresh
+    CA->>BA: refresh(md, drawio, spec, plan)
+
+    Note over BA: Step 0: Detect what changed
+
+    alt Case A: Only .md changed
+        BA->>BA: LLM extracts topology from prose
+        BA->>BA: Regenerate .json
+        BA->>BA: Generate Eraser.io DSL from .json
+        BA->>ER: Render new .drawio.xml + .png
+        ER-->>BA: Updated diagrams
+    else Case B: Only .drawio changed
+        BA->>BA: Parse .drawio → extract topology
+        BA->>BA: Diff against .json
+        BA->>BA: Update .json
+        BA->>BA: LLM updates .md §2 narrative
+        BA->>ER: Re-render .png
+        ER-->>BA: Updated .png
+    else Case C: Both changed
+        BA->>BA: Extract topology from both
+        BA->>BA: Diff against last-known .json
+        BA->>BA: Auto-merge agreements
+        alt Conflicts detected
+            BA-->>CA: Conflict report
+            CA->>Dev: Which version to keep?
+            Dev->>CA: Resolution
+            CA->>BA: Resolved
+        end
+        BA->>BA: Sync through merged .json
+        BA->>ER: Render reconciled diagrams
+        ER-->>BA: Reconciled .drawio.xml + .png
+    end
+
+    BA->>BA: Post-sync validation
+    BA->>BA: Regenerate .json + .blueprint-hashes
+    BA-->>CA: { sync_report, updated files }
+    CA->>Dev: Write synced files
+
+    Note over Dev,GG: Phase 3 — /catalyst.assess (Governance Guardian)
+
+    Dev->>CA: /catalyst.assess
+    CA->>CA: Auto-refresh if stale (Step 0)
+    CA->>CA: Extract 9 sections from .md
+    CA->>GG: assess_start(solution_package)
+    GG->>TS: Create assessment task
+    GG-->>CA: { taskId }
+
+    loop Poll assessment
+        CA->>GG: assess_status(taskId)
+        GG-->>CA: { status: running }
+    end
+
+    GG->>GG: EA assessment engine (black box)
+    GG-->>CA: scorecard + findings
+
+    alt Showstoppers found
+        CA->>Dev: Fix and re-assess
+        Dev->>Dev: Fix → /catalyst.refresh → /catalyst.assess
+    else Tech debt only
+        CA->>GG: recordTechDebt(findings)
+        GG-->>CA: { signal: resume, tech_debt_ids }
+    end
+
+    Note over Dev,GG: Phase 4 — /catalyst.generate
+
+    Dev->>CA: /catalyst.generate
+    CA->>CA: Verify .json not stale
+    CA->>CA: Read .json + skills
+    CA->>Dev: Generate code (agents, TF, CI/CD, eval, security)
+```
 
 ### Blueprint Advisor MCP Server — Security
 
@@ -635,7 +784,7 @@ The coding agent reads the markdown blueprint and generates the complete project
 
 #### Apigee proxy generation — per-connection routing from app-blueprint.md
 
-Each tool binding in §5 generates one Apigee proxy route with authentication settings from §7 (MCP server configs). A2A agent connections discovered via API Hub generate A2A-specific proxy routes.
+Each tool binding in the blueprint topology (derived into app-blueprint.json from §2) generates one Apigee proxy route with authentication from the security config (MCP server configs). A2A agent connections discovered via API Hub generate A2A-specific proxy routes.
 
 | Source | What's generated | Purpose |
 |---|---|---|
@@ -645,10 +794,10 @@ Each tool binding in §5 generates one Apigee proxy route with authentication se
 
 #### Per-agent Workload Identity — least-privilege from app-blueprint.md
 
-For each agent in the topology (§3), the IaC generation derives a per-agent IAM configuration from the tool bindings (§5): the agent gets IAM bindings ONLY for the tools assigned to it. All other tools are implicitly denied.
+For each agent in the topology (§2 Component Topology, derived into app-blueprint.json), the IaC generation derives a per-agent IAM configuration from the tool bindings (in app-blueprint.json): the agent gets IAM bindings ONLY for the tools assigned to it. All other tools are implicitly denied.
 
 ```hcl
-# Generated from app-blueprint.md §3 (topology) + §5 (tool bindings)
+# Generated from app-blueprint.md §2 (topology) + app-blueprint.json (tool bindings)
 resource "google_service_account" "extract_details" {
   account_id   = "fnol-extract-details"
   display_name = "FNOL - extract_details agent"
@@ -685,7 +834,7 @@ After deployment, the CI/CD pipeline registers the agent in Apigee API Hub as a 
 
 Once registered, future Blueprint Advisor runs discover this agent via `discover_integrations()` and can recommend A2A delegation to it — reusing the deployed agent instead of rebuilding duplicate capability. This creates a flywheel: the more agents deployed via AgentCatalyst, the more agents available for A2A delegation in future projects.
 
-→ *See Operations Runbook §11 for Apigee proxy, per-agent Workload Identity, and API Hub A2A operational procedures, health checks, and failure modes.*
+→ *See Operations Runbook § MCP/A2A Operations for Apigee proxy, per-agent Workload Identity, and API Hub A2A operational procedures, health checks, and failure modes.*
 
 #### IaC generation — how the Terraform overlay skill uses GitHub URLs
 
@@ -698,7 +847,7 @@ The Terraform generation flow is the most infrastructure-critical step in the pi
 | **Pattern repo** | `github.com/company/tf-agentic-pilot-cold` | Complete IaC scaffold for an entire architectural pattern + DR strategy combination. Wires together multiple service modules. |
 | **Service module** | `github.com/company/tf-cloud-sql` | Individual Terraform module for one cloud service. Enforces company standards (naming, tagging, encryption, HA). |
 
-The pattern repo is selected by the Blueprint Advisor based on two fields: the archetype (agentic, microservice, pipeline, API) and the DR strategy from plan.md (backup-restore, pilot-cold, pilot-ondemand, warm-standby). The service modules are selected based on the tech stack in §12.
+The pattern repo is selected by the Blueprint Advisor based on two fields: the archetype (agentic, microservice, pipeline, API) and the DR strategy from plan.md (backup-restore, pilot-cold, pilot-ondemand, warm-standby). The service modules are selected based on the tech stack in §4 Application Tech Stack.
 
 **Step-by-step generation flow:**
 
@@ -717,9 +866,9 @@ The pattern repo is selected by the Blueprint Advisor based on two fields: the a
    | §3 Agent Topology: agent names | `services{}` map | One Cloud Run service per agent with CPU/memory |
    | §5 Tool Bindings: MCP endpoints | `mcp_server_endpoints{}` | Connection strings per tool |
    | §7 MCP Server Configs: auth methods | `auth_configs{}` | mTLS / OAuth / API Key per server |
-   | §10 NFRs: availability target | HA configuration | 99.95% → `ha_enabled = true` |
-   | §10 NFRs: RPO | Cross-region replica | RPO < 1 hour → `replica_region = var.dr_region` |
-   | §12 Tech Stack: data layer | Service module selection | Cloud SQL → `tf-cloud-sql` |
+   | §9 NFRs: availability target | HA configuration | 99.95% → `ha_enabled = true` |
+   | §9 NFRs: RPO | Cross-region replica | RPO < 1 hour → `replica_region = var.dr_region` |
+   | §4 Tech Stack: data layer | Service module selection | Cloud SQL → `tf-cloud-sql` |
 
 4. **Generate the Terraform project** — The skill generates a complete directory structure:
 
@@ -748,8 +897,8 @@ The pattern repo is selected by the Blueprint Advisor based on two fields: the a
      source  = "github.com/company/tf-cloud-sql?ref=v3.1.0"
      instance_name  = "${var.project_name}-claims-db"
      region         = var.primary_region
-     ha_enabled     = true              # From §10 NFRs: 99.95% availability
-     replica_region = var.dr_region     # From §10 NFRs: RPO < 1 hour
+     ha_enabled     = true              # From §9 NFRs: 99.95% availability
+     replica_region = var.dr_region     # From §9 NFRs: RPO < 1 hour
    }
    ```
 
@@ -818,7 +967,7 @@ All runtime services are GA with SLA backing:
 | Content screening | Model Armor (standard) | Google's default single-pass screening. Segmented Model Armor (per-source attribution with source-specific remediation) is a future roadmap item — it requires custom implementation beyond the Model Armor API. Standard Model Armor provides adequate content screening for GA. |
 | Security | VPC-SC + CMEK + Secret Manager + Workload Identity | Data protection, key management, identity |
 
-> **Zero manual configuration:** Apigee proxy routes (one per tool binding), per-agent Workload Identity IAM bindings (least-privilege from blueprint topology + tool assignments), and API Hub registration entries (agent card for A2A discovery) are all generated by `/catalyst.generate` from `app-blueprint.md` — see Layer 3 for the generation flow, and Operations Runbook §11 for health checks and failure modes. No DevOps engineer manually configures proxy routes, IAM policies, or API Hub entries.
+> **Zero manual configuration:** Apigee proxy routes (one per tool binding), per-agent Workload Identity IAM bindings (least-privilege from blueprint topology + tool assignments), and API Hub registration entries (agent card for A2A discovery) are all generated by `/catalyst.generate` from `app-blueprint.md` — see Layer 3 for the generation flow, and Operations Runbook § MCP/A2A Operations for health checks and failure modes. No DevOps engineer manually configures proxy routes, IAM policies, or API Hub entries.
 
 ---
 
@@ -830,9 +979,38 @@ The `app-blueprint.md` is a **9-section governance document** that serves two ro
 
 **§1-§9: Governance Sections** — what Governance Guardian assesses. Written by the developer with Blueprint Advisor guidance. Human-readable narrative + summary tables. Every section is genuinely editable.
 
-Technical config is derived directly into `app-blueprint.json` by `assemble_blueprint` — not stored as "Part II" sections in the .md. This eliminates the trap where Part II edits were silently overwritten on refresh.
+Technical config is derived directly into `app-blueprint.json` by `assemble_blueprint` — not stored as separate sections in the .md. All 9 sections (§1-§9) are governance content that the developer actively edits.
 
-### The 12 Sections
+### Blueprint Advisor Output Confidence Assessment
+
+The following confidence levels (0-1 scale) represent how reliably the Blueprint Advisor generates each section from `spec.md` + `plan.md` inputs without manual correction. SAs should focus review time on lower-confidence sections.
+
+| § | Section | Confidence | Risk | SA Review Focus |
+|---|---|---|---|---|
+| §1 | Application Overview | **0.95** | Minimal | Light review |
+| §2 | Component Topology Diagram | **0.70** | Complex topologies produce cluttered auto-layouts. Developer will rearrange nodes in Draw.io (10-15 min). | Verify agent count + connections match spec. Expect layout rework. |
+| §2 | Mermaid Sequence Diagrams | **0.88** | Error/retry paths may be incomplete if spec doesn't describe failure modes. | Verify error/retry paths cover spec §7 rules. |
+| §3 | Architecture Patterns | **0.92** | Low — well-validated pipeline. | Verify confidence score ≥ 0.85. Check adjacency validation passed. |
+| §4 | Application Tech Stack | **0.90** | Selection rationale can be generic rather than workload-specific. | Check rationale cites specific workload characteristics. |
+| §5 | DevSecOps Stack | **0.88** | Defaults may not match customer's actual tooling. | Verify testing framework + FinOps tools match customer environment. |
+| §6 | HA/DR Guidance | **0.72** | **Highest factual risk.** Specific RPO/RTO numbers may be hallucinated or stale. | **Scrutinize every RPO/RTO number.** Cross-check against GCP HA/DR documentation. |
+| §7 | HA/DR Lifecycle Diagrams | **0.60** | **Hardest section.** 4 lifecycle scenarios across 2 regions — auto-layout will be cluttered. | **Expect significant manual rework in Draw.io.** |
+| §8 | Architecture Decision Log | **0.82** | Generic rationale ("industry standard") adds no value. | Verify each rationale references a specific spec section. |
+| §9 | Non-Functional Requirements | **0.88** | Aggregate RTO/RPO calculation ties back to §6 accuracy. | Verify aggregate RTO/RPO is consistent with §6 per-component targets. |
+
+**Weighted overall confidence: 0.82** — but this hides a bimodal distribution. The 7 text sections average **0.87** (generate well, need minor SA edits). The 2 diagram sections average **0.65** (useful starting point, need significant manual refinement in Draw.io).
+
+**Value proposition:** 30 minutes of SA review and Draw.io refinement instead of 4-8 hours from scratch — a 90% reduction.
+
+**Three mitigations built into the architecture:**
+
+1. **HA/DR grounding (§6, §7):** The Blueprint Advisor sources RPO/RTO numbers from `memory/hadr-reference.md` (a curated reference table maintained by platform engineering) rather than relying on LLM training data.
+
+2. **ADL specificity (§8):** The Blueprint Advisor's reasoning trace is structured and extractable. Each ADL entry includes the specific spec section, plan choice, or API Hub result that drove the decision.
+
+3. **Diagram simplification (§7):** For HA/DR lifecycle diagrams, the Blueprint Advisor generates one consolidated diagram with a state table below it rather than four separate diagrams.
+
+### The 9 Sections
 
 #### Governance Sections (§1-§9) — Governance Guardian Assesses These
 
@@ -854,7 +1032,7 @@ Technical config is derived directly into `app-blueprint.json` by `assemble_blue
 | 9 | **Business Rules & FunctionTools** | Full IF/THEN detail per rule: FunctionTool name, input/output params, test entries, golden dataset entries | §5 business rules column |
 | 10 | **Security & Identity** | Model Armor per-agent config (screening level, PII handling), Workload Identity SAs + IAM roles, VPC-SC perimeter | §9 NFR security targets + §5 DevSecOps stack + security baseline API |
 | 11 | **CI/CD & EvalOps** | Jenkins pipeline stages, Harness deployment config, EvalOps phases, golden dataset size, pre-commit hooks | plan.md CI/CD + company CI/CD standards |
-| 12 | **Observability** | OTel span names per agent, logging config, PII filtering, dashboard metrics, alert thresholds | §5 agent topology + plan.md observability + company standards |
+| 12 | **Observability** | OTel span names per agent, logging config, PII filtering, dashboard metrics, alert thresholds | §2 Component Topology + plan.md observability + company standards |
 
 ### Workspace File Layout (Simplified)
 
@@ -905,47 +1083,97 @@ features/fnol-claims-agent/
 
 After the developer edits `app-blueprint.md` and/or `diagrams/*.drawio.xml`, they run `/catalyst.refresh` to validate structural integrity and regenerate .json + .png.
 
-**MCP tool:** `refresh(blueprint_md, drawio_files[])` — new tool on the Blueprint Advisor MCP Server.
+**MCP tool:** `refresh(blueprint_md, drawio_files[], spec, plan)` — on the Blueprint Advisor MCP Server.
 
-**Three steps:**
+![/catalyst.refresh — Bidirectional Sync Flow](refresh-sync-flow.png)
+
+**Bidirectional sync with conflict reconciliation.** The `app-blueprint.json` serves as the structured intermediate — both `.md` (prose) and `.drawio.xml` (visual) sync through it.
+
+```
+app-blueprint.md (prose, human-readable)
+        ↕ LLM-assisted (Blueprint Advisor)
+app-blueprint.json (structured topology — reconciliation hub)
+        ↕ deterministic (Eraser.io DSL)
+diagrams/*.drawio.xml (visual, editable in Draw.io)
+```
+
+**Four steps:**
 
 ```
 /catalyst.refresh
   │
-  ├── Step 1: VALIDATE
+  ├── Step 0: DETECT what changed
+  │   Read .blueprint-hashes → compare against current file timestamps
+  │   ├── Case A: Only .md changed (.md timestamp > .json, .drawio timestamp ≤ .json)
+  │   ├── Case B: Only .drawio changed (.drawio timestamp > .json, .md timestamp ≤ .json)
+  │   └── Case C: Both changed (.md timestamp > .json AND .drawio timestamp > .json)
+  │
+  ├── Step 1: SYNC the unchanged artifact to match the changed one
+  │
+  │   Case A — Only .md changed (developer edited §2 narrative, added an agent):
+  │   ├── Send edited .md + spec.md + plan.md to Blueprint Advisor
+  │   ├── LLM extracts topology changes from edited prose
+  │   ├── Regenerate app-blueprint.json from .md + spec + plan (assemble_blueprint)
+  │   ├── Generate Eraser.io DSL from updated .json topology (deterministic)
+  │   ├── Call Eraser.io API: DSL → .eraser → .drawio.xml + .png
+  │   └── Overwrite diagrams/*.drawio.xml + .png
+  │
+  │   Case B — Only .drawio changed (developer added a box in Draw.io):
+  │   ├── Parse .drawio.xml → extract nodes, edges, groupings
+  │   ├── Diff against current .json topology (adk_agent_tree, tool_bindings, data_flows)
+  │   ├── Update .json with new/removed/changed nodes and edges
+  │   ├── Send updated .json to Blueprint Advisor
+  │   ├── LLM updates .md §2 narrative + mermaid sequence to reflect new topology
+  │   │   (only §2 is affected — §3-§9 untouched unless agent count changes §4 tech stack)
+  │   ├── Regenerate .png from .drawio.xml via Eraser.io headless
+  │   └── Write updated .md
+  │
+  │   Case C — Both changed (reconciliation required):
+  │   ├── Extract topology from both:
+  │   │   .md via LLM → md_topology
+  │   │   .drawio.xml via parser → drawio_topology
+  │   ├── Diff both against last-known .json (from .blueprint-hashes):
+  │   │   AGREE: both added same agent → auto-merge
+  │   │   MD-ONLY: .md changed §4 tech stack → include (no diagram impact)
+  │   │   DRAWIO-ONLY: diagram regrouped agents → include
+  │   │   CONFLICT: .md says agent→tool-A, diagram says agent→tool-B
+  │   ├── For AGREE/MD-ONLY/DRAWIO-ONLY: auto-merge into .json
+  │   ├── For CONFLICT: report to developer with both versions:
+  │   │   "Conflict: .md says fraud_detector → fraud-db-mcp,
+  │   │    diagram says fraud_detector → claims-db-mcp.
+  │   │    Which should I keep? [.md / diagram / let me edit]"
+  │   ├── Developer resolves → merged .json
+  │   ├── From merged .json:
+  │   │   LLM regenerates .md prose for changed sections
+  │   │   Deterministic DSL → Eraser.io → new .drawio.xml + .png
+  │   └── Write reconciled .md + .drawio.xml + .png
+  │
+  ├── Step 2: VALIDATE (post-sync consistency check)
   │   ├── .md completeness: all 9 sections present?
-  │   ├── .md table parseability: can every table be parsed to JSON?
-  │   ├── .md internal consistency:
-  │   │   Agents in §2 component topology match .json adk_agent_tree?
-  │   │   Tool bindings reference real tools in §8?
-  │   │   Security config in §10 covers all agents from §5?
-  │   │   OTel spans in §12 cover all agents from §5?
-  │   ├── .md↔.drawio consistency:
-  │   │   Parse component-architecture.drawio.xml → extract agent nodes
-  │   │   Compare with §5 agent topology table
-  │   │   If mismatch → WARN: "Diagram has 8 agents, §5 has 7.
-  │   │     Missing from §5: fraud-check-agent"
+  │   ├── .md↔.drawio node parity: agent count matches?
+  │   ├── .md↔.drawio name matching: agent names match?
+  │   ├── Pattern composition validity: adjacency rules?
+  │   ├── .json consistency: adk_agent_tree matches both .md and .drawio?
   │   └── Return: structural_report (PASS/WARN per check)
   │
-  ├── Step 2: REGENERATE .json from .md + spec.md + plan.md
-  │   If .md changed (new agent, new pattern, new NFR):
-  │   ├── §8: Add rows for new agents (MCP config from API Hub + company defaults)
-  │   ├── §9: Add FunctionTool rows for new business rules
-  │   ├── §10: Add security rows (Model Armor + WI from data classification)
-  │   ├── §11: No change needed (CI/CD config is project-level, not per-agent)
-  │   ├── §12: Add OTel span rows for new agents
-  │   │
-  │   PRESERVE developer overrides:
-  │   │ If developer changed claims-mcp timeout from 30s to 60s in §8,
-  │   │ /catalyst.refresh does NOT clobber it. Only NEW rows get defaults.
-  │   └── Return: sync_report (rows added, rows preserved)
-  │
   └── Step 3: REGENERATE derived files
-      ├── .json: derive from .md + spec.md + plan.md → emit app-blueprint.json
-      ├── .png: for each .drawio where modified_time > .png modified_time,
-      │         call Eraser.io headless export → render .png
-      └── Return: updated .json + .png files + refresh_report
+      ├── .json: derive from synced .md + spec.md + plan.md → emit app-blueprint.json
+      ├── .png: render from synced .drawio.xml via Eraser.io headless
+      ├── Update .blueprint-hashes with new SHA-256 values
+      └── Return: sync_report + structural_report + updated files
 ```
+
+**Key design decisions:**
+
+1. **app-blueprint.json is the reconciliation hub.** Both .md and .drawio sync through .json because it has the structured topology (adk_agent_tree, tool_bindings, data_flows) that prose and visuals both represent. The .json is never edited directly — it is always derived.
+
+2. **LLM is required for prose↔structure bridging.** Unlike AgentForge (which uses machine-parseable STL tables in the .md, enabling fully deterministic sync), AgentCatalyst's .md uses narrative prose. The Blueprint Advisor LLM is needed to extract topology from prose (Case A) and to generate prose from topology (Case B). This introduces a small accuracy margin — the Governance Guardian assessment downstream catches any errors.
+
+3. **Conflicts are surfaced, not silently resolved.** When both .md and .drawio changed and disagree, the coding agent presents the conflict to the developer rather than guessing. Silent auto-resolution would violate the "human is always in control" principle.
+
+4. **Only §2 is updated on diagram-driven sync.** When the .drawio changes (Case B), the LLM updates §2 (Component Topology Diagram narrative + mermaid) and potentially §3 (if pattern composition changed). Sections §4-§9 are NOT auto-modified — they contain governance decisions that must be edited by the developer.
+
+5. **PRESERVE developer overrides.** If the developer changed a tool timeout from 30s to 60s in the .json, the refresh does NOT clobber it. Only NEW topology elements get defaults. This is tracked via the `.blueprint-hashes` diff — changes relative to last-known-good are additions/removals, not replacements.
 
 ### Staleness Detection — Skip-Refresh Safety Net
 
@@ -993,20 +1221,22 @@ Governance Guardian reads all 9 sections of app-blueprint.md (§1-§9):
 
 | Governance Artifact | Extracted from |
 |---|---|
-| Executive summary + strategic alignment | §1 tables + narrative |
-| Tech stack (target state) | §2 tables |
-| Architecture Decision Log | §3 table |
-| NFRs + how met | §4 table |
-| Patterns + topology | §5 tables |
-| Component diagram | §6 PNG reference |
-| HA/DR views | §7 PNG references + recovery table |
+| Application overview + strategic alignment | §1 Application Overview |
+| Component topology + agent hierarchy + diagram | §2 Component Topology Diagram (+ PNG) |
+| Architecture patterns + composition + confidence | §3 Architecture Patterns |
+| Application tech stack + selection rationale | §4 Application Tech Stack |
+| DevSecOps stack + CI/CD + evaluation | §5 DevSecOps Stack |
+| HA/DR guidance + RPO/RTO per component | §6 HA/DR Guidance |
+| HA/DR lifecycle diagrams + failover scenarios | §7 HA/DR Lifecycle Diagrams (+ PNG) |
+| Architecture decision log + rationale | §8 Architecture Decision Log |
+| Non-functional requirements + how met | §9 NFRs |
 
-Technical config (agent topology, tool bindings, etc.) lives in app-blueprint.json only — the Governance Guardian never sees it because it assesses governance decisions, not implementation details.
+Technical config (agent topology, tool bindings, infra modules, business rules, screening, eval, pipeline configs) lives in app-blueprint.json only — the Governance Guardian never sees it because it assesses governance decisions, not implementation details.
 
 ### Diagram Generation (Inside the Pipeline)
 
 Blueprint Advisor generates diagrams during `assemble_blueprint`:
-1. Builds diagram description from §5 agent topology + tool bindings
+1. Builds diagram description from §2 Component Topology + tool bindings
 2. Renders `.drawio.xml` using Draw.io export library (server-side)
 3. Renders `.png` from `.drawio.xml` using Eraser.io headless
 4. Returns both formats. Developer edits `.drawio.xml`; `.png` is view-only.
@@ -1397,9 +1627,9 @@ Extracts architecture artifacts from app-blueprint.md (NOT app-blueprint.json) a
    - TSA component diagram: read PNG path from `![...]()` in §4
    - HA/DR views: read PNG paths from §13
    - Sequence diagrams: extract  from §14
-   - NFRs: extract the table from §10
-   - Architecture decisions log: extract the table from §11
-   - Tech stack: extract the table from §12
+   - NFRs: extract the table from §9 (NFRs)
+   - Architecture decisions log: extract the table from §8 (ADL)
+   - Tech stack: extract the table from §4 (Tech Stack)
    - Patterns used: extract from §2
 3. Package as a `solution_package` JSON (ephemeral transport — NOT the same as `app-blueprint.json`):
    ```json
@@ -2294,7 +2524,7 @@ setup instructions, development workflow, deployment instructions (via CI/CD —
     },
     "nfrs": {
       "type": "array",
-      "description": "Non-functional requirements (from §10)",
+      "description": "Non-functional requirements (from §9)",
       "items": {
         "type": "object",
         "properties": {

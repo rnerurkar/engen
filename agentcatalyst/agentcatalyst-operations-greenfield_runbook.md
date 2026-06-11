@@ -22,7 +22,7 @@
 | 2. Search Quality Regression | Layer 2 — Blueprint Advisor | Section 8 — Reading Confidence Scores |
 | 3. Acceptance Telemetry | Layer 2 — Blueprint Advisor | Section 9 — When the Blueprint Advisor Gets It Wrong |
 | 4. Catalog Quality | Layer 2 — Vertex AI Search data stores | Section 4 — Writing Effective Specs |
-| 5. Tool Lifecycle | Layer 2 — Apigee API Hub (integration catalog) | Section 11 — Reporting Issues |
+| 5. Tool Lifecycle | Layer 2 — Tool Registry | Section 11 — Reporting Issues |
 | 6. Failure Modes | Layer 2 — Blueprint Advisor MCP Server | Section 14 — Troubleshooting |
 | 7. Composition Validator | Layer 2 — Pattern composition | Section 6 — Iterating on the Design |
 | 8. EvalOps Operations | Layer 4 — EvalOps 3-layer lifecycle | Section 4b — EvalOps Workflow |
@@ -34,7 +34,7 @@
 
 ## 1. Wire-Level Vertex AI Search API Calls
 
-> **Architecture context:** The Blueprint Advisor MCP Server (see Architecture Document, Layer 2) exposes five MCP tools to the coding agent: `blueprint_start` (async start), `blueprint_status` (poll), `blueprint_result` (retrieve), `validate_composition` (deterministic), and `assemble_blueprint` (deterministic). The first three implement the MCP Tasks async pattern — `blueprint_start` creates a background task that runs the Blueprint Advisor LlmAgent, the coding agent polls `blueprint_status` for progress, and retrieves the result via `blueprint_result`. Internally, the background pipeline uses three RAG tools to query Vertex AI Search. These RAG tools are NOT exposed to the coding agent.
+> **Architecture context:** The Blueprint Advisor MCP Server (see Architecture Document, Layer 2) exposes six MCP tools to the coding agent: `blueprint_start` (async start), `blueprint_status` (poll), `blueprint_result` (retrieve), `refresh` (bidirectional sync), `validate_composition` (deterministic), and `assemble_blueprint` (deterministic). The first three implement the MCP Tasks async pattern — `blueprint_start` creates a background task that runs the Blueprint Advisor LlmAgent, the coding agent polls `blueprint_status` for progress, and retrieves the result via `blueprint_result`. Internally, the background pipeline uses three RAG tools to query Vertex AI Search. These RAG tools are NOT exposed to the coding agent.
 
 ### Transport security
 
@@ -103,7 +103,7 @@ POST https://discoveryengine.googleapis.com/v1/projects/{PROJECT}/locations/{LOC
 |---|---|---|
 | `search_patterns()` | `agentcatalyst-patterns` | 11 agentic patterns (8 sections each) |
 | `search_skills()` | `agentcatalyst-skills` | Reusable skills with use_when/do_not_use_when |
-| `discover_integrations()` | Apigee API Hub (not Vertex AI Search) | MCP servers, A2A agents, REST APIs — single discovery surface |
+| `search_tools()` | `agentcatalyst-tools` | MCP servers, A2A Agent Cards, FunctionTool defs |
 
 ### Performance
 
@@ -116,7 +116,7 @@ POST https://discoveryengine.googleapis.com/v1/projects/{PROJECT}/locations/{LOC
 | `blueprint_start` latency | < 2 seconds | > 5 seconds |
 | `blueprint_status` latency | < 500ms | > 2 seconds |
 | `blueprint_result` latency | < 1 second | > 3 seconds |
-| Full pipeline (2 RAG + API Hub + LLM + validate + assemble) | 15–60 seconds | > 120 seconds |
+| Full pipeline (3 RAG + LLM + validate + assemble) | 15–60 seconds | > 120 seconds |
 
 ### Troubleshooting
 
@@ -322,7 +322,7 @@ Re-ingest on: document content change (automatic via CI), Vertex AI Search model
 
 ## 4a. Catalog Backup and Disaster Recovery
 
-> **Architecture context:** The Blueprint Advisor's intelligence depends on two Vertex AI Search data stores (patterns, skills). Its async task lifecycle depends on the AlloyDB Task Store. If the Vertex AI Search data stores are corrupted or deleted, the platform is non-functional. If the Task Store is unavailable, in-flight blueprint tasks fail (but are recoverable by re-running). This section covers backup, restore, and failover for both.
+> **Architecture context:** The Blueprint Advisor's intelligence depends on three Vertex AI Search data stores (patterns, skills, tools). Its async task lifecycle depends on the AlloyDB Task Store. If the Vertex AI Search data stores are corrupted or deleted, the platform is non-functional. If the Task Store is unavailable, in-flight blueprint tasks fail (but are recoverable by re-running). This section covers backup, restore, and failover for both.
 
 ### Source of truth
 
@@ -332,7 +332,7 @@ All catalog content is version-controlled in GitHub:
 |---|---|---|
 | Pattern Catalog | `github.com/[company]/agentcatalyst-patterns` | Markdown + YAML frontmatter per pattern |
 | Skill Catalog | `github.com/[company]/agentcatalyst-skills` | SKILL.md files with frontmatter |
-| Integration Catalog | Apigee API Hub | MCP servers + A2A agents + REST APIs (source of truth for all integrations) |
+| Tool Registry | `github.com/[company]/agentcatalyst-tools` | YAML manifests per tool |
 
 The GitHub repos are the source of truth. Vertex AI Search data stores are derived indexes — they can always be rebuilt from the repos.
 
@@ -404,7 +404,7 @@ The AlloyDB Task Store holds transient async task records (taskId, status, stage
 
 ## 5. Tool Lifecycle Management
 
-> **Architecture context:** Architecture Document, Layer 2 (Apigee API Hub — integration discovery). **Developer Guide context:** Developer Guide, Section 11 (reporting missing tools).
+> **Architecture context:** Architecture Document, Layer 2 (Tool Registry). **Developer Guide context:** Developer Guide, Section 11 (reporting missing tools).
 
 ### Tool states
 
@@ -439,7 +439,7 @@ The AlloyDB Task Store holds transient async task records (taskId, status, stage
 | Governance Guardian unreachable | MCP health check (60s) | Check Cloud Run health for Governance Guardian service. Same OAuth as Blueprint Advisor. |
 | Governance assessment stuck | Assessment health check (3 min) | Check Cloud Tasks `governance-assess` queue. Flush if jammed. EA assessment engine may be down — contact EA office. |
 | Tech Debt Registry unavailable | AlloyDB health (60s) | Same database as Blueprint Advisor Task Store. Check connection pool. |
-| `app-blueprint.json` out of sync with `.md` | `/catalyst.generate` hash check detects mismatch | Auto-resolved: `/catalyst.generate` calls `assemble_blueprint` to regenerate `.json` from `.md`. If `assemble_blueprint` fails, check Draw.io headless service health, AlloyDB connection (task store), and `.md` parse errors (malformed section headers). |
+| `app-blueprint.json` out of sync with `.md` or `.drawio.xml` | `/catalyst.generate` hash check detects mismatch, or `/catalyst.refresh` reports Case A/B/C | `/catalyst.refresh` performs bidirectional sync: if only .md changed (Case A), regenerates .drawio.xml + .json; if only .drawio changed (Case B), updates .md §2 narrative + .json; if both changed (Case C), reconciles differences with conflict detection. If sync fails, check: Eraser.io headless health (for .drawio regeneration), Blueprint Advisor MCP Server health (for LLM-assisted .md updates), AlloyDB connection, and `.md` parse errors (malformed section headers). `/catalyst.assess` auto-triggers refresh; `/catalyst.generate` BLOCKS and requires explicit refresh. |
 | `app-blueprint.json` corrupted or missing | `/catalyst.generate` fails to parse `.json` | Delete `app-blueprint.json` from workspace. Run `assemble_blueprint` manually (via coding agent MCP call) to regenerate from `.md`. The `.md` is always the source of truth — `.json` can always be regenerated. |
 | `app-blueprint.json` edited directly by developer | Hash mismatch on next `/catalyst.generate` | Auto-resolved: `/catalyst.generate` detects `.md` hash differs from stored hash, regenerates `.json` from `.md` (overwriting manual edits). Warn developer: **never edit `.json` directly** — edits will be overwritten. |
 
@@ -514,12 +514,16 @@ The Blueprint Advisor has two deployment components: the **MCP API layer** (Clou
 | `assemble_blueprint` | Known selections | 5 min |
 | Task Store | AlloyDB `SELECT 1` connection check | 60s |
 | Cross-user access blocked | `blueprint_result` with wrong owner_id → 403 | 15 min |
-| Draw.io headless reachable | HTTP health check to Draw.io headless service | 5 min |
+| Eraser.io headless reachable | HTTP health check to Eraser.io headless service | 5 min |
 | Diagram rendering | Golden FNOL → verify `.drawio.xml` + `.png` all generated | 4 hours |
 
 The pipeline completion check uses a lightweight golden spec (1 integration) that completes in <30 seconds, so a 3-minute interval adds negligible load while ensuring pipeline failures are detected within 3 minutes rather than 15.
 
-**Draw.io headless failure mode:** If the Draw.io headless service is unreachable, `/catalyst.refresh` and `assemble_blueprint` cannot render `.png` from `.drawio.xml`. The `.drawio.xml` source files are still valid and editable. The developer can still edit diagrams in the Draw.io VSCode extension (local, no cloud dependency). `.png` rendering will resume when Draw.io headless recovers. The blueprint `.md` and `.json` are unaffected — only `.png` rendering is blocked.
+**Eraser.io headless failure mode:** If the Eraser.io headless service is unreachable, `/catalyst.refresh` has degraded behavior depending on the sync case:
+- **Case A (.md changed → regenerate diagram):** BLOCKED — cannot generate new .drawio.xml from topology. The .md edits are preserved but the diagram is stale. Developer sees: "Eraser.io unavailable — diagram regeneration deferred. .json regenerated from .md but .drawio.xml is stale."
+- **Case B (.drawio changed → update .md):** PARTIALLY DEGRADED — the LLM can still update .md §2 narrative from parsed .drawio.xml, and .json is regenerated. But .png cannot be re-rendered. Developer sees: ".md and .json updated. .png rendering deferred until Eraser.io recovers."
+- **Case C (both changed):** Same degradation as Case A for diagram regeneration.
+- **In all cases:** The `.drawio.xml` source files are still valid and editable in the Draw.io VSCode extension (local, no cloud dependency). `.png` rendering will resume when Eraser.io recovers. The `.md` and `.json` are updated to the extent possible without Eraser.io.
 
 ### Versioning
 
@@ -773,7 +777,7 @@ Apigee proxy routes, per-agent Workload Identity IAM bindings, and API Hub regis
 | API Hub entry not created | Post-deployment check fails | Run the `apihub register` step manually from the CI/CD pipeline definition. |
 | Stale entry (agent retired but still listed as active) | API Hub shows `active` but Cloud Run has no instances | Update API Hub lifecycle to `retired`. Run cleanup. |
 
-**The flywheel:** Every agent deployed via AgentCatalyst registers in API Hub. Future Blueprint Advisor runs query API Hub via `discover_integrations()` and discover these agents for A2A delegation — reusing deployed agents instead of rebuilding. The more agents deployed, the richer the API Hub catalog, the more the Blueprint Advisor can recommend A2A reuse.
+**The flywheel:** Every agent deployed via AgentCatalyst registers in API Hub. Future Blueprint Advisor runs query API Hub via `search_a2a_agents()` and discover these agents for A2A delegation — reusing deployed agents instead of rebuilding. The more agents deployed, the richer the API Hub catalog, the more the Blueprint Advisor can recommend A2A reuse.
 
 ---
 
@@ -790,7 +794,7 @@ The `/catalyst.refresh` command validates edited files and regenerates derived a
 | 2. .md↔.drawio consistency | Parse .drawio.xml, extract agent nodes, compare with §5 | CPU only | Mismatch → report specific differences |
 | 3. Sync Part II | Generate/update §8-§12 rows from Part I changes | API Hub (for MCP configs), company standards API | API Hub timeout → use cached defaults |
 | 4. Regenerate .json | Parse all 12 sections → emit JSON | CPU only | Parse error → report line number |
-| 5. Regenerate .png | Draw.io headless export from .drawio.xml | Draw.io headless service | Render timeout → keep existing .png, warn |
+| 5. Regenerate .png | Eraser.io headless export from .drawio.xml | Eraser.io headless service | Render timeout → keep existing .png, warn |
 
 ### Troubleshooting
 
@@ -801,7 +805,7 @@ The `/catalyst.refresh` command validates edited files and regenerates derived a
 | ".md↔.drawio mismatch won't resolve" | Developer edited .md AND .drawio with conflicting changes | Pick one source of truth: update §5 to match diagram, or update diagram to match §5. Then re-run refresh. |
 | "Part II rows not updating for new agent" | API Hub lookup failed for the new agent's MCP server | Check API Hub connectivity. If the MCP server isn't registered in API Hub yet, manually add the §8 row with connection details. |
 | ".json not regenerating" | Table parse error — malformed markdown table in .md | Check the .md tables for missing pipe characters, misaligned columns, or special characters. Fix and re-run. |
-| ".png not regenerating" | Draw.io headless service unavailable | Check Draw.io headless service health. The .drawio.xml is still valid — .png will regenerate on next successful refresh. |
+| ".png not regenerating" | Eraser.io headless service unavailable | Check Eraser.io headless service health. The .drawio.xml is still valid — .png will regenerate on next successful refresh. |
 | "Auto-refresh slowing down /catalyst.assess" | Large .drawio files causing slow .png rendering | Pre-run `/catalyst.refresh` manually before `/catalyst.assess` so the auto-refresh is a no-op (files already current). |
 | "Stale .json detected but auto-refresh fails" | .md has structural errors that block parsing | Run `/catalyst.refresh` manually for detailed error messages. Fix .md errors, then re-run `/catalyst.assess`. |
 
@@ -844,7 +848,7 @@ The Blueprint Advisor validates specs before running the RAG pipeline. When deve
 | Check | Method | Expected |
 |---|---|---|
 | `refresh` tool available | Call refresh with empty .md | Returns validation error (not connection error) |
-| Draw.io headless rendering | Submit test .drawio.xml | Returns .png base64 |
+| Eraser.io headless rendering | Submit test .drawio.xml | Returns .png base64 |
 | Staleness detection | Modify .md, call assess | Auto-refresh triggers before assessment |
 
 ### Troubleshooting
@@ -853,7 +857,7 @@ The Blueprint Advisor validates specs before running the RAG pipeline. When deve
 |---|---|---|
 | "/catalyst.refresh returns connection error" | Blueprint Advisor MCP Server unreachable | Check MCP Server health. Refresh uses the same server as blueprint_start. |
 | ".json not regenerated after refresh" | .md has unparseable tables | Check refresh validation report — it identifies which table failed to parse. Fix table markdown syntax. |
-| ".png not regenerated after refresh" | Draw.io headless export failed | Check server logs for Draw.io rendering errors. Verify .drawio.xml is valid XML. |
+| ".png not regenerated after refresh" | Eraser.io headless export failed | Check server logs for Eraser.io rendering errors. Verify .drawio.xml is valid XML. |
 | "Part II sections have wrong defaults for new agent" | API Hub lookup failed for new tool | Check API Hub connectivity. If API Hub is down, refresh uses fallback defaults (30s timeout, 3x retry). Developer can override in §8. |
 | "/catalyst.assess says 'Auto-refreshing' every time" | Developer never runs /catalyst.refresh | Normal behavior — assess auto-detects stale .json. No action needed, but running refresh explicitly is faster. |
 | "/catalyst.generate blocked with 'stale .json'" | Developer edited .md but didn't refresh or assess | Run /catalyst.refresh (or /catalyst.assess which auto-refreshes). Then re-run /catalyst.generate. |

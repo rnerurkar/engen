@@ -1,86 +1,121 @@
 %% Blueprint Advisor — Async Call Sequence (MCP Tasks)
-%% AgentCatalyst Brownfield
-%% File: blueprint-advisor-sequence.mmd
+%% Including Bidirectional Refresh Flow
 
 sequenceDiagram
-    autonumber
-    participant Agent as Coding Agent<br/>(VSCode + Copilot)
-    participant MCP as Blueprint Advisor<br/>MCP Server (Cloud Run)
-    participant BG as Background Job<br/>(Cloud Run Jobs)
-    participant TS as Tech Substitution<br/>Decision Table
-    participant PC as Pattern Catalog<br/>(Vertex AI Search)
-    participant AH as Apigee API Hub<br/>(MCP + A2A + REST discovery)
-    participant ADR as ADR Constraint Store<br/>(AlloyDB)
-    participant IAC as IaC Module Registry<br/>(GitHub)
-    participant ER as Draw.io Headless<br/>(diagram rendering)
-    participant FS as Task Store<br/>(AlloyDB)
+    participant Dev as Developer (IDE)
+    participant CA as Coding Agent
+    participant BA as Blueprint Advisor<br/>MCP Server
+    participant BG as Background Job<br/>(Cloud Run Job)
+    participant VS as Vertex AI Search
+    participant AH as Apigee API Hub
+    participant ER as Eraser.io Headless
+    participant TS as Task Store (AlloyDB)
+    participant GG as Governance Guardian<br/>MCP Server
 
-    rect rgb(214, 234, 248)
-    Note over Agent,MCP: Phase 1 — Start (< 2s, within Copilot timeout)
-    Agent->>MCP: blueprint_start({ spec, plan })
-    MCP->>MCP: validate JSON schema
-    MCP->>FS: create task record (status: ACCEPTED)
-    MCP->>BG: enqueue via Cloud Tasks
-    MCP-->>Agent: { taskId, status: "working", pollInterval: 10000 }
+    Note over Dev,GG: Phase 1 — /catalyst.blueprint (Async MCP Tasks)
+
+    Dev->>CA: /catalyst.blueprint
+    CA->>BA: blueprint_start(spec, plan)
+    BA->>TS: Create task (status: queued)
+    BA->>BG: Enqueue via Cloud Tasks
+    BA-->>CA: { taskId, pollInterval: 5s }
+
+    loop Poll until complete
+        CA->>BA: blueprint_status(taskId)
+        BA->>TS: Read task status
+        BA-->>CA: { status: running, stage: "reasoning..." }
     end
 
-    rect rgb(214, 234, 248)
-    Note over Agent,MCP: Phase 2 — Poll (< 1s each, prompt-file loop)
-    loop Every pollInterval seconds
-        Agent->>MCP: blueprint_status(taskId)
-        MCP->>FS: read task status
-        MCP-->>Agent: { status, stage, message }
-    end
-    end
-
-    rect rgb(209, 242, 235)
-    Note over BG,FS: Background — Step 0 + 4-stage pipeline (1–30 min)
-    BG->>FS: status → "validating"
-    Note over BG: validate_spec — 8-signal migration readiness gate
-    BG->>TS: verify every CSA tech has approved TSA mapping + confidence score
-    TS-->>BG: tech_coverage: pass/warn/block per integration
-    BG->>AH: verify A2A agents + MCP servers for integrations (API Hub)
-    AH-->>BG: integration_availability: pass/warn/block per integration
-    BG->>ADR: pre-check spec decisions against coexistence + rollback ADRs
-    ADR-->>BG: adr_pre_compliance: pass/warn/block per integration
-    BG->>BG: cross-integration graph analysis (circular deps, conflicting coexistence, phase ordering)
-    BG->>BG: compute migration_readiness_score (0–100) + phase_assignment_preview
-
-    alt Any signal = BLOCK
-        BG->>FS: status → "failed" (migration_readiness_score + block reason + guidance)
-    else All signals = PASS or WARN
-        Note over BG: WARN → continue with risk flags on affected integrations
-        BG->>FS: status → "substituting"
-        BG->>TS: map_current_to_target (per integration)
-        TS-->>BG: tech_substitutions[]
-    BG->>FS: status → "recommending"
-    BG->>PC: hybrid_search (per integration)
-    PC-->>BG: candidate_patterns[]
-    BG->>AH: discover_integrations (MCP servers + A2A agents + REST APIs)
-    AH-->>BG: integrations[] (tools + a2a_agents, priority: A2A > MCP > Build)
-    BG->>BG: validate_composition
-    BG->>FS: status → "checking"
-    BG->>ADR: adr_compliance_check
-    ADR-->>BG: compliance_results[]
-    BG->>FS: status → "assembling"
-    BG->>IAC: resolve_modules
-    IAC-->>BG: module_refs[]
+    BG->>VS: search_patterns(spec signals)
+    VS-->>BG: matched patterns + confidence
+    BG->>AH: discover_integrations(spec §4-§5)
+    AH-->>BG: MCP servers + A2A agents + REST APIs
+    BG->>BG: recommend_architecture (LlmAgent)
+    BG->>BG: validate_composition (adjacency)
+    BG->>BG: adr_compliance_check (deterministic)
+    BG->>BG: Construct Eraser.io DSL from topology
     BG->>ER: render component topology (.drawio.xml + .png)
     ER-->>BG: component-diagram.drawio.xml + .png
     BG->>ER: render HA/DR lifecycle views (.drawio.xml + .png)
-    ER-->>BG: hadr-*.drawio.xml + .png
-    BG->>BG: generate .drawio.xml from Draw.io export library
-    BG->>BG: assemble app-blueprint.md (12 sections: Part I §1-§7 + Part II §8-§12) + generate app-blueprint.json (derived, machine-readable)
-    BG->>BG: bundle: .md + .json + diagrams (.drawio.xml + .png)
-    BG->>FS: store result, status → "completed"
-    end
+    ER-->>BG: hadr-lifecycle.drawio.xml + .png
+    BG->>BG: assemble_blueprint (.md + .json)
+    BG->>TS: Update task (status: completed, result: .md + .json + diagrams)
+
+    CA->>BA: blueprint_result(taskId)
+    BA->>TS: Read completed task
+    BA-->>CA: { markdown, diagrams[], json }
+    CA->>Dev: Write app-blueprint.md + .json + .drawio.xml + .png
+
+    Note over Dev,GG: Phase 2 — HITL Edit + /catalyst.refresh (Bidirectional Sync)
+
+    Dev->>Dev: Edit app-blueprint.md and/or .drawio.xml
+
+    Dev->>CA: /catalyst.refresh
+    CA->>BA: refresh(blueprint_md, drawio_files[], spec, plan)
+
+    Note over BA: Step 0: Detect what changed via .blueprint-hashes
+
+    alt Case A: Only .md changed
+        BA->>BA: LLM extracts topology from edited prose
+        BA->>BA: assemble_blueprint → regenerate .json
+        BA->>BA: Generate Eraser.io DSL from .json topology
+        BA->>ER: Render new .drawio.xml + .png from DSL
+        ER-->>BA: Updated .drawio.xml + .png
+    else Case B: Only .drawio changed
+        BA->>BA: Parse .drawio.xml → extract nodes/edges
+        BA->>BA: Diff against .json → identify changes
+        BA->>BA: Update .json with new topology
+        BA->>BA: LLM updates .md §2 narrative + mermaid
+        BA->>ER: Re-render .png from .drawio.xml
+        ER-->>BA: Updated .png
+    else Case C: Both changed
+        BA->>BA: Extract topology from both .md and .drawio
+        BA->>BA: Diff both against last-known .json
+        BA->>BA: Auto-merge agreements
+        alt Conflicts detected
+            BA-->>CA: Conflict report (both versions shown)
+            CA->>Dev: "Which version to keep?"
+            Dev->>CA: Resolution choice
+            CA->>BA: Resolved conflicts
+        end
+        BA->>BA: Sync both through merged .json
+        BA->>ER: Render reconciled .drawio.xml + .png
+        ER-->>BA: Reconciled diagrams
     end
 
-    rect rgb(213, 245, 227)
-    Note over Agent,MCP: Phase 3 — Retrieve (< 1s)
-    Agent->>MCP: blueprint_status(taskId)
-    MCP-->>Agent: { status: "completed" }
-    Agent->>MCP: blueprint_result(taskId)
-    MCP->>FS: read result
-    MCP-->>Agent: app-blueprint.md + app-blueprint.json + diagrams (.drawio.xml + .png)
+    BA->>BA: Post-sync validation (parity, adjacency, consistency)
+    BA->>BA: Regenerate .json + update .blueprint-hashes
+    BA-->>CA: { sync_report, structural_report, updated files }
+    CA->>Dev: Write synced .md + .json + .drawio.xml + .png
+
+    Note over Dev,GG: Phase 3 — /catalyst.assess (Governance Guardian)
+
+    Dev->>CA: /catalyst.assess
+    CA->>CA: Check timestamps → auto-refresh if stale (Step 0)
+    CA->>CA: Extract 9 sections from app-blueprint.md
+    CA->>GG: assess_start(solution_package)
+    GG->>TS: Create assessment task
+    GG-->>CA: { taskId }
+
+    loop Poll assessment
+        CA->>GG: assess_status(taskId)
+        GG-->>CA: { status: running, stage: "evaluating..." }
     end
+
+    GG->>GG: EA assessment engine (black box)
+    GG-->>CA: assess_result → scorecard + findings
+
+    alt Showstoppers found
+        CA->>Dev: "Showstopper: [finding]. Fix and re-assess."
+        Dev->>Dev: Fix .md → /catalyst.refresh → /catalyst.assess
+    else Tech debt only
+        CA->>GG: recordTechDebt(findings)
+        GG-->>CA: { signal: "resume", tech_debt_ids }
+    end
+
+    Note over Dev,GG: Phase 4 — /catalyst.generate
+
+    Dev->>CA: /catalyst.generate
+    CA->>CA: Verify .json not stale (hash check)
+    CA->>CA: Read app-blueprint.json + skills
+    CA->>Dev: Generate code (agents, MCP, A2A, TF, CI/CD, eval, security)
