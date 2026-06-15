@@ -8,8 +8,9 @@ sequenceDiagram
     participant BG as Background Job<br/>(Cloud Run Job)
     participant VS as Vertex AI Search
     participant AH as Apigee API Hub
-    participant ER as Eraser.io Headless
+    participant ER as Eraser MCP Server
     participant TS as Task Store (AlloyDB)
+    participant AS as Artifact Store<br/>(GCS + AlloyDB pointer)
     participant GG as Governance Guardian<br/>MCP Server
 
     Note over Dev,GG: Phase 1 — /accelerator.blueprint (Async MCP Tasks)
@@ -33,17 +34,16 @@ sequenceDiagram
     BG->>BG: recommend_architecture (LlmAgent)
     BG->>BG: validate_composition (adjacency)
     BG->>BG: adr_compliance_check (deterministic)
-    BG->>BG: Construct Eraser.io DSL from topology
-    BG->>ER: render component topology (.drawio.xml + .png)
-    ER-->>BG: component-diagram.drawio.xml + .png
-    BG->>ER: render HA/DR lifecycle views (.drawio.xml + .png)
-    ER-->>BG: hadr-lifecycle.drawio.xml + .png
-    BG->>BG: assemble_blueprint (.md + .json)
-    BG->>TS: Update task (status: completed, result: .md + .json + diagrams)
+    BG->>BG: assemble_blueprint (.md + .json + Eraser DSL)
+    BG->>ER: render(component DSL), render(HA/DR DSL)
+    ER-->>BG: .drawio.xml + .png (synchronous, per diagram)
+    BG->>AS: Write artifacts to GCS (md, json, .drawio.xml, .png)<br/>+ record AlloyDB pointer (task_id, owner_id, gcs_prefix)
+    BG->>TS: Update task (status: completed)
 
     CA->>BA: blueprint_result(taskId)
-    BA->>TS: Read completed task
-    BA-->>CA: { markdown, diagrams[], json }
+    BA->>AS: Read AlloyDB pointer → fetch artifacts from GCS
+    AS-->>BA: { markdown, json, diagrams[] (base64) }
+    BA-->>CA: { markdown, json, diagrams[] }
     CA->>Dev: Write app-blueprint.md + .json + .drawio.xml + .png
 
     Note over Dev,GG: Phase 2 — HITL Edit + /accelerator.refresh (Bidirectional Sync)
@@ -58,16 +58,16 @@ sequenceDiagram
     alt Case A: Only .md changed
         BA->>BA: LLM extracts topology from edited prose
         BA->>BA: assemble_blueprint → regenerate .json
-        BA->>BA: Generate Eraser.io DSL from .json topology
-        BA->>ER: Render new .drawio.xml + .png from DSL
-        ER-->>BA: Updated .drawio.xml + .png
+        BA->>BA: Generate Eraser DSL from .json topology
+        BA->>ER: render(DSL)
+        ER-->>BA: .drawio.xml + .png (synchronous)
     else Case B: Only .drawio changed
         BA->>BA: Parse .drawio.xml → extract nodes/edges
         BA->>BA: Diff against .json → identify changes
         BA->>BA: Update .json with new topology
         BA->>BA: LLM updates .md §2 narrative + mermaid
-        BA->>ER: Re-render .png from .drawio.xml
-        ER-->>BA: Updated .png
+        BA->>ER: render(DSL) → .png
+        ER-->>BA: Updated .png (synchronous)
     else Case C: Both changed
         BA->>BA: Extract topology from both .md and .drawio
         BA->>BA: Diff both against last-known .json
@@ -79,8 +79,8 @@ sequenceDiagram
             CA->>BA: Resolved conflicts
         end
         BA->>BA: Sync both through merged .json
-        BA->>ER: Render reconciled .drawio.xml + .png
-        ER-->>BA: Reconciled diagrams
+        BA->>ER: render(reconciled DSL)
+        ER-->>BA: Reconciled .drawio.xml + .png (synchronous)
     end
 
     BA->>BA: Post-sync validation (parity, adjacency, consistency)
@@ -102,15 +102,20 @@ sequenceDiagram
         GG-->>CA: { status: running, stage: "evaluating..." }
     end
 
-    GG->>GG: EA assessment engine (black box)
-    GG-->>CA: assess_result → scorecard + findings
+    GG->>GG: Convert app-blueprint.md → PDF (sections + embedded PNGs)
+    GG->>GG: Eraser MCP server assesses PDF → findings PDF
+    GG->>GG: Convert findings PDF → MD (Critical/High/Medium/Low)
+    GG->>AS: Write findings.md to GCS + AlloyDB pointer
+    GG-->>CA: assess_result → findings_md + scorecard
 
-    alt Showstoppers found
-        CA->>Dev: "Showstopper: [finding]. Fix and re-assess."
-        Dev->>Dev: Fix .md → /accelerator.refresh → /accelerator.assess
-    else Tech debt only
-        CA->>GG: recordTechDebt(findings)
-        GG-->>CA: { signal: "resume", tech_debt_ids }
+    CA->>GG: verify_generation_gate(taskId)
+    GG->>GG: Read findings.md from GCS via AlloyDB pointer
+    alt Critical or High remain
+        GG-->>CA: { signal: stop, message, findings_gcs_uri }
+        CA->>Dev: Resolve findings → /accelerator.refresh (sync .md↔.drawio) → /accelerator.assess
+    else Only Medium/Low remain
+        GG->>AS: Write one tech-debt JSON per finding to GCS
+        GG-->>CA: { signal: resume, tech_debt_uris }
     end
 
     Note over Dev,GG: Phase 4 — /accelerator.generate

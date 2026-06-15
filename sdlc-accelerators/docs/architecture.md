@@ -476,6 +476,7 @@ sequenceDiagram
     participant AH as Apigee API Hub
     participant ER as Eraser MCP Server
     participant TS as Task Store (AlloyDB)
+    participant AS as Artifact Store<br/>(GCS + AlloyDB pointer)
     participant GG as Governance Guardian<br/>MCP Server
 
     Note over Dev,GG: Phase 1 — /accelerator.blueprint (Async MCP Tasks)
@@ -499,18 +500,16 @@ sequenceDiagram
     BG->>BG: recommend_architecture (LlmAgent)
     BG->>BG: validate_composition (adjacency)
     BG->>BG: adr_compliance_check (deterministic)
-    BG->>ER: Construct Eraser DSL, render(dsl)
-    ER-->>BG: .drawio.xml + .png (synchronous)
-    BG->>ER: render component topology
-    ER-->>BG: component-diagram.drawio.xml + .png
-    BG->>ER: render HA/DR lifecycle views
-    ER-->>BG: hadr-lifecycle.drawio.xml + .png
-    BG->>BG: assemble_blueprint (.md + .json)
+    BG->>BG: assemble_blueprint (.md + .json + Eraser DSL)
+    BG->>ER: render(component DSL), render(HA/DR DSL)
+    ER-->>BG: .drawio.xml + .png (synchronous, per diagram)
+    BG->>AS: Write artifacts to GCS (md, json, .drawio.xml, .png)<br/>+ record AlloyDB pointer (task_id, owner_id, gcs_prefix)
     BG->>TS: Update task (completed)
 
     CA->>BA: blueprint_result(taskId)
-    BA->>TS: Read completed task
-    BA-->>CA: { markdown, diagrams[], json }
+    BA->>AS: Read AlloyDB pointer → fetch artifacts from GCS
+    AS-->>BA: { markdown, json, diagrams[] (base64) }
+    BA-->>CA: { markdown, json, diagrams[] }
     CA->>Dev: Write .md + .json + .drawio.xml + .png
 
     Note over Dev,GG: Phase 2 — HITL Edit + /accelerator.refresh (Bidirectional Sync)
@@ -629,7 +628,7 @@ sequenceDiagram
     Note over CA,BA: Phase 2 — Authenticated MCP tool calls (Solution Accelerator)
 
     CA->>BA: blueprint_start(spec, plan)<br>Authorization: Bearer {access_token}
-    BA->>BA: Validate JWT signature (Entra ID JWKS endpoint)<br>Verify audience = sdlc-accelerators.mcp<br>Extract user identity (sub claim = sarah@company.com)
+    BA->>BA: Validate JWT signature (Entra ID JWKS endpoint)<br>Verify audience + scope = sdlc-accelerators.mcp<br>Check Solution Architect group (groups claim) → else 403<br>Extract owner_id (sub = sarah@company.com)
     BA->>TS: INSERT task (owner_id = sarah@company.com)
     BA-->>CA: { taskId, pollInterval }
 
@@ -640,8 +639,9 @@ sequenceDiagram
     end
 
     CA->>BA: blueprint_result(taskId)<br>Authorization: Bearer {access_token}
-    BA->>TS: SELECT result WHERE owner_id = sarah@company.com
-    BA-->>CA: { markdown, diagrams, hashes }
+    BA->>TS: Read AlloyDB artifact pointer WHERE owner_id = sarah@company.com
+    BA->>BA: Fetch artifacts from GCS via pointer
+    BA-->>CA: { markdown, json, diagrams[] (base64) }
 
     Note over CA,GG: Phase 3 — Same token, different MCP Server (Governance Guardian)
 
@@ -649,7 +649,7 @@ sequenceDiagram
     CA->>CA: Token still valid (< 1 hour old)
 
     CA->>GG: assess_start(solution_package)<br>Authorization: Bearer {access_token}
-    GG->>GG: Validate same JWT (same Entra ID JWKS)<br>Same audience scope, same user identity
+    GG->>GG: Validate same JWT (same Entra ID JWKS)<br>Same audience + scope + Solution Architect group<br>same owner_id
     GG->>TS: INSERT task (owner_id = sarah@company.com)
     GG-->>CA: { taskId, pollInterval }
 
