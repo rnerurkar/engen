@@ -1,0 +1,10 @@
+# Cloud Build — platform deploy pipeline (downstream CI/CD owns eval/promote gates)
+steps:
+  - name: 'python:3.12'
+    entrypoint: bash
+    args: ['-c', 'pip install ruff pytest pydantic jsonschema jinja2 && ruff check . && pytest -q']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '$_IMAGE', '.']
+  # cosign sign + Binary Authorization attestation (NEVER-SWAPPABLE) happen here.
+substitutions:
+  _IMAGE: 'us-east1-docker.pkg.dev/$PROJECT_ID/sdlc-accelerators/solution-accelerator'

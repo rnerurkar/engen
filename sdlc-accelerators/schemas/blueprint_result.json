@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "blueprint_result",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": [
+        "taskId"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "markdown",
+        "json",
+        "diagrams"
+      ],
+      "properties": {
+        "markdown": {
+          "type": "string",
+          "description": "app-blueprint.md (9 sections)"
+        },
+        "json": {
+          "type": "object",
+          "description": "app-blueprint.json (see app-blueprint.schema.json)"
+        },
+        "diagrams": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "drawio_xml": {
+                "type": "string"
+              },
+              "png_base64": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

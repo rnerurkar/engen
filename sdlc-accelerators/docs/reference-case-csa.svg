@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 480" font-family="Segoe UI, Arial, sans-serif">
+  <style>
+    .title { font-size: 26; fill: #2C6E9B; font-weight: 600; }
+    .zone-title { font-size: 18; font-weight: bold; }
+    .node-text { font-size: 16; }
+    .edge-label { font-size: 14; fill: #333; }
+    .edge { stroke: #B5651D; stroke-width: 2.5; fill: none; marker-end: url(#ar-orange); }
+    .edge-purple { stroke: #7C3AED; stroke-width: 2.5; fill: none; marker-end: url(#ar-purple); }
+    .edge-blue { stroke: #1C8ACB; stroke-width: 2.5; fill: none; marker-end: url(#ar-blue); }
+    .edge-dash { stroke: #9DB4C0; stroke-width: 2.5; fill: none; stroke-dasharray: 8,5; marker-end: url(#ar-gray); }
+  </style>
+  <defs>
+    <marker id="ar-orange" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0, 9 3.5, 0 7" fill="#B5651D"/></marker>
+    <marker id="ar-purple" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0, 9 3.5, 0 7" fill="#7C3AED"/></marker>
+    <marker id="ar-blue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0, 9 3.5, 0 7" fill="#1C8ACB"/></marker>
+    <marker id="ar-gray" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0, 9 3.5, 0 7" fill="#9DB4C0"/></marker>
+  </defs>
+
+  <text x="700" y="70" text-anchor="middle" class="title">Reference Case — Current State Architecture (CSA)</text>
+
+  <!-- Internal User -->
+  <rect x="60" y="270" width="150" height="55" rx="12" fill="#FCF3CF" stroke="#D4AC0D" stroke-width="2"/>
+  <text x="135" y="303" text-anchor="middle" class="node-text">Internal User</text>
+
+  <!-- On-Prem Data Center zone -->
+  <rect x="410" y="145" width="580" height="320" rx="14" fill="#F5CBA7" fill-opacity="0.45" stroke="#B5651D" stroke-width="2.5"/>
+  <text x="700" y="178" text-anchor="middle" class="zone-title" fill="#7E3F0E">On-Prem Data Center (vSphere)</text>
+
+  <!-- ClaimsPortal MPA -->
+  <rect x="430" y="270" width="250" height="60" rx="12" fill="#FDEBD0" stroke="#B5651D" stroke-width="2"/>
+  <text x="555" y="294" text-anchor="middle" class="node-text">ClaimsPortal MPA</text>
+  <text x="555" y="315" text-anchor="middle" class="node-text">Java + JSP on Tomcat</text>
+
+  <!-- IBM API Connect -->
+  <rect x="800" y="210" width="170" height="55" rx="12" fill="#FDEBD0" stroke="#B5651D" stroke-width="2"/>
+  <text x="885" y="243" text-anchor="middle" class="node-text">IBM API Connect</text>
+
+  <!-- IBM MQ -->
+  <rect x="800" y="375" width="120" height="50" rx="12" fill="#FDEBD0" stroke="#B5651D" stroke-width="2"/>
+  <text x="860" y="405" text-anchor="middle" class="node-text">IBM MQ</text>
+
+  <!-- Downstream Domain zone -->
+  <rect x="1130" y="160" width="240" height="120" rx="14" fill="#E8DAEF" fill-opacity="0.5" stroke="#7C3AED" stroke-width="2.5"/>
+  <text x="1250" y="190" text-anchor="middle" class="zone-title" fill="#5B2C9B">Downstream Domain</text>
+  <rect x="1155" y="210" width="160" height="50" rx="12" fill="#FBF7FE" stroke="#7C3AED" stroke-width="2"/>
+  <text x="1235" y="240" text-anchor="middle" class="node-text">Domain API</text>
+
+  <!-- AWS zone -->
+  <rect x="1130" y="310" width="540" height="130" rx="14" fill="#AED6F1" fill-opacity="0.45" stroke="#2980B9" stroke-width="2.5"/>
+  <text x="1400" y="340" text-anchor="middle" class="zone-title" fill="#1A5276">AWS (already migrated)</text>
+  <rect x="1150" y="365" width="200" height="55" rx="12" fill="#EBF5FB" stroke="#2980B9" stroke-width="2"/>
+  <text x="1250" y="398" text-anchor="middle" class="node-text">SQS Queue (existing)</text>
+  <rect x="1480" y="365" width="170" height="55" rx="12" fill="#EBF5FB" stroke="#2980B9" stroke-width="2"/>
+  <text x="1565" y="398" text-anchor="middle" class="node-text">Downstream App</text>
+
+  <!-- Edges -->
+  <line x1="210" y1="297" x2="428" y2="298" class="edge"/>
+  <text x="290" y="288" class="edge-label">HTTPS</text>
+
+  <path d="M 680 285 L 798 240" class="edge"/>
+  <text x="710" y="255" class="edge-label">REST / OAuth</text>
+
+  <path d="M 680 315 L 798 395" class="edge"/>
+  <text x="715" y="358" class="edge-label">JMS</text>
+
+  <path d="M 970 235 L 1153 235" class="edge-purple"/>
+
+  <line x1="920" y1="400" x2="1148" y2="393" class="edge-dash"/>
+  <text x="1000" y="385" class="edge-label">bridge</text>
+
+  <line x1="1350" y1="393" x2="1478" y2="393" class="edge-blue"/>
+</svg>

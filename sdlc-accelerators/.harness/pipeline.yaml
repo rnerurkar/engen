@@ -1,0 +1,108 @@
+# SDLC Accelerators — Reference Harness Pipeline (downstream of /accelerator.generate)
+# This runs in YOUR Harness instance after the PR is opened. It is the deploy gate
+# that the platform deliberately does NOT own (Constitution Rule 1: platform never deploys).
+# Wire the <PLACEHOLDER> values to your connectors, then this enforces the full chain:
+#   PRS scan -> EvalOps gate -> cosign sign -> Binary Authorization -> terraform apply -> AgentEngine deploy
+
+pipeline:
+  name: sdlc-accelerators-agent-deploy
+  identifier: sdlc_accelerators_agent_deploy
+  projectIdentifier: <PROJECT>
+  orgIdentifier: <ORG>
+  stages:
+
+    - stage:
+        name: Production Readiness Scan
+        identifier: prs_scan
+        type: CI
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: PRS Scan (constitution enforcement)
+                  identifier: prs
+                  type: Run
+                  spec:
+                    # Fails the pipeline on any CRITICAL constitution violation (exit 1)
+                    command: |
+                      python -m prs_scanner.cli \
+                        --generated ./generated \
+                        --blueprint ./app-blueprint.json
+
+    - stage:
+        name: EvalOps Phase 1 Gate
+        identifier: eval_gate
+        type: CI
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: Golden Dataset Evaluation
+                  identifier: eval
+                  type: Run
+                  spec:
+                    # Vertex AI Eval SDK runs golden-dataset.json; gate on threshold >= 0.90
+                    command: |
+                      python -m evalops.cli \
+                        --golden ./eval/golden-dataset.json \
+                        --threshold 0.90
+
+    - stage:
+        name: Sign & Attest
+        identifier: sign_attest
+        type: CI
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: cosign sign (NEVER-SWAPPABLE)
+                  identifier: cosign
+                  type: Run
+                  spec:
+                    command: cosign sign --key <KMS_KEY> <IMAGE>
+              - step:
+                  name: Binary Authorization attest (NEVER-SWAPPABLE)
+                  identifier: binauthz
+                  type: Run
+                  spec:
+                    command: gcloud container binauthz attestations sign-and-create --artifact-url=<IMAGE> --attestor=<ATTESTOR>
+
+    - stage:
+        name: Provision Infrastructure
+        identifier: provision
+        type: Deployment
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: Terraform Apply (approval-gated)
+                  identifier: tf_apply
+                  type: TerraformApply
+                  spec:
+                    # Applies the GENERATED terraform/ (company modules only — Rule 4)
+                    configuration:
+                      type: Inline
+                      spec:
+                        workspace: <WORKSPACE>
+                        configFiles: { store: { type: Github, spec: { paths: ["terraform/"] } } }
+          # Manual approval before any provisioning
+          when: { pipelineStatus: Success }
+
+    - stage:
+        name: Deploy to AgentEngine
+        identifier: deploy_agentengine
+        type: Deployment
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: Deploy agents to Vertex AI AgentEngine
+                  identifier: agentengine
+                  type: Run
+                  spec:
+                    # Only runs if PRS + eval + attestation all passed.
+                    command: |
+                      gcloud ai agent-engines deploy \
+                        --region=<REGION> \
+                        --agent-config=./app-blueprint.json
+          # Canary: Non-Prod -> Pre-Prod (canary) -> Prod, auto-rollback on error rate > 1%

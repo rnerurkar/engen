@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 720" font-family="Segoe UI, Arial, sans-serif">
+  <style>
+    .title { font-size: 22; font-weight: bold; }
+    .subtitle { font-size: 12; fill: #555; }
+    .step-circle { fill: #FF8C00; }
+    .step-num { fill: white; font-size: 13; font-weight: bold; }
+    .bold { font-weight: bold; }
+    .s13 { font-size: 13; }
+    .s11 { font-size: 11; }
+    .s10 { font-size: 10; }
+    .s9 { font-size: 9; fill: #555; }
+    .arrow { stroke: #555; stroke-width: 2; fill: none; marker-end: url(#ah); }
+    .arrow-d { stroke: #999; stroke-width: 1.5; fill: none; stroke-dasharray: 5,3; marker-end: url(#ah); }
+  </style>
+  <defs>
+    <marker id="ah" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#555"/></marker>
+  </defs>
+
+  <text x="450" y="30" class="title">SDLC Accelerators Brownfield — End-to-End Component Architecture</text>
+  <text x="450" y="48" class="subtitle">CSA Agent → csa-extractor → Solution Accelerator → Governance Guardian → brownfield-aware code → coexistence runtime</text>
+
+  <!-- Step 0: CSA Agent (upstream) -->
+  <circle cx="48" cy="95" r="12" class="step-circle"/>
+  <text x="48" y="99" text-anchor="middle" class="step-num">0</text>
+  <rect x="25" y="110" width="160" height="70" rx="8" fill="#EDE7F6" stroke="#5E35B1" stroke-width="2"/>
+  <text x="105" y="132" text-anchor="middle" class="s11 bold">CSA Agent</text>
+  <text x="105" y="148" text-anchor="middle" class="s9">Upstream — separate system</text>
+  <text x="105" y="162" text-anchor="middle" class="s9">Produces validated</text>
+  <text x="105" y="174" text-anchor="middle" class="s9">CSA diagram</text>
+
+  <!-- Step 1: csa-extractor -->
+  <circle cx="248" cy="95" r="12" class="step-circle"/>
+  <text x="248" y="99" text-anchor="middle" class="step-num">1</text>
+  <rect x="225" y="110" width="160" height="70" rx="8" fill="#E3F2FD" stroke="#1565C0" stroke-width="2"/>
+  <text x="305" y="132" text-anchor="middle" class="s11 bold">csa-extractor</text>
+  <text x="305" y="148" text-anchor="middle" class="s9">Parses CSA diagram</text>
+  <text x="305" y="162" text-anchor="middle" class="s9">Pre-fills spec.md</text>
+  <text x="305" y="174" text-anchor="middle" class="s9">(§1-§9)</text>
+  <line x1="185" y1="145" x2="223" y2="145" class="arrow"/>
+
+  <!-- Step 2: Two-stage plan -->
+  <circle cx="448" cy="95" r="12" class="step-circle"/>
+  <text x="448" y="99" text-anchor="middle" class="step-num">2</text>
+  <rect x="425" y="110" width="160" height="70" rx="8" fill="#E3F2FD" stroke="#1565C0" stroke-width="2"/>
+  <text x="505" y="132" text-anchor="middle" class="s11 bold">Two-Stage Plan</text>
+  <text x="505" y="148" text-anchor="middle" class="s9">plan.draft + plan.review</text>
+  <text x="505" y="162" text-anchor="middle" class="s9">Migration phases +</text>
+  <text x="505" y="174" text-anchor="middle" class="s9">coexistence constraints</text>
+  <line x1="385" y1="145" x2="423" y2="145" class="arrow"/>
+
+  <!-- Step 3-7: Solution Accelerator MCP Server -->
+  <circle cx="48" cy="225" r="12" class="step-circle" style="fill:#0097A7"/>
+  <text x="48" y="229" text-anchor="middle" class="step-num">3</text>
+  <rect x="25" y="240" width="560" height="140" rx="10" fill="#E0F7FA" stroke="#0097A7" stroke-width="2.5"/>
+  <text x="305" y="262" text-anchor="middle" class="s13 bold">Solution Accelerator MCP Server (OAuth 2.1 + Entra ID)</text>
+
+  <rect x="40" y="275" width="120" height="44" rx="6" fill="#B2EBF2" stroke="#0097A7"/>
+  <text x="100" y="293" text-anchor="middle" class="s10 bold">④ Substitution</text>
+  <text x="100" y="308" text-anchor="middle" class="s9">deterministic</text>
+
+  <rect x="170" y="275" width="120" height="44" rx="6" fill="#B2EBF2" stroke="#0097A7"/>
+  <text x="230" y="290" text-anchor="middle" class="s10 bold">⑤ Pattern RAG</text>
+  <text x="230" y="303" text-anchor="middle" class="s9">+ LLM compose</text>
+  <text x="230" y="314" text-anchor="middle" class="s9">(only LLM stage)</text>
+
+  <rect x="300" y="275" width="120" height="44" rx="6" fill="#B2EBF2" stroke="#0097A7"/>
+  <text x="360" y="293" text-anchor="middle" class="s10 bold">⑥ ADR Check</text>
+  <text x="360" y="308" text-anchor="middle" class="s9">deterministic</text>
+
+  <rect x="430" y="275" width="140" height="44" rx="6" fill="#B2EBF2" stroke="#0097A7"/>
+  <text x="500" y="290" text-anchor="middle" class="s10 bold">⑦ Assemble</text>
+  <text x="500" y="303" text-anchor="middle" class="s9">.md + .json +</text>
+  <text x="500" y="314" text-anchor="middle" class="s9">.drawio + .png</text>
+
+  <text x="305" y="345" text-anchor="middle" class="s9">blueprint_start → blueprint_status → blueprint_result (async MCP Tasks · AlloyDB Task Store)</text>
+  <text x="305" y="365" text-anchor="middle" class="s10 bold">Brownfield-aware: migration_phases[] + coexistence_constraints[] in design contract</text>
+
+  <line x1="505" y1="180" x2="505" y2="200" class="arrow"/>
+  <line x1="505" y1="200" x2="305" y2="238" class="arrow"/>
+
+  <!-- Step 8: Blueprint Package -->
+  <circle cx="48" cy="410" r="12" class="step-circle" style="fill:#2E7D32"/>
+  <text x="48" y="414" text-anchor="middle" class="step-num">8</text>
+  <rect x="25" y="425" width="380" height="55" rx="8" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+  <text x="215" y="447" text-anchor="middle" class="s11 bold">Blueprint Package (app-blueprint.md PRIMARY)</text>
+  <text x="215" y="466" text-anchor="middle" class="s9">+ app-blueprint.json (derived) + design contract + inline diagrams</text>
+  <line x1="305" y1="380" x2="215" y2="423" class="arrow"/>
+
+  <!-- HITL + refresh -->
+  <rect x="430" y="420" width="155" height="28" rx="6" fill="#FFF9C4" stroke="#F9A825"/>
+  <text x="507" y="438" text-anchor="middle" class="s10 bold" fill="#F57F17">HITL: Draw.io edit</text>
+  <rect x="430" y="452" width="155" height="28" rx="6" fill="#B2EBF2" stroke="#0097A7"/>
+  <text x="507" y="470" text-anchor="middle" class="s10 bold">🔄 /accelerator.refresh</text>
+  <line x1="405" y1="452" x2="428" y2="445" class="arrow"/>
+
+  <!-- Step 8a: Governance Guardian -->
+  <circle cx="48" cy="510" r="11" class="step-circle" style="fill:#E65100"/>
+  <text x="48" y="514" text-anchor="middle" class="step-num" font-size="10">8a</text>
+  <rect x="25" y="525" width="380" height="48" rx="8" fill="#FFF3E0" stroke="#E65100" stroke-width="2"/>
+  <text x="215" y="547" text-anchor="middle" class="s11 bold" fill="#E65100">Governance Guardian (assess-fix-reassess)</text>
+  <text x="215" y="564" text-anchor="middle" class="s9">Reads §1-§9 · assess_start → result · recordTechDebt gate · iterate until no showstoppers</text>
+  <line x1="215" y1="480" x2="215" y2="523" class="arrow"/>
+
+  <!-- Step 9: Code Generation -->
+  <circle cx="48" cy="600" r="12" class="step-circle" style="fill:#C62828"/>
+  <text x="48" y="604" text-anchor="middle" class="step-num">9</text>
+  <rect x="25" y="615" width="380" height="55" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text x="215" y="637" text-anchor="middle" class="s11 bold">Brownfield-Aware Code Generation</text>
+  <text x="215" y="656" text-anchor="middle" class="s9">Governance gate (recordTechDebt → stop/resume) · brownfield skills · reads .json</text>
+  <line x1="215" y1="573" x2="215" y2="613" class="arrow"/>
+
+  <!-- GitHub MCP + CI/CD + Runtime (right column) -->
+  <rect x="640" y="240" width="200" height="50" rx="8" fill="#F5F5F5" stroke="#9E9E9E" stroke-width="2"/>
+  <text x="740" y="262" text-anchor="middle" class="s11 bold">GitHub MCP Server</text>
+  <text x="740" y="279" text-anchor="middle" class="s9">Company TF module repos</text>
+
+  <rect x="640" y="320" width="200" height="50" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text x="740" y="342" text-anchor="middle" class="s11 bold">Harness CI/CD</text>
+  <text x="740" y="359" text-anchor="middle" class="s9">PR → Non-Prod → Pre-Prod → Prod</text>
+
+  <rect x="640" y="400" width="200" height="60" rx="8" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+  <text x="740" y="422" text-anchor="middle" class="s11 bold">Coexistence Runtime</text>
+  <text x="740" y="439" text-anchor="middle" class="s9">Strangler-fig: new + legacy</text>
+  <text x="740" y="453" text-anchor="middle" class="s9">side-by-side · runtime compliance</text>
+
+  <line x1="405" y1="640" x2="620" y2="640" class="arrow"/>
+  <path d="M 740 460 L 740 470 L 600 470 L 600 640" class="arrow-d"/>
+  <line x1="405" y1="345" x2="638" y2="265" class="arrow-d"/>
+
+  <!-- Peripheral systems band -->
+  <rect x="640" y="490" width="200" height="80" rx="8" fill="#ECEFF1" stroke="#607D8B" stroke-width="2"/>
+  <text x="740" y="512" text-anchor="middle" class="s11 bold">Peripheral Systems</text>
+  <text x="740" y="528" text-anchor="middle" class="s9">Vertex AI Search · Apigee API Hub</text>
+  <text x="740" y="542" text-anchor="middle" class="s9">ADR Store · Draw.io headless</text>
+  <text x="740" y="558" text-anchor="middle" class="s9">Maintained by Platform Eng (read-only)</text>
+
+  <text x="450" y="700" text-anchor="middle" class="s9">SDLC Accelerators — Employer Internal Tool — Brownfield (CSA → TSA Migration) — Not for External Distribution</text>
+</svg>

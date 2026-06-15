@@ -1,0 +1,145 @@
+{
+  "metadata": {
+    "solution_id": "fnol",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "use_case": "FNOL intake",
+    "generated_by": "assemble_blueprint",
+    "source_hashes": {
+      "spec_hash": "sha256:6057e18ac9a3bf9c85d6fbf264598ef2b8b8b4b9529fca8d59e2f40fa2678883",
+      "plan_hash": "sha256:57c93a05b2f8103f0d85cbb68cfb5dca0a5f72a0f5084b63a27ad4a4d6a75f89",
+      "blueprint_hash": "sha256:832d49c80f93037a181cc1e279d3280aba27a27ab79bc03e602ee1065430a8c9"
+    },
+    "blueprint_version": "9-section",
+    "accelerator_version": "2.0"
+  },
+  "pattern_composition": {
+    "primary_pattern": "SequentialAgent",
+    "composition": [
+      {
+        "pattern": "SequentialAgent",
+        "role": "orchestration",
+        "confidence": 0.95
+      }
+    ],
+    "adjacency_validation": "PASSED"
+  },
+  "adk_agent_tree": {
+    "root": {
+      "name": "fnol_coordinator",
+      "type": "SequentialAgent",
+      "role": "Orchestrates",
+      "children": [
+        {
+          "name": "extract_details",
+          "type": "LlmAgent",
+          "role": "Extract",
+          "model": "gemini-2.0-flash",
+          "tools": [
+            "claims-db-mcp",
+            "coverage_calculator_fn"
+          ],
+          "children": []
+        },
+        {
+          "name": "severity_classifier",
+          "type": "LlmAgent",
+          "role": "Classify",
+          "model": "gemini-2.0-flash",
+          "tools": [
+            "severity_classifier_fn",
+            "body-shop-a2a"
+          ],
+          "children": []
+        }
+      ]
+    }
+  },
+  "tool_bindings": [
+    {
+      "name": "claims-db-mcp",
+      "type": "mcp_server",
+      "assigned_to": "extract_details",
+      "capabilities": [],
+      "discovered_via": "Apigee API Hub"
+    },
+    {
+      "name": "coverage_calculator_fn",
+      "type": "function_tool",
+      "assigned_to": "extract_details",
+      "capabilities": []
+    },
+    {
+      "name": "severity_classifier_fn",
+      "type": "function_tool",
+      "assigned_to": "severity_classifier",
+      "capabilities": []
+    },
+    {
+      "name": "body-shop-a2a",
+      "type": "a2a_agent",
+      "assigned_to": "severity_classifier",
+      "capabilities": [],
+      "discovered_via": "Apigee API Hub"
+    }
+  ],
+  "business_rules": [
+    {
+      "id": "BR-001",
+      "rule": "IF x THEN y",
+      "implemented_by": "severity_classifier_fn"
+    }
+  ],
+  "agent_identity_config": [
+    {
+      "agent": "fnol_coordinator",
+      "service_account": "sa@p",
+      "capabilities": [
+        "delegation-only"
+      ]
+    }
+  ],
+  "screening_config": {
+    "model_armor_level": "strict",
+    "agents_with_input_screening": [
+      "extract_details"
+    ],
+    "agents_with_output_screening": [
+      "severity_classifier"
+    ]
+  },
+  "observability_config": {
+    "tracing": "Cloud Trace"
+  },
+  "infra_modules": [
+    {
+      "module": "tf-cloud-run-agent",
+      "source": "github.com/c/m",
+      "version": "v2.1.0",
+      "variables": {
+        "region": "us-east1"
+      }
+    }
+  ],
+  "hadr_config": {
+    "strategy": "Warm Standby",
+    "primary_region": "us-east1",
+    "dr_region": "us-central1"
+  },
+  "nfr_targets": {
+    "availability": {
+      "target": "99.9%"
+    }
+  },
+  "skills": [
+    {
+      "name": "adk-agents",
+      "sha": "abc",
+      "version": "2.1.0",
+      "assigned_to": "fnol_coordinator"
+    }
+  ],
+  "confidence_scores": {
+    "overall": "high"
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "metadata": {
+    "solution_id": "contract-review-assistant",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "use_case": "Iterative contract clause extraction and risk assessment",
+    "team": "legal-engineering",
+    "generated_by": "assemble_blueprint",
+    "generated_at": "2026-06-14T10:00:00Z",
+    "source_hashes": {
+      "spec_hash": "sha256:11aa22bb33cc...",
+      "plan_hash": "sha256:44dd55ee66ff...",
+      "blueprint_hash": "sha256:77gg88hh99ii..."
+    },
+    "blueprint_version": "9-section",
+    "accelerator_version": "2.0"
+  },
+  "pattern_composition": {
+    "primary_pattern": "LoopAgent",
+    "composition": [
+      {"pattern": "LoopAgent", "role": "iterative_refinement", "confidence": 0.9, "source_signal": "Loop until quality score exceeds 0.9 in spec §2"},
+      {"pattern": "SequentialAgent", "role": "review_chain", "nesting": "inside LoopAgent", "confidence": 0.92, "source_signal": "first extract, then assess, then synthesize"},
+      {"pattern": "ParallelAgent", "role": "parallel_risk", "nesting": "inside SequentialAgent (step 2)", "confidence": 0.88, "source_signal": "assess legal and compliance risk concurrently"}
+    ],
+    "adjacency_validation": "PASSED",
+    "adjacency_notes": "LoopAgent at root wrapping Sequential is valid. ParallelAgent nests inside Sequential."
+  },
+  "adk_agent_tree": {
+    "root": {
+      "name": "contract_review_loop",
+      "type": "LoopAgent",
+      "role": "Iterative refinement until quality threshold",
+      "model": null,
+      "retry": {"type": "LoopAgent", "max_attempts": 5, "backoff": "none"},
+      "children": [
+        {
+          "name": "review_chain",
+          "type": "SequentialAgent",
+          "role": "Extract -> assess -> synthesize",
+          "model": null,
+          "children": [
+            {"name": "extract_clauses", "type": "LlmAgent", "role": "Extract contract clauses", "model": "gemini-2.0-flash", "tools": ["doc-store-mcp", "clause_parser_fn"], "children": []},
+            {
+              "name": "parallel_risk",
+              "type": "ParallelAgent",
+              "role": "Concurrent legal + compliance risk assessment",
+              "model": null,
+              "children": [
+                {"name": "legal_risk", "type": "LlmAgent", "role": "Legal risk via partner", "model": "gemini-2.0-flash", "tools": ["legal-review-a2a"], "children": []},
+                {"name": "compliance_risk", "type": "LlmAgent", "role": "Compliance risk via partner", "model": "gemini-2.0-flash", "tools": ["compliance-engine-a2a"], "children": []}
+              ]
+            },
+            {"name": "synthesize_report", "type": "LlmAgent", "role": "Synthesize final risk report", "model": "gemini-2.0-flash", "tools": ["report_builder_fn"], "children": []}
+          ]
+        }
+      ]
+    }
+  },
+  "tool_bindings": [
+    {"name": "doc-store-mcp", "type": "mcp_server", "endpoint": "mcp://doc-store.company.internal:8443", "auth_method": "OAuth 2.1 + Workload Identity", "assigned_to": "extract_clauses", "capabilities": ["doc_fetch", "doc_search"], "discovered_via": "Vertex AI Search", "confidence": 0.95},
+    {"name": "clause_parser_fn", "type": "function_tool", "assigned_to": "extract_clauses", "capabilities": ["parse_clauses"]},
+    {"name": "legal-review-a2a", "type": "a2a_agent", "endpoint": "https://legal-review.partner.example/a2a", "auth_method": "mTLS + OAuth", "assigned_to": "legal_risk", "capabilities": ["legal_risk_score"], "discovered_via": "Apigee API Hub", "confidence": 0.9},
+    {"name": "compliance-engine-a2a", "type": "a2a_agent", "endpoint": "https://compliance.partner.example/a2a", "auth_method": "mTLS + OAuth", "assigned_to": "compliance_risk", "capabilities": ["compliance_check"], "discovered_via": "Apigee API Hub", "confidence": 0.9},
+    {"name": "report_builder_fn", "type": "function_tool", "assigned_to": "synthesize_report", "capabilities": ["build_report"]}
+  ],
+  "data_flows": [],
+  "sequence_summary": ["loop iterates review_chain until quality >= 0.9"],
+  "business_rules": [
+    {"id": "BR-001", "source": "spec §7", "rule": "IF clause_type == 'indemnification' AND cap_absent THEN risk = 'high'", "implemented_by": "clause_parser_fn"},
+    {"id": "BR-002", "source": "spec §7", "rule": "IF quality_score >= 0.9 THEN exit_loop", "implemented_by": "report_builder_fn"}
+  ],
+  "infra_modules": [],
+  "gateway_routes": [],
+  "screening_config": {
+    "model_armor_level": "strict",
+    "agents_with_input_screening": ["extract_clauses", "legal_risk", "compliance_risk", "synthesize_report"],
+    "agents_with_output_screening": ["synthesize_report"],
+    "pii_categories_monitored": ["party_names", "contract_value", "signatures"],
+    "blocked_output_patterns": ["full SSN", "bank account"]
+  },
+  "agent_identity_config": [
+    {"agent": "contract_review_loop", "service_account": "sa-contract-loop@PROJECT.iam.gserviceaccount.com", "capabilities": ["delegation-only"], "denied": ["doc-store-mcp", "legal-review-a2a", "compliance-engine-a2a"], "delegation": ["review_chain"]},
+    {"agent": "extract_clauses", "service_account": "sa-extract-clauses@PROJECT.iam.gserviceaccount.com", "capabilities": ["doc-store-mcp:read", "clause_parser_fn:invoke"], "denied": [], "delegation": []},
+    {"agent": "legal_risk", "service_account": "sa-legal-risk@PROJECT.iam.gserviceaccount.com", "capabilities": ["legal-review-a2a:invoke"], "denied": [], "delegation": []},
+    {"agent": "compliance_risk", "service_account": "sa-compliance-risk@PROJECT.iam.gserviceaccount.com", "capabilities": ["compliance-engine-a2a:invoke"], "denied": [], "delegation": []},
+    {"agent": "synthesize_report", "service_account": "sa-synthesize@PROJECT.iam.gserviceaccount.com", "capabilities": ["report_builder_fn:invoke"], "denied": [], "delegation": []}
+  ],
+  "pipeline_configs": {"ci_cd": {}, "evalops": {}},
+  "observability_config": {"tracing": "Cloud Trace"},
+  "hadr_config": {"strategy": "Warm Standby", "primary_region": "us-east1", "dr_region": "us-central1"},
+  "nfr_targets": {"availability": {"target": "99.9%"}},
+  "confidence_scores": {}
+}

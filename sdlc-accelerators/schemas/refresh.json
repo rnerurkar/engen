@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "refresh",
+  "description": "Bidirectional .md <-> .drawio sync through app-blueprint.json.",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": [
+        "blueprint_md",
+        "drawio_files",
+        "spec",
+        "plan"
+      ],
+      "properties": {
+        "blueprint_md": {
+          "type": "string"
+        },
+        "drawio_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "spec": {
+          "type": "string"
+        },
+        "plan": {
+          "type": "string"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "sync_report",
+        "updated_files"
+      ],
+      "properties": {
+        "sync_report": {
+          "type": "object",
+          "properties": {
+            "case": {
+              "type": "string",
+              "enum": [
+                "A",
+                "B",
+                "C"
+              ]
+            },
+            "conflicts": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "structural_report": {
+          "type": "object"
+        },
+        "updated_files": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

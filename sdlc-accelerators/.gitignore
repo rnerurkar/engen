@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+.accelerator-hashes
+
+# Agent-specific spec-kit command files — DERIVED from .specify/, regenerated locally
+# per developer with `specify init --here --integration <agent>`. Do NOT commit these;
+# committing one agent's folder creates churn for teammates on a different agent.
+.claude/commands/
+.github/prompts/
+.pi/prompts/

@@ -1,0 +1,121 @@
+%% Solution Accelerator — Async Call Sequence (MCP Tasks)
+%% Including Bidirectional Refresh Flow
+
+sequenceDiagram
+    participant Dev as Developer (IDE)
+    participant CA as Coding Agent
+    participant BA as Solution Accelerator<br/>MCP Server
+    participant BG as Background Job<br/>(Cloud Run Job)
+    participant VS as Vertex AI Search
+    participant AH as Apigee API Hub
+    participant ER as Eraser.io Headless
+    participant TS as Task Store (AlloyDB)
+    participant GG as Governance Guardian<br/>MCP Server
+
+    Note over Dev,GG: Phase 1 — /accelerator.blueprint (Async MCP Tasks)
+
+    Dev->>CA: /accelerator.blueprint
+    CA->>BA: blueprint_start(spec, plan)
+    BA->>TS: Create task (status: queued)
+    BA->>BG: Enqueue via Cloud Tasks
+    BA-->>CA: { taskId, pollInterval: 5s }
+
+    loop Poll until complete
+        CA->>BA: blueprint_status(taskId)
+        BA->>TS: Read task status
+        BA-->>CA: { status: running, stage: "reasoning..." }
+    end
+
+    BG->>VS: search_patterns(spec signals)
+    VS-->>BG: matched patterns + confidence
+    BG->>AH: discover_integrations(spec §4-§5)
+    AH-->>BG: MCP servers + A2A agents + REST APIs
+    BG->>BG: recommend_architecture (LlmAgent)
+    BG->>BG: validate_composition (adjacency)
+    BG->>BG: adr_compliance_check (deterministic)
+    BG->>BG: Construct Eraser.io DSL from topology
+    BG->>ER: render component topology (.drawio.xml + .png)
+    ER-->>BG: component-diagram.drawio.xml + .png
+    BG->>ER: render HA/DR lifecycle views (.drawio.xml + .png)
+    ER-->>BG: hadr-lifecycle.drawio.xml + .png
+    BG->>BG: assemble_blueprint (.md + .json)
+    BG->>TS: Update task (status: completed, result: .md + .json + diagrams)
+
+    CA->>BA: blueprint_result(taskId)
+    BA->>TS: Read completed task
+    BA-->>CA: { markdown, diagrams[], json }
+    CA->>Dev: Write app-blueprint.md + .json + .drawio.xml + .png
+
+    Note over Dev,GG: Phase 2 — HITL Edit + /accelerator.refresh (Bidirectional Sync)
+
+    Dev->>Dev: Edit app-blueprint.md and/or .drawio.xml
+
+    Dev->>CA: /accelerator.refresh
+    CA->>BA: refresh(blueprint_md, drawio_files[], spec, plan)
+
+    Note over BA: Step 0: Detect what changed via .accelerator-hashes
+
+    alt Case A: Only .md changed
+        BA->>BA: LLM extracts topology from edited prose
+        BA->>BA: assemble_blueprint → regenerate .json
+        BA->>BA: Generate Eraser.io DSL from .json topology
+        BA->>ER: Render new .drawio.xml + .png from DSL
+        ER-->>BA: Updated .drawio.xml + .png
+    else Case B: Only .drawio changed
+        BA->>BA: Parse .drawio.xml → extract nodes/edges
+        BA->>BA: Diff against .json → identify changes
+        BA->>BA: Update .json with new topology
+        BA->>BA: LLM updates .md §2 narrative + mermaid
+        BA->>ER: Re-render .png from .drawio.xml
+        ER-->>BA: Updated .png
+    else Case C: Both changed
+        BA->>BA: Extract topology from both .md and .drawio
+        BA->>BA: Diff both against last-known .json
+        BA->>BA: Auto-merge agreements
+        alt Conflicts detected
+            BA-->>CA: Conflict report (both versions shown)
+            CA->>Dev: "Which version to keep?"
+            Dev->>CA: Resolution choice
+            CA->>BA: Resolved conflicts
+        end
+        BA->>BA: Sync both through merged .json
+        BA->>ER: Render reconciled .drawio.xml + .png
+        ER-->>BA: Reconciled diagrams
+    end
+
+    BA->>BA: Post-sync validation (parity, adjacency, consistency)
+    BA->>BA: Regenerate .json + update .accelerator-hashes
+    BA-->>CA: { sync_report, structural_report, updated files }
+    CA->>Dev: Write synced .md + .json + .drawio.xml + .png
+
+    Note over Dev,GG: Phase 3 — /accelerator.assess (Governance Guardian)
+
+    Dev->>CA: /accelerator.assess
+    CA->>CA: Check timestamps → auto-refresh if stale (Step 0)
+    CA->>CA: Extract 9 sections from app-blueprint.md
+    CA->>GG: assess_start(solution_package)
+    GG->>TS: Create assessment task
+    GG-->>CA: { taskId }
+
+    loop Poll assessment
+        CA->>GG: assess_status(taskId)
+        GG-->>CA: { status: running, stage: "evaluating..." }
+    end
+
+    GG->>GG: EA assessment engine (black box)
+    GG-->>CA: assess_result → scorecard + findings
+
+    alt Showstoppers found
+        CA->>Dev: "Showstopper: [finding]. Fix and re-assess."
+        Dev->>Dev: Fix .md → /accelerator.refresh → /accelerator.assess
+    else Tech debt only
+        CA->>GG: recordTechDebt(findings)
+        GG-->>CA: { signal: "resume", tech_debt_ids }
+    end
+
+    Note over Dev,GG: Phase 4 — /accelerator.generate
+
+    Dev->>CA: /accelerator.generate
+    CA->>CA: Verify .json not stale (hash check)
+    CA->>CA: Read app-blueprint.json + skills
+    CA->>Dev: Generate code (agents, MCP, A2A, TF, CI/CD, eval, security)

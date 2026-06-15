@@ -1,0 +1,126 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 1080" width="1020" height="1080" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555" />
+    </marker>
+    <marker id="arrow-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#aaa" />
+    </marker>
+    <filter id="sh" x="-3%" y="-3%" width="106%" height="106%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-color="#00000012" />
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="1020" height="1080" fill="#FAFBFC" />
+  <text x="510" y="28" font-size="15" font-weight="bold" fill="#1a1a2e" text-anchor="middle">SDLC Accelerators — End-to-End Component Architecture (Agentic Archetype)</text>
+  <text x="510" y="46" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">Generates production-ready application code + deployment-ready company-compliant multi-region IaC from structured spec</text>
+  <circle cx="110" cy="85" r="14" fill="#1565C0" />
+  <text x="110" y="89" font-size="11" font-weight="bold" fill="#FFF" text-anchor="middle">1</text>
+  <rect x="60" y="100" width="180" height="55" rx="8" fill="#E8F0FE" stroke="#4285F4" stroke-width="1.5" filter="url(#sh)" />
+  <text x="150" y="118" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">Developer</text>
+  <text x="150" y="132" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">/specify → spec.md</text>
+  <text x="150" y="145" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">/plan → plan.md</text>
+  <circle cx="310" cy="85" r="14" fill="#00897B" />
+  <text x="310" y="89" font-size="11" font-weight="bold" fill="#FFF" text-anchor="middle">2</text>
+  <rect x="280" y="100" width="360" height="80" rx="8" fill="#E0F2F1" stroke="#00897B" stroke-width="1.5" filter="url(#sh)" />
+  <text x="460" y="118" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">Solution Accelerator MCP Server</text>
+  <text x="460" y="133" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">(Cloud Run · OAuth 2.1 · TLS 1.3 · Async MCP Tasks)</text>
+  <rect x="293" y="140" width="80" height="18" rx="4" fill="#FFF3E0" stroke="#FF6F00" stroke-width="1.5" filter="url(#sh)" />
+  <text x="333" y="153" font-size="7" font-weight="bold" fill="#E65100" text-anchor="middle">validate_spec</text>
+  <text x="460" y="153" font-size="7" font-weight="normal" fill="#555" text-anchor="middle">recommend_architecture   validate_composition   assemble_blueprint</text>
+  <text x="460" y="167" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">RAG: search_patterns · search_skills · discover_integrations (API Hub)</text>
+  <text x="460" y="178" font-size="7" font-weight="normal" fill="#bbb" text-anchor="middle">INTERNAL — not exposed to coding agent</text>
+  <line x1="240" y1="127" x2="280" y2="127" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="30" y="210" width="175" height="42" rx="5" fill="#F5F5F5" stroke="#78909C" stroke-width="1.5" filter="url(#sh)" />
+  <text x="117" y="227" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">Vertex AI Search</text>
+  <text x="117" y="242" font-size="8" font-weight="normal" fill="#666" text-anchor="middle">Patterns · Skills</text>
+  <rect x="230" y="210" width="235" height="42" rx="5" fill="#F5F5F5" stroke="#78909C" stroke-width="1.5" filter="url(#sh)" />
+  <text x="347" y="227" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">Apigee API Hub</text>
+  <text x="347" y="242" font-size="7" font-weight="normal" fill="#666" text-anchor="middle">MCP + A2A + REST (discover_integrations)</text>
+  <path d="M 340,180 L 117,210" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <text x="160" y="202" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">semantic search</text>
+  <path d="M 460,180 L 347,210" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <text x="440" y="202" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">integration discovery</text>
+  <line x1="460" y1="252" x2="460" y2="278" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="300" y="278" width="340" height="40" rx="8" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5" filter="url(#sh)" />
+  <text x="460" y="294" font-size="11" font-weight="bold" fill="#2E7D32" text-anchor="middle">app-blueprint.md</text>
+  <text x="460" y="309" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">Part I: §1-§7 + Part II: §8-§12 + .json + .drawio.xml + .png</text>
+  <circle cx="660" cy="273" r="14" fill="#EF6C00" />
+  <text x="660" y="277" font-size="11" font-weight="bold" fill="#FFF" text-anchor="middle">3</text>
+  <circle cx="695" cy="273" r="14" fill="#EF6C00" />
+  <text x="695" y="277" font-size="11" font-weight="bold" fill="#FFF" text-anchor="middle">3a</text>
+  <rect x="630" y="288" width="260" height="50" rx="6" fill="#FFF3E0" stroke="#EF6C00" stroke-width="1.5" filter="url(#sh)" />
+  <text x="760" y="306" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">Developer Reviews Blueprint</text>
+  <text x="760" y="320" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">Edits .md (Part I) + .drawio</text>
+  <text x="760" y="332" font-size="8" font-weight="normal" fill="#C62828" text-anchor="middle">/accelerator.refresh → regen .json + .png</text>
+  <line x1="610" y1="298" x2="630" y2="308" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="620" y="370" width="370" height="140" rx="6" fill="#FFF" stroke="#78909C" stroke-width="1.5" filter="url(#sh)" />
+  <text x="805" y="388" font-size="11" font-weight="bold" fill="#333" text-anchor="middle">What SDLC Accelerators Generates</text>
+  <text x="640" y="410" font-size="12" font-weight="normal" fill="#C62828" text-anchor="start">⊞</text>
+  <text x="658" y="410" font-size="9" font-weight="bold" fill="#C62828" text-anchor="start">Application Code (80-95%)</text>
+  <text x="670" y="423" font-size="8" font-weight="normal" fill="#555" text-anchor="start">ADK agents · MCP/A2A · FunctionTools</text>
+  <text x="640" y="440" font-size="12" font-weight="normal" fill="#00897B" text-anchor="start">⊞</text>
+  <text x="658" y="440" font-size="9" font-weight="bold" fill="#00897B" text-anchor="start">Deployment-Ready Multi-Region IaC</text>
+  <text x="670" y="453" font-size="8" font-weight="normal" fill="#555" text-anchor="start">TF modules + Apigee + Workload Identity</text>
+  <text x="640" y="470" font-size="12" font-weight="normal" fill="#EF6C00" text-anchor="start">⊞</text>
+  <text x="658" y="470" font-size="9" font-weight="bold" fill="#EF6C00" text-anchor="start">API Hub Registration Entry</text>
+  <text x="670" y="483" font-size="8" font-weight="normal" fill="#555" text-anchor="start">Agent Card for A2A discovery</text>
+  <text x="840" y="410" font-size="12" font-weight="normal" fill="#7B1FA2" text-anchor="start">⊞</text>
+  <text x="858" y="410" font-size="9" font-weight="bold" fill="#7B1FA2" text-anchor="start">CI/CD + EvalOps</text>
+  <text x="870" y="423" font-size="8" font-weight="normal" fill="#555" text-anchor="start">Harness pipelines · golden dataset</text>
+  <text x="840" y="440" font-size="12" font-weight="normal" fill="#1565C0" text-anchor="start">⊞</text>
+  <text x="858" y="440" font-size="9" font-weight="bold" fill="#1565C0" text-anchor="start">Security + Observability</text>
+  <text x="870" y="453" font-size="8" font-weight="normal" fill="#555" text-anchor="start">Model Armor · OTel · Cloud Trace</text>
+  <rect x="240" y="555" width="460" height="68" rx="8" fill="#FCE4EC" stroke="#C62828" stroke-width="1.5" filter="url(#sh)" />
+  <text x="470" y="571" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">Governance Assessment (/accelerator.assess)</text>
+  <text x="470" y="587" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">Governance Guardian MCP Server (async MCP Tasks)</text>
+  <text x="470" y="600" font-size="8" font-weight="normal" fill="#666" text-anchor="middle">Extracts Part I (§1-§7): diagrams · NFRs · ADL · tech stack · patterns</text>
+  <text x="470" y="613" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">EA engine scores solution. Returns scorecard + findings. SA fixes → re-assesses.</text>
+  <line x1="460" y1="318" x2="460" y2="555" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <circle cx="460" cy="645" r="14" fill="#C62828" />
+  <text x="460" y="649" font-size="11" font-weight="bold" fill="#FFF" text-anchor="middle">4</text>
+  <rect x="350" y="660" width="220" height="32" rx="4" fill="#FFEBEE" stroke="#EF9A9A" stroke-width="1.5" filter="url(#sh)" />
+  <text x="460" y="680" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">findings + scorecard</text>
+  <text x="460" y="702" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">If no showstoppers ↓</text>
+  <line x1="460" y1="623" x2="460" y2="660" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <circle cx="460" cy="715" r="14" fill="#1565C0" />
+  <text x="460" y="719" font-size="11" font-weight="bold" fill="#FFF" text-anchor="middle">5</text>
+  <rect x="240" y="730" width="460" height="72" rx="8" fill="#E3F2FD" stroke="#1565C0" stroke-width="1.5" filter="url(#sh)" />
+  <text x="470" y="746" font-size="11" font-weight="bold" fill="#333" text-anchor="middle">Skill-Guided Code + IaC Generation (/accelerator.generate)</text>
+  <text x="470" y="762" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">Governance gate: recordTechDebt → stop/resume</text>
+  <rect x="260" y="770" width="100" height="20" rx="4" fill="#BBDEFB" stroke="#1565C0" stroke-width="1.5" filter="url(#sh)" />
+  <text x="310" y="784" font-size="7" font-weight="bold" fill="#1565C0" text-anchor="middle">Blueprint .json</text>
+  <rect x="370" y="770" width="95" height="20" rx="4" fill="#C8E6C9" stroke="#2E7D32" stroke-width="1.5" filter="url(#sh)" />
+  <text x="418" y="784" font-size="7" font-weight="bold" fill="#2E7D32" text-anchor="middle">Domain Skills</text>
+  <rect x="475" y="770" width="95" height="20" rx="4" fill="#FFCDD2" stroke="#C62828" stroke-width="1.5" filter="url(#sh)" />
+  <text x="522" y="784" font-size="7" font-weight="bold" fill="#C62828" text-anchor="middle">Overlay Skills</text>
+  <text x="470" y="810" font-size="8" font-weight="normal" fill="#1565C0" text-anchor="middle">ADK agents + MCP/A2A + FunctionTools + Terraform + Apigee + WI + API Hub</text>
+  <line x1="460" y1="692" x2="460" y2="730" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="700" y="740" width="190" height="42" rx="5" fill="#F5F5F5" stroke="#78909C" stroke-width="1.5" filter="url(#sh)" />
+  <text x="795" y="757" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">GitHub MCP Server</text>
+  <text x="795" y="772" font-size="8" font-weight="normal" fill="#666" text-anchor="middle">IaC pattern repos</text>
+  <path d="M 700,765 L 700,761" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <circle cx="460" cy="835" r="14" fill="#7B1FA2" />
+  <text x="460" y="839" font-size="11" font-weight="bold" fill="#FFF" text-anchor="middle">6</text>
+  <text x="460" y="822" font-size="8" font-weight="normal" fill="#666" text-anchor="middle">git push + create PR</text>
+  <rect x="340" y="850" width="240" height="38" rx="5" fill="#FFF" stroke="#78909C" stroke-width="1.5" filter="url(#sh)" />
+  <text x="460" y="867" font-size="11" font-weight="bold" fill="#333" text-anchor="middle">GitHub Repo + PR</text>
+  <text x="460" y="882" font-size="8" font-weight="normal" fill="#666" text-anchor="middle">GitHub Action triggers Harness</text>
+  <line x1="460" y1="810" x2="460" y2="850" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <circle cx="460" cy="910" r="14" fill="#7B1FA2" />
+  <text x="460" y="914" font-size="11" font-weight="bold" fill="#FFF" text-anchor="middle">7</text>
+  <rect x="270" y="925" width="380" height="55" rx="8" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1.5" filter="url(#sh)" />
+  <text x="460" y="943" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">Harness CI/CD Pipeline</text>
+  <text x="460" y="959" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">Provision IaC · Build + Deploy · 3-Phase EvalOps · Canary</text>
+  <text x="460" y="973" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">Non-Prod → Pre-Prod (canary 10%) → Production (both regions)</text>
+  <line x1="460" y1="888" x2="460" y2="925" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="310" y="1015" width="300" height="50" rx="8" fill="#FFF9C4" stroke="#F57F17" stroke-width="1.5" filter="url(#sh)" />
+  <text x="460" y="1033" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">Production</text>
+  <text x="460" y="1049" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">Cloud Run + Apigee · Dynatrace + Splunk</text>
+  <text x="460" y="1063" font-size="9" font-weight="normal" fill="#888" text-anchor="middle">Model Armor · VPC-SC</text>
+  <line x1="460" y1="980" x2="460" y2="1015" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="650" y="1015" width="270" height="42" rx="5" fill="#FFF8E1" stroke="#FF8F00" stroke-width="1.5" filter="url(#sh)" />
+  <text x="785" y="1032" font-size="9" font-weight="bold" fill="#E65100" text-anchor="middle">Coding agent NEVER deploys.</text>
+  <text x="785" y="1047" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">Generates code + IaC + pipelines only.</text>
+  <text x="510" y="1068" font-size="9" font-weight="normal" fill="#999" text-anchor="middle">SDLC Accelerators — Employer Internal Tool — Not for External Distribution</text>
+</svg>

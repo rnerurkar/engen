@@ -1,0 +1,22 @@
+[project]
+name = "sdlc-accelerators"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = ["pydantic", "jinja2", "jsonschema", "pyyaml", "pyjwt[crypto]", "reportlab", "pdfplumber"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["UP042"]  # str+Enum is an intentional, widely-used pattern
+
+[tool.ruff.lint.per-file-ignores]
+# Multi-service layout requires sys.path insertion before imports.
+"tests/*" = ["E402", "E501", "E702"]
+"services/*/src/**" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"

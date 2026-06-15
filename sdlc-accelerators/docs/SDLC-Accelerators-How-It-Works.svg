@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" font-family="Segoe UI, Arial, sans-serif" font-size="12">
+  <style>
+    .main-title { font-size: 28; font-weight: bold; }
+    .title-sub { font-size: 14; fill: #777; }
+    .step-title { font-size: 16; font-weight: bold; }
+    .step-desc { font-size: 11; fill: #444; }
+    .artifact { fill: #FFF8E1; stroke: #F9A825; stroke-width: 1.5; rx: 12; }
+    .artifact-text { font-size: 11; font-weight: bold; fill: #F57F17; }
+    .step-circle { stroke-width: 2.5; }
+    .insight-box { fill: #FAFAFA; stroke: #E0E0E0; stroke-width: 1.5; rx: 8; }
+    .stat-num { font-size: 32; font-weight: bold; }
+    .stat-label { font-size: 10; fill: #888; }
+    .dev-box { fill: #FAFAFA; stroke: #E0E0E0; stroke-width: 1.5; rx: 8; }
+    .dev-title { font-size: 14; font-weight: bold; }
+    .dev-time { font-size: 11; font-weight: bold; }
+    .dev-task { font-size: 11; fill: #444; }
+    .xs { font-size: 10; fill: #666; }
+    .arrow-line { stroke: #BDBDBD; stroke-width: 2; fill: none; marker-end: url(#flow-arrow); }
+  </style>
+  <defs>
+    <marker id="flow-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#BDBDBD"/>
+    </marker>
+  </defs>
+
+  <!-- TITLE -->
+  <text x="550" y="45" text-anchor="middle" class="main-title">SDLC Accelerators</text>
+  <text x="550" y="45" text-anchor="middle" dx="240" font-size="18" fill="#999"> — How It Works</text>
+  <text x="550" y="68" text-anchor="middle" class="title-sub">From business requirements to production-ready agent code in under 1 hour</text>
+
+  <!-- ==================== STEP 1 ==================== -->
+  <rect x="198" y="95" width="50" height="50" rx="12" fill="white" stroke="#FF8C00" class="step-circle"/>
+  <text x="223" y="127" text-anchor="middle" font-size="20" font-weight="bold" fill="#FF8C00">1</text>
+
+  <text x="550" y="112" text-anchor="middle" class="step-title" fill="#1565C0">Capture Requirements</text>
+  <text x="550" y="132" text-anchor="middle" class="step-desc">Developer + Coding Agent</text>
+  <text x="550" y="148" text-anchor="middle" class="step-desc">Opens VS Code with Copilot, Claude, or Cursor · Types /specify — fills 10-section structured template · Types /plan — answers technical questions</text>
+
+  <!-- Arrow -->
+  <line x1="550" y1="158" x2="550" y2="178" class="arrow-line"/>
+
+  <!-- Artifact: spec.md + plan.md -->
+  <rect x="475" y="178" width="150" height="30" class="artifact"/>
+  <text x="550" y="198" text-anchor="middle" class="artifact-text">spec.md + plan.md</text>
+
+  <line x1="550" y1="208" x2="550" y2="240" class="arrow-line"/>
+
+  <!-- ==================== STEP 2 ==================== -->
+  <rect x="148" y="245" width="50" height="50" rx="12" fill="white" stroke="#2E7D32" class="step-circle"/>
+  <text x="173" y="277" text-anchor="middle" font-size="20" font-weight="bold" fill="#2E7D32">2</text>
+
+  <text x="550" y="262" text-anchor="middle" class="step-title" fill="#2E7D32">AI Architecture Advice</text>
+  <text x="550" y="282" text-anchor="middle" class="step-desc">Solution Accelerator + Vertex AI Search (async MCP Tasks)</text>
+  <text x="550" y="298" text-anchor="middle" class="step-desc">An AI advisor (LlmAgent on GCP) reads the structured spec and searches the company pattern catalog, skill catalog, and tool registry</text>
+  <text x="550" y="314" text-anchor="middle" class="step-desc">Developer reviews and edits the recommendation</text>
+
+  <line x1="550" y1="324" x2="550" y2="344" class="arrow-line"/>
+
+  <!-- Artifact: app-blueprint yaml -->
+  <rect x="465" y="344" width="170" height="30" class="artifact"/>
+  <text x="550" y="364" text-anchor="middle" class="artifact-text">app-blueprint yaml</text>
+
+  <line x1="550" y1="374" x2="550" y2="406" class="arrow-line"/>
+
+  <!-- ==================== STEP 2a ==================== -->
+  <rect x="48" y="415" width="50" height="50" rx="12" fill="white" stroke="#E65100" class="step-circle"/>
+  <text x="73" y="445" text-anchor="middle" font-size="16" font-weight="bold" fill="#E65100">2a</text>
+
+  <text x="550" y="432" text-anchor="middle" class="step-title" fill="#E65100">Governance Assessment</text>
+  <text x="550" y="452" text-anchor="middle" class="step-desc">Governance Guardian MCP Server (async MCP Tasks)</text>
+  <text x="550" y="468" text-anchor="middle" class="step-desc">Extracts TSA diagrams, HA/DR views, NFRs, ADL, tech stack, patterns from workspace</text>
+  <text x="550" y="484" text-anchor="middle" class="step-desc">EA assessment engine scores the solution (black box) · Returns scorecard + findings · SA fixes showstoppers, re-assesses until passed</text>
+
+  <line x1="550" y1="494" x2="550" y2="514" class="arrow-line"/>
+
+  <!-- Artifact: findings + scorecard -->
+  <rect x="462" y="514" width="176" height="30" class="artifact" style="stroke: #E65100"/>
+  <text x="550" y="534" text-anchor="middle" class="artifact-text" fill="#E65100">findings + scorecard</text>
+
+  <line x1="550" y1="544" x2="550" y2="576" class="arrow-line"/>
+
+  <!-- ==================== STEP 3 ==================== -->
+  <rect x="98" y="585" width="50" height="50" rx="12" fill="white" stroke="#C62828" class="step-circle"/>
+  <text x="123" y="617" text-anchor="middle" font-size="20" font-weight="bold" fill="#C62828">3</text>
+
+  <text x="160" y="602" class="step-title" fill="#C62828">Deterministic Scaffold + Governance Gate</text>
+  <text x="160" y="622" class="step-desc">accelerator-cli (Python tool)</text>
+  <text x="160" y="638" class="step-desc">recordTechDebt: checks showstoppers → stop/resume</text>
+  <text x="160" y="654" class="step-desc">If resume: reads YAML, generates complete project using company Jinja2 templates</text>
+  <text x="160" y="670" class="step-desc">6 ADK agent files, MCP + A2A, Terraform, CI/CD · Same YAML → identical output</text>
+
+  <line x1="400" y1="680" x2="400" y2="710" class="arrow-line"/>
+
+  <!-- Artifact: scaffolded code -->
+  <rect x="285" y="710" width="230" height="30" class="artifact" style="stroke: #C62828"/>
+  <text x="400" y="730" text-anchor="middle" class="artifact-text" fill="#C62828">scaffolded code + tech debt ID</text>
+
+  <!-- What the Developer Does box -->
+  <rect x="830" y="580" width="330" height="195" class="dev-box"/>
+  <text x="995" y="605" text-anchor="middle" class="dev-title">What the Developer Does</text>
+
+  <text x="850" y="632" class="dev-time" fill="#1565C0">15 min</text>
+  <text x="920" y="632" class="dev-task">/specify — describe the problem</text>
+
+  <text x="850" y="655" class="dev-time" fill="#1565C0">5 min</text>
+  <text x="920" y="655" class="dev-task">/plan — answer technical questions</text>
+
+  <text x="850" y="678" class="dev-time" fill="#2E7D32">1-5 min</text>
+  <text x="920" y="678" class="dev-task">/accelerator.blueprint — get AI advice</text>
+
+  <text x="850" y="701" class="dev-time" fill="#333">10 min</text>
+  <text x="920" y="701" class="dev-task">Review and edit the YAML</text>
+
+  <text x="850" y="724" class="dev-time" fill="#E65100">1-5 min</text>
+  <text x="920" y="724" class="dev-task">/accelerator.assess — governance check</text>
+
+  <text x="850" y="747" class="dev-time" fill="#C62828">10 sec</text>
+  <text x="920" y="747" class="dev-task">/accelerator.generate — generate code</text>
+
+  <text x="850" y="770" class="dev-time" fill="#7C3AED">2-4 hrs</text>
+  <text x="920" y="770" class="dev-task">Write business logic (20% of code)</text>
+
+  <line x1="400" y1="740" x2="400" y2="790" class="arrow-line"/>
+
+  <!-- ==================== STEP 4 ==================== -->
+  <rect x="198" y="800" width="50" height="50" rx="12" fill="white" stroke="#7C3AED" class="step-circle"/>
+  <text x="223" y="832" text-anchor="middle" font-size="20" font-weight="bold" fill="#7C3AED">4</text>
+
+  <text x="550" y="817" text-anchor="middle" class="step-title" fill="#7C3AED">Company CI/CD</text>
+  <text x="550" y="837" text-anchor="middle" class="step-desc">Jenkins + Harness (existing) · Standard company pipelines</text>
+  <text x="550" y="853" text-anchor="middle" class="step-desc">PR review → Non-Prod (build, test) → Pre-Prod (canary deploy) → Production (progressive rollout)</text>
+  <text x="550" y="869" text-anchor="middle" class="step-desc">SDLC Accelerators generates pipeline definitions · Your CI/CD runs them</text>
+
+  <line x1="550" y1="879" x2="550" y2="899" class="arrow-line"/>
+
+  <!-- Artifact: deployed agent -->
+  <rect x="475" y="899" width="150" height="30" class="artifact" style="stroke: #7C3AED"/>
+  <text x="550" y="919" text-anchor="middle" class="artifact-text" fill="#7C3AED">deployed agent</text>
+
+  <line x1="550" y1="929" x2="550" y2="949" class="arrow-line"/>
+
+  <!-- ==================== STEP 5 ==================== -->
+  <rect x="198" y="955" width="50" height="50" rx="12" fill="white" stroke="#0097A7" class="step-circle"/>
+  <text x="223" y="987" text-anchor="middle" font-size="20" font-weight="bold" fill="#0097A7">5</text>
+
+  <text x="550" y="972" text-anchor="middle" class="step-title" fill="#0097A7">Production Runtime</text>
+  <text x="550" y="992" text-anchor="middle" class="step-desc">Agent Engine + Security + Monitoring</text>
+  <text x="550" y="1008" text-anchor="middle" class="step-desc">Agent runs on GCP Agent Runtime · Secured by Model Armor, VPC-SC, CMEK</text>
+  <text x="550" y="1024" text-anchor="middle" class="step-desc">Monitored by Dynatrace + OTel + Cloud Logging · Alerts to Splunk · Fully operational from day one</text>
+
+  <!-- ==================== KEY INSIGHT ==================== -->
+  <rect x="280" y="1055" width="540" height="55" class="insight-box"/>
+  <text x="550" y="1077" text-anchor="middle" font-size="14" font-weight="bold">The Key Insight</text>
+  <text x="550" y="1092" text-anchor="middle" class="step-desc">SDLC Accelerators separates WHAT to build (app-blueprint yaml — AI-advised, human-approved, governance-assessed)</text>
+  <text x="550" y="1105" text-anchor="middle" class="step-desc">from HOW to build it (accelerator-cli — deterministic, company-grounded, byte-identical every time).</text>
+
+  <!-- ==================== STATS BAR ==================== -->
+  <text x="140" y="1180" text-anchor="middle" class="stat-num" fill="#2E7D32">90%+</text>
+  <text x="140" y="1170" text-anchor="middle" class="stat-label">faster to</text>
+  <text x="140" y="1180" text-anchor="middle" class="stat-label">first code</text>
+
+  <text x="300" y="1180" text-anchor="middle" class="stat-num" fill="#1565C0">80%</text>
+  <text x="300" y="1170" text-anchor="middle" class="stat-label">code auto-</text>
+  <text x="300" y="1180" text-anchor="middle" class="stat-label">generated</text>
+
+  <text x="460" y="1180" text-anchor="middle" class="stat-num" fill="#E65100">100%</text>
+  <text x="460" y="1170" text-anchor="middle" class="stat-label">consistent</text>
+  <text x="460" y="1180" text-anchor="middle" class="stat-label">across teams</text>
+
+  <text x="600" y="1180" text-anchor="middle" class="stat-num" fill="#7C3AED">11</text>
+  <text x="600" y="1170" text-anchor="middle" class="stat-label">patterns in</text>
+  <text x="600" y="1180" text-anchor="middle" class="stat-label">catalog</text>
+
+  <text x="740" y="1180" text-anchor="middle" class="stat-num" fill="#0097A7">30+</text>
+  <text x="740" y="1170" text-anchor="middle" class="stat-label">coding agents</text>
+  <text x="740" y="1180" text-anchor="middle" class="stat-label">supported</text>
+
+  <text x="880" y="1180" text-anchor="middle" class="stat-num" fill="#C62828">0</text>
+  <text x="880" y="1170" text-anchor="middle" class="stat-label">vendor</text>
+  <text x="880" y="1180" text-anchor="middle" class="stat-label">lock-in</text>
+</svg>

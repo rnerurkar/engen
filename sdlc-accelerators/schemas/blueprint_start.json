@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "blueprint_start",
+  "description": "Async. Starts the Solution Accelerator background pipeline.",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": [
+        "spec",
+        "plan"
+      ],
+      "properties": {
+        "spec": {
+          "type": "string",
+          "description": "Full spec.md content"
+        },
+        "plan": {
+          "type": "string",
+          "description": "Full plan.md content"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "pollInterval"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "pollInterval": {
+          "type": "integer",
+          "description": "seconds"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,95 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 1020" width="1100" height="1020" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <filter id="sh" x="-3%" y="-3%" width="106%" height="106%">
+      <feDropShadow dx="0.5" dy="0.5" stdDeviation="1.5" flood-color="#00000010" />
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="1100" height="1020" fill="#FFFFFF" />
+  <line x1="230" y1="60" x2="230" y2="810" stroke="#E0E0E0" stroke-width="3" />
+  <text x="530" y="22" font-size="22" font-weight="bold" fill="#1a1a2e" text-anchor="middle">SDLC Accelerators</text>
+  <text x="730" y="22" font-size="16" font-weight="normal" fill="#888" text-anchor="start">— How It Works</text>
+  <text x="550" y="40" font-size="10" font-weight="normal" fill="#999" text-anchor="middle">From business requirements to production-ready agent code in under 1 hour</text>
+  <circle cx="215" cy="84" r="22" fill="#EF6C00" />
+  <text x="215" y="90" font-size="16" font-weight="bold" fill="#FFF" text-anchor="middle">1</text>
+  <text x="290" y="77" font-size="14" font-weight="bold" fill="#EF6C00" text-anchor="start">Capture Requirements</text>
+  <text x="290" y="94" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Developer opens any IDE (VSCode, Cursor, Claude Code). Types /specify and fills a 10-section structured</text>
+  <text x="290" y="106" font-size="9" font-weight="normal" fill="#555" text-anchor="start">template with inline signal validation. Types /plan — answers technical questions. Signals validated in real time.</text>
+  <rect x="285" y="118" width="115" height="22" rx="11" fill="#FFF3E0" stroke="#FFB74D" stroke-width="1.2" filter="url(#sh)" />
+  <text x="342" y="133" font-size="9" font-weight="bold" fill="#E65100" text-anchor="middle">spec.md  plan.md</text>
+  <circle cx="215" cy="164" r="22" fill="#1565C0" />
+  <text x="215" y="170" font-size="16" font-weight="bold" fill="#FFF" text-anchor="middle">2</text>
+  <text x="290" y="157" font-size="14" font-weight="bold" fill="#1565C0" text-anchor="start">AI Architecture Advice</text>
+  <text x="290" y="174" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Solution Accelerator + Vertex AI Search + API Hub. AI advisor (LlmAgent) reads structured spec, searches company's</text>
+  <text x="290" y="186" font-size="9" font-weight="normal" fill="#555" text-anchor="start">pattern catalog (11 patterns), skill catalog, tool registry, and API Hub for A2A agents. validate_spec runs first</text>
+  <text x="290" y="198" font-size="9" font-weight="normal" fill="#555" text-anchor="start">(6-signal quality gate). Recommends patterns, tools, connections. Generates 12-section app-blueprint.md</text>
+  <text x="290" y="210" font-size="9" font-weight="normal" fill="#555" text-anchor="start">(Part I: §1-§7 governance + Part II: §8-§12 technical auto-generated) + .json + .drawio.xml diagrams + .png.</text>
+  <rect x="285" y="224" width="115" height="22" rx="11" fill="#E3F2FD" stroke="#90CAF9" stroke-width="1.2" filter="url(#sh)" />
+  <text x="342" y="239" font-size="9" font-weight="bold" fill="#1565C0" text-anchor="middle">app-blueprint.md</text>
+  <circle cx="215" cy="274" r="22" fill="#EF6C00" />
+  <text x="215" y="280" font-size="16" font-weight="bold" fill="#FFF" text-anchor="middle">2a</text>
+  <text x="290" y="267" font-size="14" font-weight="bold" fill="#EF6C00" text-anchor="start">Review, Edit + Refresh</text>
+  <text x="290" y="284" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Developer reviews app-blueprint.md. Edits Part I sections (topology, tool bindings, business rules).</text>
+  <text x="290" y="296" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Edits diagrams in Draw.io VSCode extension. Runs /accelerator.refresh — validates structure,</text>
+  <text x="290" y="308" font-size="9" font-weight="normal" fill="#555" text-anchor="start">syncs Part II from Part I changes, regenerates .json + .png. Auto-triggered by assess/generate if skipped.</text>
+  <circle cx="215" cy="352" r="22" fill="#C62828" />
+  <text x="215" y="358" font-size="16" font-weight="bold" fill="#FFF" text-anchor="middle">2b</text>
+  <text x="290" y="345" font-size="14" font-weight="bold" fill="#C62828" text-anchor="start">Governance Assessment</text>
+  <text x="290" y="362" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Governance Guardian MCP Server. Extracts Part I (§1-§7): component diagrams, HA/DR views, NFRs, ADL, tech stack,</text>
+  <text x="290" y="374" font-size="9" font-weight="normal" fill="#555" text-anchor="start">patterns from workspace. EA assessment engine scores the solution (black box). Returns scorecard + findings.</text>
+  <text x="290" y="386" font-size="9" font-weight="normal" fill="#555" text-anchor="start">SA fixes showstoppers → re-assesses until no showstoppers remain.</text>
+  <rect x="285" y="398" width="125" height="22" rx="11" fill="#FFEBEE" stroke="#EF9A9A" stroke-width="1.2" filter="url(#sh)" />
+  <text x="347" y="413" font-size="9" font-weight="bold" fill="#C62828" text-anchor="middle">findings + scorecard</text>
+  <circle cx="215" cy="450" r="22" fill="#2E7D32" />
+  <text x="215" y="456" font-size="16" font-weight="bold" fill="#FFF" text-anchor="middle">3</text>
+  <text x="290" y="443" font-size="14" font-weight="bold" fill="#2E7D32" text-anchor="start">Deterministic Scaffold + Governance Gate</text>
+  <text x="290" y="460" font-size="9" font-weight="normal" fill="#555" text-anchor="start">/accelerator.generate: recordTechDebt checks showstoppers → stop/resume. Reads app-blueprint.json and generates the</text>
+  <text x="290" y="472" font-size="9" font-weight="normal" fill="#555" text-anchor="start">complete agent project: ADK agents + MCP/A2A + FunctionTools + Terraform (multi-region) + Apigee proxy routes</text>
+  <text x="290" y="484" font-size="9" font-weight="normal" fill="#555" text-anchor="start">+ Per-agent Workload Identity + CI/CD + EvalOps. Same blueprint → identical output. API Hub registration entry.</text>
+  <rect x="285" y="496" width="105" height="22" rx="11" fill="#E8F5E9" stroke="#A5D6A7" stroke-width="1.2" filter="url(#sh)" />
+  <text x="337" y="511" font-size="9" font-weight="bold" fill="#2E7D32" text-anchor="middle">scaffolded code</text>
+  <circle cx="215" cy="548" r="22" fill="#7B1FA2" />
+  <text x="215" y="554" font-size="16" font-weight="bold" fill="#FFF" text-anchor="middle">4</text>
+  <text x="290" y="541" font-size="14" font-weight="bold" fill="#7B1FA2" text-anchor="start">Company CI/CD</text>
+  <text x="290" y="558" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Jenkins + Harness (existing). Standard company pipelines. PR review → Non-Prod (build, test) → Pre-Prod (canary</text>
+  <text x="290" y="570" font-size="9" font-weight="normal" fill="#555" text-anchor="start">deploy) → Production (progressive rollout). SDLC Accelerators generates pipeline definitions. Your CI/CD runs them.</text>
+  <circle cx="215" cy="612" r="22" fill="#AD1457" />
+  <text x="215" y="618" font-size="16" font-weight="bold" fill="#FFF" text-anchor="middle">5</text>
+  <text x="290" y="605" font-size="14" font-weight="bold" fill="#AD1457" text-anchor="start">Production Runtime</text>
+  <text x="290" y="622" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Agent runs on Cloud Run. Secured by Model Armor (prompt + response screening). VPC-SC, CMEK.</text>
+  <text x="290" y="634" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Monitored by Dynatrace + OTel + Cloud Logging. Alerts to Splunk. Fully operational from day one.</text>
+  <rect x="135" y="668" width="380" height="180" rx="8" fill="#FAFAFA" stroke="#E0E0E0" stroke-width="1.2" filter="url(#sh)" />
+  <text x="325" y="688" font-size="11" font-weight="bold" fill="#333" text-anchor="middle">What the Developer Does</text>
+  <text x="150" y="706" font-size="9" font-weight="bold" fill="#EF6C00" text-anchor="start">15 min</text>
+  <text x="215" y="706" font-size="9" font-weight="normal" fill="#555" text-anchor="start">/specify — describe the problem</text>
+  <text x="150" y="726" font-size="9" font-weight="bold" fill="#EF6C00" text-anchor="start">5 min</text>
+  <text x="215" y="726" font-size="9" font-weight="normal" fill="#555" text-anchor="start">/plan — answer technical questions</text>
+  <text x="150" y="746" font-size="9" font-weight="bold" fill="#EF6C00" text-anchor="start">1-5 min</text>
+  <text x="215" y="746" font-size="9" font-weight="normal" fill="#555" text-anchor="start">/accelerator.blueprint — get AI advice</text>
+  <text x="150" y="766" font-size="9" font-weight="bold" fill="#EF6C00" text-anchor="start">10 min</text>
+  <text x="215" y="766" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Review + edit blueprint, /accelerator.refresh</text>
+  <text x="150" y="786" font-size="9" font-weight="bold" fill="#EF6C00" text-anchor="start">1-5 min</text>
+  <text x="215" y="786" font-size="9" font-weight="normal" fill="#555" text-anchor="start">/accelerator.assess — governance (iterative)</text>
+  <text x="150" y="806" font-size="9" font-weight="bold" fill="#EF6C00" text-anchor="start">5-10 min</text>
+  <text x="215" y="806" font-size="9" font-weight="normal" fill="#555" text-anchor="start">/accelerator.generate — code (gov gate)</text>
+  <text x="150" y="826" font-size="9" font-weight="bold" fill="#EF6C00" text-anchor="start">2-4 hrs</text>
+  <text x="215" y="826" font-size="9" font-weight="normal" fill="#555" text-anchor="start">Write business logic (20% of code)</text>
+  <rect x="570" y="693" width="420" height="95" rx="8" fill="#FFFDE7" stroke="#F9A825" stroke-width="1.2" filter="url(#sh)" />
+  <text x="780" y="715" font-size="12" font-weight="bold" fill="#E65100" text-anchor="middle">The Key Insight</text>
+  <text x="780" y="735" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">SDLC Accelerators separates WHAT to build (app-blueprint.md — AI-advised, human-approved, governance-assessed)</text>
+  <text x="780" y="749" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">from HOW to build it (/accelerator.generate — deterministic, company-grounded, byte-identical every time).</text>
+  <text x="780" y="769" font-size="8" font-weight="bold" fill="#555" text-anchor="middle">The developer focuses on the business problem. The platform handles the boilerplate.</text>
+  <text x="157" y="920" font-size="26" font-weight="bold" fill="#1a1a2e" text-anchor="middle">90%+</text>
+  <text x="157" y="938" font-size="9" font-weight="normal" fill="#888" text-anchor="middle">faster to first code</text>
+  <text x="314" y="920" font-size="26" font-weight="bold" fill="#1a1a2e" text-anchor="middle">80-95%</text>
+  <text x="314" y="938" font-size="9" font-weight="normal" fill="#888" text-anchor="middle">code auto-generated</text>
+  <text x="471" y="920" font-size="26" font-weight="bold" fill="#1a1a2e" text-anchor="middle">100%</text>
+  <text x="471" y="938" font-size="9" font-weight="normal" fill="#888" text-anchor="middle">consistent across teams</text>
+  <text x="628" y="920" font-size="26" font-weight="bold" fill="#1a1a2e" text-anchor="middle">11</text>
+  <text x="628" y="938" font-size="9" font-weight="normal" fill="#888" text-anchor="middle">patterns in catalog</text>
+  <text x="785" y="920" font-size="26" font-weight="bold" fill="#1a1a2e" text-anchor="middle">30+</text>
+  <text x="785" y="938" font-size="9" font-weight="normal" fill="#888" text-anchor="middle">coding agents supported</text>
+  <text x="942" y="920" font-size="26" font-weight="bold" fill="#1a1a2e" text-anchor="middle">0</text>
+  <text x="942" y="938" font-size="9" font-weight="normal" fill="#888" text-anchor="middle">vendor lock-in</text>
+  <text x="550" y="1008" font-size="9" font-weight="normal" fill="#CCC" text-anchor="middle">SDLC Accelerators — Employer Internal Tool — Not for External Distribution</text>
+</svg>

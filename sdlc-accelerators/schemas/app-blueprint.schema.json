@@ -1,0 +1,416 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-accelerators/schemas/app-blueprint.schema.json",
+  "title": "app-blueprint.json",
+  "description": "Machine-readable DERIVED artifact produced by assemble_blueprint. The accelerator-cli reads this (never the .md) to generate code.",
+  "type": "object",
+  "required": [
+    "metadata",
+    "pattern_composition",
+    "adk_agent_tree",
+    "tool_bindings",
+    "business_rules",
+    "agent_identity_config",
+    "screening_config",
+    "observability_config",
+    "infra_modules",
+    "hadr_config",
+    "nfr_targets"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": [
+        "solution_id",
+        "archetype",
+        "source_hashes"
+      ],
+      "properties": {
+        "solution_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "archetype": {
+          "type": "string",
+          "enum": [
+            "agentic",
+            "agentic-ai",
+            "microservice",
+            "pipeline",
+            "api"
+          ]
+        },
+        "use_case": {
+          "type": "string"
+        },
+        "team": {
+          "type": "string"
+        },
+        "generated_by": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source_hashes": {
+          "type": "object",
+          "required": [
+            "spec_hash",
+            "plan_hash",
+            "blueprint_hash"
+          ],
+          "properties": {
+            "spec_hash": {
+              "type": "string",
+              "pattern": "^sha256:"
+            },
+            "plan_hash": {
+              "type": "string",
+              "pattern": "^sha256:"
+            },
+            "blueprint_hash": {
+              "type": "string",
+              "pattern": "^sha256:"
+            }
+          }
+        },
+        "blueprint_version": {
+          "type": "string"
+        },
+        "accelerator_version": {
+          "type": "string"
+        }
+      }
+    },
+    "pattern_composition": {
+      "type": "object",
+      "required": [
+        "primary_pattern",
+        "composition"
+      ],
+      "properties": {
+        "primary_pattern": {
+          "type": "string"
+        },
+        "composition": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "pattern",
+              "role"
+            ],
+            "properties": {
+              "pattern": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "nesting": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "source_signal": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "adjacency_validation": {
+          "type": "string"
+        },
+        "adjacency_notes": {
+          "type": "string"
+        }
+      }
+    },
+    "adk_agent_tree": {
+      "type": "object",
+      "required": [
+        "root"
+      ],
+      "properties": {
+        "root": {
+          "$ref": "#/$defs/agent_node"
+        }
+      }
+    },
+    "tool_bindings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/tool_binding"
+      }
+    },
+    "data_flows": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "sequence_summary": {
+      "type": "array",
+      "items": {
+        "type": [
+          "string",
+          "object"
+        ]
+      }
+    },
+    "business_rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/business_rule"
+      }
+    },
+    "infra_modules": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "gateway_routes": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "screening_config": {
+      "$ref": "#/$defs/screening_config"
+    },
+    "agent_identity_config": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/agent_identity"
+      }
+    },
+    "pipeline_configs": {
+      "type": "object",
+      "properties": {
+        "ci_cd": {
+          "type": "object"
+        },
+        "evalops": {
+          "type": "object"
+        }
+      }
+    },
+    "observability_config": {
+      "type": "object"
+    },
+    "hadr_config": {
+      "type": "object"
+    },
+    "nfr_targets": {
+      "type": "object"
+    },
+    "confidence_scores": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "agent_node": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "role"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "SequentialAgent",
+            "ParallelAgent",
+            "LoopAgent",
+            "LlmAgent",
+            "CustomAgent"
+          ]
+        },
+        "role": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retry": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "backoff": {
+              "type": "string"
+            }
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/agent_node"
+          }
+        }
+      }
+    },
+    "tool_binding": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "assigned_to"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "mcp_server",
+            "a2a_agent",
+            "function_tool"
+          ]
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "auth_method": {
+          "type": "string"
+        },
+        "assigned_to": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "discovered_via": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        }
+      }
+    },
+    "business_rule": {
+      "type": "object",
+      "required": [
+        "id",
+        "rule",
+        "implemented_by"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^BR-[0-9]+$"
+        },
+        "source": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        },
+        "implemented_by": {
+          "type": "string"
+        }
+      }
+    },
+    "screening_config": {
+      "type": "object",
+      "required": [
+        "model_armor_level",
+        "agents_with_input_screening",
+        "agents_with_output_screening"
+      ],
+      "properties": {
+        "model_armor_level": {
+          "type": "string"
+        },
+        "agents_with_input_screening": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agents_with_output_screening": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pii_categories_monitored": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "blocked_output_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "agent_identity": {
+      "type": "object",
+      "required": [
+        "agent",
+        "service_account",
+        "capabilities"
+      ],
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "service_account": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "denied": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "delegation": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

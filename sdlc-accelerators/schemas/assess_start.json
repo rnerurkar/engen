@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "assess_start",
+  "description": "Async. Governance Guardian EA assessment of app-blueprint.md.",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": [
+        "solution_package"
+      ],
+      "properties": {
+        "solution_package": {
+          "type": "object",
+          "description": "app-blueprint.md sections 1-9"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "taskId"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

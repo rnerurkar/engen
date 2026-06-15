@@ -1,0 +1,60 @@
+# SDLC Accelerators — Greenfield Agentic Preset
+# Installed via: specify init --preset sdlc-accelerators
+name: sdlc-accelerators
+version: "2.0"
+archetype: agentic
+description: Greenfield agentic AI application development on GCP (ADK + MCP + A2A)
+
+templates:
+  spec: templates/spec-template.md      # loaded by /specify
+  plan: templates/plan-template.md      # loaded by /plan
+  tasks: templates/tasks-template.md    # loaded by /tasks
+
+commands:
+  - command: accelerator.blueprint
+    file: commands/accelerator.blueprint.md
+  - command: accelerator.assess
+    file: commands/accelerator.assess.md
+  - command: accelerator.generate
+    file: commands/accelerator.generate.md
+  - command: accelerator.refresh
+    file: commands/accelerator.refresh.md
+
+memory:                                 # loaded into coding-agent context
+  - memory/constitution.md              # ABSOLUTE rules — cannot be overridden
+  - memory/adk-reference.md
+  - memory/company-patterns.md
+  - memory/approved-tools.md
+  - memory/infra-standards.md
+
+# OAuth 2.1 + Entra ID. The IDE (VSCode/Copilot) reads this to drive the auth flow:
+# on first tool call with no cached token, it opens the browser to authorize_endpoint
+# (PKCE S256), exchanges the code at token_endpoint, caches tokens in the OS keychain,
+# and attaches "Authorization: Bearer <token>" to every MCP call. Both servers share the
+# same scope/audience — one token works for both. Tool access requires Solution Architect group.
+oauth:
+  provider: entra_id
+  authorize_endpoint: https://login.microsoftonline.com/<TENANT_ID>/oauth2/v2.0/authorize
+  token_endpoint: https://login.microsoftonline.com/<TENANT_ID>/oauth2/v2.0/token
+  jwks_uri: https://login.microsoftonline.com/<TENANT_ID>/discovery/v2.0/keys
+  client_id: <IDE_PUBLIC_CLIENT_APP_ID>
+  scope: sdlc-accelerators.mcp
+  audience: api://sdlc-accelerators
+  pkce: S256                      # required by OAuth 2.1 for public clients (IDE can't store a secret)
+  required_group: Solution Architect   # Entra AD group; object id in SOLUTION_ARCHITECT_GROUP_ID
+
+mcp_servers:
+  solution_accelerator:
+    endpoint: https://solution-accelerator.<company-domain>.run.app
+    auth: oauth
+    tools: [blueprint_start, blueprint_status, blueprint_result, assemble_blueprint, validate_composition, refresh]
+  governance_guardian:
+    endpoint: https://governance-guardian.<company-domain>.run.app
+    auth: oauth
+    tools: [assess_start, assess_status, assess_result, recordTechDebt]
+
+settings:
+  diagram_format: [drawio, png]
+  blueprint_primary: app-blueprint.md
+  blueprint_derived: app-blueprint.json
+  hash_file: .accelerator-hashes

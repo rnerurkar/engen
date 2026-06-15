@@ -1,0 +1,105 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 1160" width="880" height="1160" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555" />
+    </marker>
+    <marker id="arrow-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#aaa" />
+    </marker>
+    <filter id="sh" x="-3%" y="-3%" width="106%" height="106%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-color="#00000012" />
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="880" height="1160" fill="#F9FAFB" />
+  <text x="440" y="28" font-size="16" font-weight="bold" fill="#1a1a2e" text-anchor="middle">Solution Accelerator — Async Internal Architecture (MCP Tasks)</text>
+  <text x="440" y="48" font-size="10" font-weight="normal" fill="#888" text-anchor="middle">Greenfield pipeline · discover_integrations() queries API Hub for all tools + agents</text>
+  <rect x="270" y="78" width="260" height="55" rx="20" fill="#E8F0FE" stroke="#4285F4" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="98" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">JSON { spec, plan }</text>
+  <text x="400" y="113" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">from /accelerator.blueprint</text>
+  <text x="400" y="125" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">(OAuth 2.1 + Entra ID)</text>
+  <line x1="400" y1="133" x2="400" y2="160" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="250" y="160" width="300" height="50" rx="8" fill="#E0F2F1" stroke="#00897B" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="178" font-size="13" font-weight="bold" fill="#333" text-anchor="middle">blueprint_start</text>
+  <text x="400" y="192" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">validate → create task → enqueue</text>
+  <text x="400" y="204" font-size="9" font-weight="normal" fill="#888" text-anchor="middle">Returns taskId immediately</text>
+  <text x="600" y="178" font-size="8" font-weight="normal" fill="#999" text-anchor="middle">create task</text>
+  <text x="600" y="190" font-size="8" font-weight="normal" fill="#999" text-anchor="middle">+ enqueue</text>
+  <path d="M 550,185 L 575,185" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <text x="410" y="224" font-size="9" font-weight="normal" fill="#666" text-anchor="middle">Cloud Tasks trigger ↓</text>
+  <line x1="400" y1="210" x2="400" y2="248" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="240" y="248" width="320" height="55" rx="8" fill="#FFF3E0" stroke="#FF6F00" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="266" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">validate_spec (Step 0)</text>
+  <text x="400" y="281" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">6-signal greenfield validation</text>
+  <text x="400" y="294" font-size="8" font-weight="normal" fill="#E65100" text-anchor="middle">PASS/WARN/BLOCK · BLOCK aborts pipeline</text>
+  <line x1="400" y1="303" x2="400" y2="338" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="220" y="338" width="360" height="50" rx="8" fill="#FCE4EC" stroke="#C62828" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="356" font-size="13" font-weight="bold" fill="#333" text-anchor="middle">recommend_architecture</text>
+  <text x="400" y="371" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">Semantic retrieval + LlmAgent</text>
+  <text x="400" y="384" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">+ discover_integrations (Apigee API Hub)</text>
+  <rect x="30" y="403" width="185" height="50" rx="5" fill="#F5F5F5" stroke="#78909C" stroke-width="1.5" filter="url(#sh)" />
+  <text x="122" y="420" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">Vertex AI Search</text>
+  <text x="122" y="435" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">Patterns · Skills</text>
+  <text x="122" y="446" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">(2 archetype-specific stores)</text>
+  <rect x="265" y="403" width="240" height="50" rx="5" fill="#F5F5F5" stroke="#78909C" stroke-width="1.5" filter="url(#sh)" />
+  <text x="385" y="420" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">Apigee API Hub</text>
+  <text x="385" y="435" font-size="9" font-weight="bold" fill="#1565C0" text-anchor="middle">discover_integrations()</text>
+  <text x="385" y="446" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">MCP servers + A2A agents + REST APIs</text>
+  <path d="M 320,388 L 122,403" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <text x="115" y="396" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">semantic search</text>
+  <path d="M 440,388 L 385,403" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <text x="395" y="396" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">integration discovery</text>
+  <line x1="400" y1="388" x2="400" y2="462" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="260" y="462" width="280" height="42" rx="8" fill="#FFF3E0" stroke="#EF6C00" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="479" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">validate_composition</text>
+  <text x="400" y="495" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">Adjacency matrix check · deterministic (no LLM)</text>
+  <line x1="400" y1="504" x2="400" y2="532" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="260" y="532" width="280" height="42" rx="8" fill="#FFF3E0" stroke="#EF6C00" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="549" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">adr_compliance_check</text>
+  <text x="400" y="565" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">Deterministic policy (no LLM)</text>
+  <rect x="30" y="527" width="175" height="42" rx="5" fill="#F5F5F5" stroke="#78909C" stroke-width="1.5" filter="url(#sh)" />
+  <text x="117" y="544" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">ADR Store</text>
+  <text x="117" y="559" font-size="8" font-weight="normal" fill="#666" text-anchor="middle">Architecture Decision Records</text>
+  <path d="M 260,552 L 205,548" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <text x="225" y="542" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">policy lookup</text>
+  <line x1="400" y1="574" x2="400" y2="610" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="225" y="610" width="350" height="72" rx="8" fill="#FFF3E0" stroke="#EF6C00" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="628" font-size="13" font-weight="bold" fill="#333" text-anchor="middle">assemble_blueprint</text>
+  <text x="400" y="643" font-size="10" font-weight="bold" fill="#2E7D32" text-anchor="middle">app-blueprint.md (PRIMARY)</text>
+  <text x="400" y="657" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">Part I (§1-§7) + Part II (§8-§12 auto-gen)</text>
+  <text x="400" y="670" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">+ app-blueprint.json (DERIVED) + .drawio.xml + .png (no LLM)</text>
+  <rect x="600" y="615" width="195" height="45" rx="5" fill="#F5F5F5" stroke="#78909C" stroke-width="1.5" filter="url(#sh)" />
+  <text x="697" y="632" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">Draw.io Headless</text>
+  <text x="697" y="648" font-size="8" font-weight="normal" fill="#666" text-anchor="middle">.drawio.xml → .png rendering</text>
+  <path d="M 575,640 L 600,638" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <text x="570" y="630" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">render diagrams</text>
+  <rect x="540" y="722" width="280" height="80" rx="6" fill="#E3F2FD" stroke="#1565C0" stroke-width="1.5" filter="url(#sh)" />
+  <text x="680" y="740" font-size="11" font-weight="bold" fill="#333" text-anchor="middle">AlloyDB Task Store</text>
+  <text x="680" y="755" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">task_id · owner_id · status · stage</text>
+  <text x="680" y="768" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">result (.md + .json + .drawio.xml + .png)</text>
+  <text x="680" y="782" font-size="8" font-weight="normal" fill="#666" text-anchor="middle">24h retention · RLS enforced</text>
+  <path d="M 575,670 L 540,742" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <text x="490" y="714" font-size="7" font-weight="normal" fill="#999" text-anchor="middle">store result</text>
+  <rect x="610" y="842" width="220" height="55" rx="6" fill="#E0F2F1" stroke="#00897B" stroke-width="1.5" filter="url(#sh)" />
+  <text x="720" y="860" font-size="11" font-weight="bold" fill="#333" text-anchor="middle">blueprint_status</text>
+  <text x="720" y="875" font-size="8" font-weight="normal" fill="#555" text-anchor="middle">query AlloyDB → stage + message</text>
+  <text x="720" y="888" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">Called by prompt-file poll loop</text>
+  <path d="M 680,802 L 680,842" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <rect x="240" y="852" width="320" height="58" rx="8" fill="#E0F2F1" stroke="#00897B" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="870" font-size="13" font-weight="bold" fill="#333" text-anchor="middle">blueprint_result</text>
+  <text x="400" y="885" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">query AlloyDB → return .md + .json</text>
+  <text x="400" y="899" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">+ .drawio.xml + .png diagrams</text>
+  <path d="M 540,782 L 560,872" stroke="#bbb" stroke-width="1.3" fill="none" marker-end="url(#arrow-d)" stroke-dasharray="6,3" />
+  <text x="400" y="924" font-size="9" font-weight="normal" fill="#666" text-anchor="middle">returned to coding agent ↓</text>
+  <line x1="400" y1="924" x2="400" y2="952" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="220" y="952" width="360" height="65" rx="8" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="970" font-size="12" font-weight="bold" fill="#2E7D32" text-anchor="middle">app-blueprint.md (PRIMARY)</text>
+  <text x="400" y="986" font-size="9" font-weight="normal" fill="#333" text-anchor="middle">Part I: §1-§7 (governance) + Part II: §8-§12 (technical)</text>
+  <text x="400" y="1000" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">+ app-blueprint.json (DERIVED) + .drawio.xml + .png</text>
+  <line x1="400" y1="1017" x2="400" y2="1057" stroke="#888" stroke-width="1.3" marker-end="url(#arrow)" />
+  <rect x="220" y="1057" width="360" height="60" rx="8" fill="#FFF9C4" stroke="#F9A825" stroke-width="1.5" filter="url(#sh)" />
+  <text x="400" y="1075" font-size="12" font-weight="bold" fill="#C62828" text-anchor="middle">refresh (after HITL edits)</text>
+  <text x="400" y="1091" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">validate Part I · sync Part II · regen .json + .png</text>
+  <text x="400" y="1105" font-size="8" font-weight="normal" fill="#C62828" text-anchor="middle">Auto-triggered by /accelerator.assess + /accelerator.generate if stale</text>
+  <text x="440" y="1148" font-size="9" font-weight="normal" fill="#999" text-anchor="middle">SDLC Accelerators — Solution Accelerator Internal Architecture (Greenfield)</text>
+</svg>

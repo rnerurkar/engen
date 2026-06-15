@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" font-family="Segoe UI, Arial, sans-serif">
+  <style>
+    .s12b { font-size: 12; font-weight: bold; }
+    .s11 { font-size: 11; }
+    .s10 { font-size: 10; }
+    .s9 { font-size: 9; }
+    .s8 { font-size: 8; fill: #555; }
+    .title { font-size: 16; font-weight: bold; }
+    .arrow { stroke: #333; stroke-width: 1.5; fill: none; marker-end: url(#ra); }
+    .arrow-bi { stroke: #0097A7; stroke-width: 2; fill: none; marker-end: url(#ra); marker-start: url(#ra2); }
+    .arrow-d { stroke: #999; stroke-width: 1.2; fill: none; stroke-dasharray: 5,3; marker-end: url(#ra); }
+  </style>
+  <defs>
+    <marker id="ra" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <polygon points="0 0, 7 2.5, 0 5" fill="#333"/>
+    </marker>
+    <marker id="ra2" markerWidth="7" markerHeight="5" refX="0" refY="2.5" orient="auto">
+      <polygon points="7 0, 0 2.5, 7 5" fill="#0097A7"/>
+    </marker>
+  </defs>
+
+  <text x="500" y="25" text-anchor="middle" class="title">/accelerator.refresh — Bidirectional Sync Flow</text>
+
+  <!-- Step 0: Detect -->
+  <rect x="350" y="45" width="300" height="45" fill="#E3F2FD" stroke="#1565C0" stroke-width="2" rx="6"/>
+  <text x="500" y="65" text-anchor="middle" class="s12b" fill="#1565C0">Step 0: Detect What Changed</text>
+  <text x="500" y="80" text-anchor="middle" class="s9">Compare .md and .drawio timestamps against .blueprint-hashes</text>
+
+  <!-- Three cases -->
+  <line x1="400" y1="90" x2="160" y2="120" class="arrow"/>
+  <line x1="500" y1="90" x2="500" y2="120" class="arrow"/>
+  <line x1="600" y1="90" x2="840" y2="120" class="arrow"/>
+
+  <!-- Case A -->
+  <rect x="30" y="120" width="260" height="140" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2" rx="6"/>
+  <text x="160" y="140" text-anchor="middle" class="s12b" fill="#2E7D32">Case A: Only .md Changed</text>
+  <text x="40" y="160" class="s9">1. LLM extracts topology from edited prose</text>
+  <text x="40" y="175" class="s9">2. Regenerate .json from .md + spec + plan</text>
+  <text x="40" y="190" class="s9">3. Generate Eraser.io DSL from .json topology</text>
+  <text x="40" y="205" class="s9">4. Eraser.io API: DSL → .drawio.xml + .png</text>
+  <text x="40" y="220" class="s9">5. Overwrite diagram files</text>
+  <text x="160" y="248" text-anchor="middle" class="s8">Developer edited prose → diagram auto-updates</text>
+
+  <!-- Case B -->
+  <rect x="370" y="120" width="260" height="140" fill="#FFF3E0" stroke="#E65100" stroke-width="2" rx="6"/>
+  <text x="500" y="140" text-anchor="middle" class="s12b" fill="#E65100">Case B: Only .drawio Changed</text>
+  <text x="380" y="160" class="s9">1. Parse .drawio.xml → nodes, edges, groups</text>
+  <text x="380" y="175" class="s9">2. Diff against current .json topology</text>
+  <text x="380" y="190" class="s9">3. Update .json with new/removed elements</text>
+  <text x="380" y="205" class="s9">4. LLM updates .md §2 narrative + mermaid</text>
+  <text x="380" y="220" class="s9">5. Regenerate .png via Eraser.io headless</text>
+  <text x="500" y="248" text-anchor="middle" class="s8">Developer drew a box → prose auto-updates</text>
+
+  <!-- Case C -->
+  <rect x="710" y="120" width="260" height="140" fill="#FFEBEE" stroke="#C62828" stroke-width="2" rx="6"/>
+  <text x="840" y="140" text-anchor="middle" class="s12b" fill="#C62828">Case C: Both Changed</text>
+  <text x="720" y="160" class="s9">1. Extract topology from both artifacts</text>
+  <text x="720" y="175" class="s9">2. Diff both against last-known .json</text>
+  <text x="720" y="190" class="s9">3. Auto-merge AGREE items</text>
+  <text x="720" y="205" class="s9">4. Surface CONFLICT items to developer</text>
+  <text x="720" y="220" class="s9">5. After resolution → sync both artifacts</text>
+  <text x="840" y="248" text-anchor="middle" class="s8">Conflicts shown, never silently resolved</text>
+
+  <!-- Converge to sync hub -->
+  <line x1="160" y1="260" x2="500" y2="300" class="arrow"/>
+  <line x1="500" y1="260" x2="500" y2="300" class="arrow"/>
+  <line x1="840" y1="260" x2="500" y2="300" class="arrow"/>
+
+  <!-- JSON as reconciliation hub -->
+  <rect x="300" y="300" width="400" height="60" fill="#E0F7FA" stroke="#0097A7" stroke-width="2.5" rx="8"/>
+  <text x="500" y="322" text-anchor="middle" class="s12b" fill="#0097A7">app-blueprint.json — Reconciliation Hub</text>
+  <text x="500" y="340" text-anchor="middle" class="s9">Structured topology: adk_agent_tree + tool_bindings + data_flows</text>
+  <text x="500" y="352" text-anchor="middle" class="s8">Both .md and .drawio sync THROUGH .json — never directly to each other</text>
+
+  <!-- Bidirectional arrows -->
+  <rect x="50" y="315" width="180" height="30" fill="white" stroke="#2E7D32" stroke-width="1.5" rx="4"/>
+  <text x="140" y="334" text-anchor="middle" class="s10">app-blueprint.md (prose)</text>
+  <line x1="230" y1="330" x2="298" y2="330" stroke="#0097A7" stroke-width="2" fill="none" marker-end="url(#ra)" marker-start="url(#ra2)"/>
+  <text x="264" y="322" text-anchor="middle" class="s8" fill="#0097A7">LLM</text>
+
+  <rect x="770" y="315" width="180" height="30" fill="white" stroke="#E65100" stroke-width="1.5" rx="4"/>
+  <text x="860" y="334" text-anchor="middle" class="s10">diagrams/*.drawio.xml</text>
+  <line x1="700" y1="330" x2="768" y2="330" stroke="#0097A7" stroke-width="2" fill="none" marker-end="url(#ra)" marker-start="url(#ra2)"/>
+  <text x="734" y="322" text-anchor="middle" class="s8" fill="#0097A7">deterministic</text>
+
+  <!-- Step 2: Validate -->
+  <line x1="500" y1="360" x2="500" y2="390" class="arrow"/>
+
+  <rect x="300" y="390" width="400" height="50" fill="#F3E8FF" stroke="#7C3AED" stroke-width="2" rx="6"/>
+  <text x="500" y="412" text-anchor="middle" class="s12b" fill="#7C3AED">Step 2: Post-Sync Validation</text>
+  <text x="500" y="428" text-anchor="middle" class="s9">.md completeness · .md↔.drawio parity · adjacency rules · .json consistency</text>
+
+  <!-- Step 3: Regenerate -->
+  <line x1="500" y1="440" x2="500" y2="470" class="arrow"/>
+
+  <rect x="300" y="470" width="400" height="50" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2" rx="6"/>
+  <text x="500" y="492" text-anchor="middle" class="s12b" fill="#2E7D32">Step 3: Regenerate Derived Files</text>
+  <text x="500" y="508" text-anchor="middle" class="s9">.json (from synced .md) + .png (from synced .drawio) + update .blueprint-hashes</text>
+
+  <!-- Output files -->
+  <line x1="500" y1="520" x2="500" y2="545" class="arrow"/>
+
+  <rect x="140" y="545" width="140" height="30" fill="#FFF9C4" stroke="#F9A825" stroke-width="1" rx="10"/>
+  <text x="210" y="565" text-anchor="middle" class="s9 font-weight: bold" fill="#F57F17">app-blueprint.md</text>
+
+  <rect x="310" y="545" width="140" height="30" fill="#FFF9C4" stroke="#F9A825" stroke-width="1" rx="10"/>
+  <text x="380" y="565" text-anchor="middle" class="s9" fill="#F57F17">app-blueprint.json</text>
+
+  <rect x="480" y="545" width="140" height="30" fill="#FFF9C4" stroke="#F9A825" stroke-width="1" rx="10"/>
+  <text x="550" y="565" text-anchor="middle" class="s9" fill="#F57F17">*.drawio.xml (synced)</text>
+
+  <rect x="650" y="545" width="140" height="30" fill="#FFF9C4" stroke="#F9A825" stroke-width="1" rx="10"/>
+  <text x="720" y="565" text-anchor="middle" class="s9" fill="#F57F17">*.png (re-rendered)</text>
+
+  <!-- Footer -->
+  <text x="500" y="600" text-anchor="middle" class="s8">SDLC Accelerators — Bidirectional Refresh Sync via app-blueprint.json as Structured Intermediate</text>
+</svg>
