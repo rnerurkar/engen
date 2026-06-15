@@ -47,10 +47,28 @@ class RecommendArchitecture:
 
     def retrieve(self, signals) -> RetrievedContext:
         """RAG retrieval (search_patterns + search_skills) + API Hub discovery.
-        Returns empty until the corpus is populated; orchestration is real."""
-        patterns = self.search.search_patterns(signals.ordering_words)
-        skills = self.search.search_tools(signals.data_systems)  # skill catalog query
-        integrations = []  # discover_integrations() — API Hub query (TODO live; returns [])
+        Pattern/skill results are empty until the corpus is populated; the orchestration,
+        and the API Hub discovery query construction + shaping, are real."""
+        from reasoning.discover_integrations import discover_integrations
+        # Vertex AI Search live call is commented out until the corpus is ingested; degrade
+        # gracefully to empty results so the pipeline orchestration stays testable.
+        try:
+            patterns = self.search.search_patterns(signals.ordering_words)
+            skills = self.search.search_tools(signals.data_systems)  # skill catalog query
+        except NotImplementedError:
+            patterns, skills = [], []
+        # discover_integrations builds the API Hub filters and shapes results (A2A>MCP>Build).
+        # The live API Hub call is commented out in ApigeeHubClient._live_search; until it's
+        # wired this raises at that seam, so guard it so retrieval degrades gracefully.
+        try:
+            disc = discover_integrations(
+                data_sources=signals.data_systems,
+                partners=signals.own_system_partners,
+                client=self.api_hub,
+            )
+            integrations = disc["a2a_agents"] + disc["mcp_servers"] + disc["rest_apis"]
+        except NotImplementedError:
+            integrations = []  # API Hub live call not yet wired (commented out)
         return RetrievedContext(patterns=patterns, skills=skills, integrations=integrations)
 
     def run(self, spec_md: str, plan_md: str,

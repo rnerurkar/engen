@@ -119,7 +119,45 @@ def invoke_llm_agent(system_prompt: str, user_message: str,
     """
     if model_fn is not None:
         return model_fn(system_prompt, user_message)
+    return _live_invoke(system_prompt, user_message)
+
+
+def _live_invoke(system_prompt: str, user_message: str) -> dict:
+    """The actual ADK LlmAgent (Gemini) call. COMMENTED OUT until wired.
+
+    TO WIRE (checklist):
+      1. `pip install google-adk` (the Agent Development Kit) — or `google-genai` if calling
+         Gemini directly without ADK.
+      2. Supply the model id (e.g. gemini-2.5-pro) and the GCP project/location for Vertex AI.
+      3. Credentials: Application Default Credentials (ADC) with the Vertex AI User role.
+      4. Ensure egress to aiplatform.googleapis.com (Vertex AI).
+      5. Request JSON output (response_mime_type=application/json) so the parser downstream
+         receives a clean dict. Uncomment the body and wrap the model call in with_retry(...).
+
+    NOTE (prompt is authored IP): the system_prompt passed here is the human-authored curated
+    reasoning prompt loaded from prompts/greenfield-system-prompt.md — do NOT inline or mutate
+    it here; bind it as the agent's instruction verbatim.
+    """
+    # import json
+    # from google.adk.agents import LlmAgent
+    # from google.adk.runners import InMemoryRunner
+    # from clients.base import with_retry
+    #
+    # agent = LlmAgent(
+    #     model="gemini-2.5-pro",
+    #     name="solution_architect",
+    #     instruction=system_prompt,          # the authored prompt, verbatim
+    #     generate_content_config={"response_mime_type": "application/json"},
+    # )
+    # runner = InMemoryRunner(agent=agent)
+    #
+    # def _call() -> dict:
+    #     events = runner.run(user_message)            # drive the agent to completion
+    #     final_text = events[-1].content.parts[0].text
+    #     return json.loads(final_text)                # JSON output -> dict
+    #
+    # return with_retry(_call)
     raise NotImplementedError(
-        "Bind the live ADK LlmAgent (Gemini) here: pass system_prompt + user_message, "
-        "request JSON output, return the parsed dict. Pass model_fn in tests."
+        "ADK LlmAgent (Gemini) call is written but commented out in _live_invoke. "
+        "Uncomment it (+ google-adk + model id + credentials), or pass model_fn in tests."
     )

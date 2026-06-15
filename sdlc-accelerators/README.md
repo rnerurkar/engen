@@ -213,17 +213,17 @@ and replace the seam. None require new design.
 
 | Seam | What's needed to wire it | Where |
 |---|---|---|
-| **Live LLM call** (Gemini) | Bind the ADK LlmAgent in `invoke_llm_agent` (request JSON output) | `reasoning/llm_harness.py` |
-| **RAG retrieval** | Vertex AI Search client real call (returns `[]` until corpus exists) | `clients/vertex_search.py` |
-| **API Hub discovery** | Apigee API Hub client real call (`discover_integrations`) | `clients/apigee_hub.py`, `reasoning/discover_integrations.py` |
+| **Live LLM call** (Gemini) | ADK LlmAgent call **written + commented out** in `_live_invoke` (binds authored prompt, JSON output) + wiring checklist; inject `model_fn` in tests | `reasoning/llm_harness.py` |
+| **RAG retrieval** | Discovery Engine call **written + commented out** in `_live_search` + checklist; query/result shaping real; inject `_search` in tests | `clients/vertex_search.py` |
+| **API Hub discovery** | `discover_integrations` filters + shaping + A2A>MCP>Build priority (real + tested); `list_apis` **written + commented out** in `_live_search` + checklist | `clients/apigee_hub.py`, `reasoning/discover_integrations.py` |
 | **Catalog ingestion external calls** | GCS upload, Discovery Engine import, GitHub fetch, API Hub create_api | `services/catalog-ingestion/` |
-| **Eraser MCP server (diagram render)** | Synchronous render: DSL → `.drawio.xml` + `.png`. Interface tested; MCP transport is the seam | `clients/eraser_mcp.py` |
+| **Eraser MCP server (diagram render)** | Synchronous render; MCP `call_tool` **written + commented out** in `_live_render` + checklist; inject `_render` in tests | `clients/eraser_mcp.py` |
 | **Eraser MCP assessment** | Eraser MCP client (`assess_pdf`) — per-section findings (placeholder per design) | `governance-guardian/assessment/eraser_assess.py` |
 | **EvalOps SDK** | Vertex AI Evaluation SDK scoring call (gate logic ready) | `services/evalops/eval_runner.py` |
 | **MCP transport** | Bind both servers' `TOOLS` to the MCP SDK on Cloud Run; pass Authorization header in | `*/server/app.py` (`serve()`) |
 | **Entra JWKS fetch** | PyJWKClient live fetch (tests inject decode) | `mcp-auth/token_validator.py` |
-| **AlloyDB task + findings store** | Replace in-memory reference with AlloyDB + Row-Level Security | `clients/alloydb_taskstore.py`, `server/task_store.py`, `findings_store/store.py` |
-| **GCS findings + tech-debt** | google.cloud.storage put/get for findings.md + tech-debt JSON | `findings_store/store.py`, `generation_gate.py` |
+| **AlloyDB (tasks + pointers)** | Connection/query **written + commented out** in `_live_execute` + `SCHEMA_DDL` (3 tables) + RLS + checklist; inject `_execute` in tests | `clients/alloydb_taskstore.py` |
+| **GCS (artifacts/findings/tech-debt)** | google-cloud-storage put/get **written + commented out** in `_live_put`/`_live_get` + checklist; reference backing until wired; inject `_put`/`_get` | `clients/gcs_client.py` (+ GG copy) |
 | **refresh prose↔structure** | LLM seams `md_to_topology` / `topology_to_md` (design requires LLM; injected) | `refresh/orchestrator.py` |
 
 ### 🔴 Not built yet — these need authoring or new code
