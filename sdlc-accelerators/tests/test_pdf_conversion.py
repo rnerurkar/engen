@@ -1,11 +1,9 @@
 """PDF round-trip for Eraser assessment: md->PDF (sections + embedded PNGs) and findings PDF->MD."""
 import os
-import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "services/governance-guardian/src"))
 
 from pdf.blueprint_to_pdf import parse_blueprint_md, render_blueprint_pdf
 from pdf.findings_to_md import convert_findings_pdf_to_md, parse_findings_pdf

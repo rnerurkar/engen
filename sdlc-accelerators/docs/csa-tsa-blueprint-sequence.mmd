@@ -1,0 +1,58 @@
+%% SDLC Accelerators — Brownfield (CSA→TSA) async blueprint sequence
+%% Editable source of truth for the inline mermaid in csa-tsa-architecture.md §9.3.
+%% Render: mermaid-cli (mmdc -i csa-tsa-blueprint-sequence.mmd -o csa-tsa-blueprint-sequence.png)
+sequenceDiagram
+    autonumber
+    participant Agent as Coding Agent (VSCode Copilot)
+    participant MCP as Solution Accelerator MCP Server
+    participant BG as Background Job (Cloud Run Jobs)
+    participant TS as Tech Substitution Table
+    participant PC as Pattern Catalog
+    participant ADR as ADR Constraint Store
+    participant IAC as IaC Module Registry
+    participant ER as Eraser MCP Server
+    participant CS as Design Contract Store (GCS + AlloyDB pointer)
+    participant FS as Task Store (AlloyDB)
+
+    Note over Agent,MCP: Phase 1 — Start (< 2s, within Copilot timeout)
+    Agent->>MCP: blueprint_start({ spec, plan })
+    MCP->>MCP: validate_spec (8-signal migration-readiness gate)
+    MCP->>FS: create task record (status: ACCEPTED)
+    MCP->>BG: enqueue via Cloud Tasks
+    MCP-->>Agent: { taskId, status: "working", pollInterval: 10000 }
+
+    Note over Agent,MCP: Phase 2 — Poll (< 1s each, prompt-file loop)
+    loop Every pollInterval seconds
+        Agent->>MCP: blueprint_status(taskId)
+        MCP->>FS: read task status
+        FS-->>MCP: { status, stage, message }
+        MCP-->>Agent: { status: "working", stage: "recommending" }
+    end
+
+    Note over BG,IAC: Background — 4-tool pipeline (1–30 min)
+    BG->>FS: status → "substituting"
+    BG->>TS: map_current_to_target (deterministic, per integration)
+    TS-->>BG: tech_substitutions[]
+    BG->>FS: status → "recommending"
+    BG->>PC: hybrid_search (per integration)
+    PC-->>BG: candidate_patterns[]
+    BG->>BG: recommend_architecture (LLM) + validate_composition
+    BG->>FS: status → "checking"
+    BG->>ADR: adr_compliance_check (deterministic predicate DSL)
+    ADR-->>BG: compliance_results[] + attested_adrs[]
+    BG->>FS: status → "assembling"
+    BG->>IAC: resolve_modules
+    IAC-->>BG: module_refs[]
+    BG->>ER: render four diagram DSLs (component, sequence-end, sequence-transition, infrastructure)
+    ER-->>BG: .drawio.xml + .png per diagram
+    BG->>BG: assemble_blueprint → app-blueprint.md + design_contract.json (v2.0, LIVE)
+    BG->>CS: write_contract (md + design_contract.json + diagrams → GCS, one AlloyDB pointer)
+    BG->>FS: status → "completed"
+
+    Note over Agent,MCP: Phase 3 — Retrieve (< 1s)
+    Agent->>MCP: blueprint_status(taskId)
+    MCP-->>Agent: { status: "completed" }
+    Agent->>MCP: blueprint_result(taskId)
+    MCP->>CS: read_contract (via AlloyDB pointer → GCS)
+    CS-->>MCP: app-blueprint.md + design_contract.json + diagrams
+    MCP-->>Agent: app-blueprint.md + design_contract.json + diagrams (.drawio.xml + .png)

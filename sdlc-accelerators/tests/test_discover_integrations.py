@@ -1,10 +1,8 @@
 """discover_integrations: API Hub filter construction, response shaping, A2A>MCP>Build priority.
 Live API Hub call is commented out; tests inject a fake _search."""
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "services/solution-accelerator/src"))
 
 from clients.apigee_hub import ApigeeHubClient
 from reasoning.discover_integrations import _capability_terms, discover_integrations

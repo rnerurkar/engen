@@ -111,6 +111,13 @@ The Solution Accelerator validates your spec for **migration readiness** before 
 
 ---
 
+
+> **Implementation status:** The brownfield archetype is implemented under `brownfield/` (spec/plan
+> parsing, the 8-signal `validate_spec` gate, all four tools, the design contract v2.0, migration code
+> generation, and the vSphere MPA → AWS SPA reference case). See the Architecture doc's *Implementation
+> Status* section. Tool 2 (`recommend_architecture`) and the live-service calls are seams; the
+> decision-table rows and ADR predicates are human-authored.
+
 ## 1. Quick Start (TL;DR)
 
 ```bash
@@ -1016,7 +1023,7 @@ Your job is to produce an opinionated Target State Architecture (TSA) blueprint 
 
 5. **Generate migration phases:** From plan.md sequencing, generate `migration_phases[]` with scope, coexistence mode, and rollback procedure per phase. Always start with read-path migration (lowest risk).
 
-6. **Assemble blueprint:** Generate `app-blueprint.md` (PRIMARY) + `app-blueprint.json` (DERIVED) + diagrams via Draw.io headless service.
+6. **Assemble blueprint:** Generate `app-blueprint.md` (PRIMARY) + `app-blueprint.json` (DERIVED) + diagrams rendered by the Eraser MCP server (DSL → `.drawio.xml` + `.png`).
 
 CONSTRAINTS:
 - NEVER recommend technologies not in the company's approved tech radar.
@@ -1371,7 +1378,7 @@ Coding Agent: Polling blueprint_status...
   → Stage: recommending — "Discovering A2A agents in API Hub..."
   → Stage: checking — "Validating ADR compliance (6 ADR attestations)..."
   → Stage: assembling — "Generating 3 migration phases (strangler-fig)..."
-  → Stage: assembling — "Rendering diagrams via Draw.io headless service..."
+  → Stage: assembling — "Rendering diagrams via the Eraser MCP server..."
   → Stage: assembling — "Generating app-blueprint.json from .md..."
   → Stage: completed
 

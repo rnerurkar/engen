@@ -2,14 +2,11 @@
 Validates schema conformance, 9-section round-trip, and determinism.
 """
 import json
-import sys
 from pathlib import Path
 
 import jsonschema
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "services/solution-accelerator/src"))
-sys.path.insert(0, str(ROOT / "services/governance-guardian/src"))
 
 from assembly.assemble import assemble_blueprint
 from clients.eraser_mcp import EraserMcpClient

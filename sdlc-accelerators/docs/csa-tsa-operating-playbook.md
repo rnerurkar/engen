@@ -177,6 +177,12 @@ During LOB onboarding (§15), assess diagram readiness for the pilot app:
 
 ---
 
+
+> **Implementation status:** The ADR predicate interpreter (no-`eval()`, 25-identifier ceiling,
+> ≥3/≥3 mandatory rule tests) and the substitution decision-table engine (12-dimension ceiling,
+> most-specific-wins) are implemented under `brownfield/src/brownfield/`. This playbook governs the
+> human-authored CONTENT (rows and rule predicates) those engines consume.
+
 ## 4. ADR Constraint Store Operations
 
 → *Architecture §10.2 covers the design. Architecture §9.4 covers how rules are evaluated.*
@@ -454,12 +460,12 @@ Platform engineering maintains the Lambda functions that back the Config rules i
 | `assemble_blueprint` | Known selections | 5 min |
 | Task Store | AlloyDB `SELECT 1` connection check | 60s |
 | Cross-user access blocked | `blueprint_result` with wrong `owner_id` → 403 | 15 min |
-| Draw.io headless service reachable | HTTP health check to Draw.io headless service endpoint | 5 min |
+| Eraser MCP server reachable | HTTP health check to the Eraser MCP server endpoint | 5 min |
 | Diagram rendering | Golden spec → verify `.drawio.xml` + `.png` all generated | 4 hours |
 
 The pipeline completion check uses a lightweight golden spec (1 integration, minimal RAG) that completes in <30 seconds, so a 3-minute interval adds negligible load while ensuring failures are detected within 3 minutes.
 
-**Draw.io headless failure mode:** If the Draw.io headless service is unreachable, `assemble_blueprint` cannot render `.png` from `.drawio.xml`. The `.drawio.xml` source files are still valid and editable in the Draw.io VSCode extension (local, no cloud dependency). `.png` rendering resumes when Draw.io headless recovers. The blueprint `.md` and `.json` are unaffected — only `.png` rendering is blocked.
+**Eraser MCP server failure mode:** If the Eraser MCP server is unreachable, `assemble_blueprint` cannot render `.drawio.xml` + `.png` from the diagram DSLs. Any `.drawio.xml` source files already produced are still valid and editable in the Draw.io VSCode extension (local, no cloud dependency). Rendering resumes when the Eraser MCP server recovers. The blueprint `.md` and `.json` are unaffected — only diagram rendering is blocked.
 
 **`app-blueprint.json` failure modes:**
 
@@ -867,7 +873,7 @@ The `/accelerator.refresh` command validates edited files and regenerates derive
 | 2. .md↔.drawio consistency | Parse .drawio.xml, compare with §5 topology | CPU only | Mismatch → report differences |
 | 3. Sync Part II | Generate/update §8-§12 from Part I + API Hub + Tech Sub Table | API Hub, Tech Sub Table | API timeout → use cached defaults |
 | 4. Regenerate .json | Parse all 12 sections → JSON | CPU only | Parse error → report line |
-| 5. Regenerate .png | Draw.io headless export | Draw.io headless | Timeout → keep existing .png |
+| 5. Regenerate diagrams | Eraser MCP render (DSL → .drawio.xml + .png) | Eraser MCP server | Timeout → keep existing diagrams |
 
 ### Skip-Refresh Safety
 

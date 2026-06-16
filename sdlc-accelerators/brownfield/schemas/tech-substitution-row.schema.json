@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tech Substitution Decision Table Row",
+  "description": "One row of the context-filtered decision table. <=12 context dimensions (CI-enforced).",
+  "type": "object",
+  "required": ["integration_id", "source_tokens", "r_factor", "target_tokens"],
+  "properties": {
+    "integration_id": {"type": "string"},
+    "source_tokens": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "r_factor": {"enum": ["rehost", "replatform", "refactor", "rearchitect", "retire"]},
+    "context_matched": {
+      "type": "object",
+      "description": "Bounded context dimensions; <=12 keys enforced by CI.",
+      "maxProperties": 12,
+      "additionalProperties": {"type": "string"}
+    },
+    "target_tokens": {"type": "array", "items": {"type": "string"}},
+    "adr_ref": {"type": "string"},
+    "transition_pattern_ref": {"type": "string"},
+    "priority": {"type": "integer"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+  }
+}

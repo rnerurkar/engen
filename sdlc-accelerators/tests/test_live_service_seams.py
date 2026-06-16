@@ -1,10 +1,8 @@
 """Every live-service boundary: injectable seam works; the live call is written but commented
 out and raises NotImplementedError when not wired (no fabrication)."""
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "services/solution-accelerator/src"))
 
 
 def test_vertex_search_seam_and_unwired_raises():

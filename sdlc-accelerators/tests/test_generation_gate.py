@@ -1,11 +1,9 @@
 """Path A generation gate: findings.md -> GCS + AlloyDB pointer -> server-side critical/high
 check -> block with refresh message, or write tech-debt JSON per medium/low to GCS."""
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "services/governance-guardian/src"))
 
 from findings_store.generation_gate import parse_findings_md, verify_generation_gate
 from findings_store.store import FindingsStore

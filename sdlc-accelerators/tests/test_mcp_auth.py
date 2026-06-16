@@ -98,8 +98,6 @@ def _patch_server(mod_path, modname):
 
 
 def test_solution_accelerator_tools_gated_and_shared_token():
-    sys.path.insert(0, str(ROOT / "services/solution-accelerator/src"))
-    sys.path.insert(0, str(AUTH))
     sa = _patch_server(ROOT / "services/solution-accelerator/src/server/app.py", "sa_app")
     sa._CFG = CFG
     sa._DECODE = _decode
@@ -115,8 +113,6 @@ def test_solution_accelerator_tools_gated_and_shared_token():
 
 
 def test_governance_guardian_tools_gated_same_token():
-    sys.path.insert(0, str(ROOT / "services/governance-guardian/src"))
-    sys.path.insert(0, str(AUTH))
     gg = _patch_server(ROOT / "services/governance-guardian/src/server/app.py", "gg_app")
     gg._CFG = CFG
     gg._DECODE = _decode
@@ -135,7 +131,6 @@ def test_governance_guardian_tools_gated_same_token():
 
 def test_assess_uses_eraser_placeholder():
     """assess_start with a stub Eraser MCP produces a scorecard; without it, fails cleanly."""
-    sys.path.insert(0, str(ROOT / "services/governance-guardian/src"))
     gg = _patch_server(ROOT / "services/governance-guardian/src/server/app.py", "gg_app2")
     gg._CFG = CFG
     gg._DECODE = _decode
@@ -189,7 +184,6 @@ def test_generation_gate_end_to_end():
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Table
 
-    sys.path.insert(0, str(ROOT / "services/governance-guardian/src"))
     gg = _patch_server(ROOT / "services/governance-guardian/src/server/app.py", "gg_app3")
     gg._CFG = CFG
     gg._DECODE = _decode
@@ -244,7 +238,6 @@ def test_generation_gate_end_to_end():
 def test_blueprint_result_reads_from_artifact_store():
     """blueprint_start persists artifacts to GCS+AlloyDB; blueprint_result reads them back
     combining md + json + diagrams. Reasoning seam is stubbed via run_pipeline injection."""
-    sys.path.insert(0, str(ROOT / "services/solution-accelerator/src"))
     sa = _patch_server(ROOT / "services/solution-accelerator/src/server/app.py", "sa_app_store")
     sa._CFG = CFG
     sa._DECODE = _decode
@@ -284,7 +277,6 @@ def test_gate_uses_alloydb_pointer_to_gcs_findings():
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Table
 
-    sys.path.insert(0, str(ROOT / "services/governance-guardian/src"))
     gg = _patch_server(ROOT / "services/governance-guardian/src/server/app.py", "gg_app_ptr")
     gg._CFG = CFG
     gg._DECODE = _decode

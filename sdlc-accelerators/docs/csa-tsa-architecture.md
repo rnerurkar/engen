@@ -146,7 +146,7 @@ The transformation problem — moving an existing on-prem application onto AWS �
 
 **P4 — Multi-label functional categorization.** The spec captures `functional_category[]` as a multi-label tag set plus a capability vector.
 
-**P5 — Transition is a first-class artifact.** The Solution Accelerator emits both an end-state and a transition sequence diagram. Migration phases are explicit in the design contract. → *§9.5 details `assemble_blueprint` diagram generation via Draw.io headless service.*
+**P5 — Transition is a first-class artifact.** The Solution Accelerator emits both an end-state and a transition sequence diagram. Migration phases are explicit in the design contract. → *§9.5 details `assemble_blueprint` diagram generation: DSLs rendered by the Eraser MCP server to `.drawio.xml` + `.png`.*
 
 **P6 — Audit attestation is generated, not added later.** Every `csa_to_tsa_mappings[]` entry carries `adr_attestations[]`. Verified at design time (§9.4), at commit time (§11), and at runtime (§12).
 
@@ -327,7 +327,7 @@ The composed pattern tree from ⑤ is checked against the ADR Constraint Store. 
 
 ### ⑦ assemble_blueprint — Deterministic blueprint and diagram generation
 
-The final tool takes the substitutions, composed patterns, compliance attestations, and matched IaC modules, and assembles two artifacts: **`app-blueprint.md`** (PRIMARY — structured markdown with inline PNG references for governance diagrams) and **`app-blueprint.json`** (DERIVED — machine-readable JSON generated from the `.md` sections, consumed by `/accelerator.generate`). It also produces base64-encoded component and HA/DR diagram PNGs, Draw.io source files (`.drawio.xml`, editable in the Draw.io VSCode extension), and `design_contract.json` with full provenance. Component and HA/DR diagrams are rendered via **Draw.io headless service**.  When cross-cloud topology is selected, it injects a Phase-0 entry with an external-team coordination checklist. All assembly is deterministic — no LLM. → *§9.5 details the assembly logic and diagram generation. See `app-blueprint-md-template-and-fnol-example.md` for the complete 12-section template structure and FNOL reference example.*
+The final tool takes the substitutions, composed patterns, compliance attestations, and matched IaC modules, and assembles two artifacts: **`app-blueprint.md`** (PRIMARY — structured markdown with inline PNG references for governance diagrams) and **`app-blueprint.json`** (DERIVED — machine-readable JSON generated from the `.md` sections, consumed by `/accelerator.generate`). It also produces base64-encoded component and HA/DR diagram PNGs, Draw.io source files (`.drawio.xml`, editable in the Draw.io VSCode extension), and `design_contract.json` with full provenance. Component and HA/DR diagrams are rendered by the **Eraser MCP server** (Solution Accelerator sends the diagram DSL, receives `.drawio.xml` + `.png` synchronously).  When cross-cloud topology is selected, it injects a Phase-0 entry with an external-team coordination checklist. All assembly is deterministic — no LLM. → *§9.5 details the assembly logic and diagram generation. See `app-blueprint-md-template-and-fnol-example.md` for the complete 12-section template structure and FNOL reference example.*
 
 ### ⑧ Developer reviews `app-blueprint.md` + `design_contract.json`
 
@@ -347,7 +347,7 @@ If showstoppers exist, the developer fixes them (e.g., adds cross-region DR for 
 
 **Governance gate (Step 0):** Before the generation pipeline runs, the coding agent calls `recordTechDebt` on the Governance Guardian MCP Server. This tool looks up the latest assessment findings and classifies each as showstopper or tech_debt. If any showstoppers remain → `{ signal: "stop" }` — generation is blocked, the developer must fix and re-assess. If no showstoppers → `{ signal: "resume", tech_debt_id: "TD-2026-0142" }` — remaining findings are recorded as tech debt and generation proceeds. If no assessment exists, the developer is warned but can skip.
 
-**Auto-regeneration (Step 0a):** After the governance gate passes, the coding agent checks whether `app-blueprint.md` was modified since the last `assemble_blueprint` call (by comparing the `.md` file's hash against `blueprint_hash` stored in `app-blueprint.json`). If the hashes differ, the coding agent calls `assemble_blueprint` first to regenerate `app-blueprint.json` from the edited `.md` + re-render diagrams via Draw.io headless service. This ensures the JSON always reflects the latest `.md` edits.
+**Auto-regeneration (Step 0a):** After the governance gate passes, the coding agent checks whether `app-blueprint.md` was modified since the last `assemble_blueprint` call (by comparing the `.md` file's hash against `blueprint_hash` stored in `app-blueprint.json`). If the hashes differ, the coding agent calls `assemble_blueprint` first to regenerate `app-blueprint.json` from the edited `.md` + re-render diagrams via the Eraser MCP server. This ensures the JSON always reflects the latest `.md` edits.
 
 **Generation (Steps 1–18):** Skills read `app-blueprint.json` (machine-readable) and consume `migration_phases[]` and `coexistence_constraints[]` from the design contract. Generated code includes feature-flag scaffolding for strangler-fig and dual-publish patterns, Phase-0 cross-cloud plumbing checklists when PrivateLink+PSC is selected, and AWS Config rules derived from ADR attestations for runtime compliance verification. The IaC generation skill reads company Terraform module interfaces from GitHub repos via the **GitHub MCP Server**, maps blueprint fields to module variables deterministically, and generates compliant Terraform that references company modules (never raw `aws_*` resources). → *See greenfield Architecture Document, Layer 3 for the full IaC generation flow via GitHub MCP Server.*
 
@@ -475,6 +475,7 @@ The LlmAgent inside `recommend_architecture` is guided by a company-curated syst
 → *Standalone Mermaid file: [`solution-accelerator-sequence.mmd`](solution-accelerator-sequence.mmd)*
 
 ```mermaid
+%% Source of truth: docs/csa-tsa-blueprint-sequence.mmd (regenerate the PNG from there).
 sequenceDiagram
     autonumber
     participant Agent as Coding Agent (VSCode Copilot)
@@ -484,12 +485,13 @@ sequenceDiagram
     participant PC as Pattern Catalog
     participant ADR as ADR Constraint Store
     participant IAC as IaC Module Registry
-    participant ER as Draw.io headless service
+    participant ER as Eraser MCP Server
+    participant CS as Design Contract Store (GCS + AlloyDB pointer)
     participant FS as Task Store (AlloyDB)
 
     Note over Agent,MCP: Phase 1 — Start (< 2s, within Copilot timeout)
     Agent->>MCP: blueprint_start({ spec, plan })
-    MCP->>MCP: validate schema
+    MCP->>MCP: validate_spec (8-signal migration-readiness gate)
     MCP->>FS: create task record (status: ACCEPTED)
     MCP->>BG: enqueue via Cloud Tasks
     MCP-->>Agent: { taskId, status: "working", pollInterval: 10000 }
@@ -499,37 +501,36 @@ sequenceDiagram
         Agent->>MCP: blueprint_status(taskId)
         MCP->>FS: read task status
         FS-->>MCP: { status, stage, message }
-        MCP-->>Agent: { status: "working", stage: "recommending", message: "..." }
+        MCP-->>Agent: { status: "working", stage: "recommending" }
     end
 
-    Note over BG,IAC: Background — 4-stage pipeline (1–30 min)
+    Note over BG,IAC: Background — 4-tool pipeline (1–30 min)
     BG->>FS: status → "substituting"
-    BG->>TS: map_current_to_target (per integration)
+    BG->>TS: map_current_to_target (deterministic, per integration)
     TS-->>BG: tech_substitutions[]
     BG->>FS: status → "recommending"
     BG->>PC: hybrid_search (per integration)
     PC-->>BG: candidate_patterns[]
-    BG->>BG: validate_composition
+    BG->>BG: recommend_architecture (LLM) + validate_composition
     BG->>FS: status → "checking"
-    BG->>ADR: adr_compliance_check
-    ADR-->>BG: compliance_results[]
+    BG->>ADR: adr_compliance_check (deterministic predicate DSL)
+    ADR-->>BG: compliance_results[] + attested_adrs[]
     BG->>FS: status → "assembling"
     BG->>IAC: resolve_modules
     IAC-->>BG: module_refs[]
-    BG->>ER: render component + HA/DR diagrams (Draw.io diagram source → .drawio.xml + .png)
-    ER-->>BG: diagram PNGs + .drawio.xml source files
-    BG->>BG: generate .drawio.xml from Draw.io diagram source
-    BG->>BG: assemble app-blueprint.md (12 sections (Part I: §1-§7 governance + Part II: §8-§12 technical)) + generate app-blueprint.json (derived)
-    BG->>BG: bundle: .md + .json + contract + diagrams (.drawio.xml + .png) 
-    BG->>FS: store result, status → "completed"
+    BG->>ER: render four diagram DSLs (component, sequence-end, sequence-transition, infrastructure)
+    ER-->>BG: .drawio.xml + .png per diagram
+    BG->>BG: assemble_blueprint → app-blueprint.md + design_contract.json (v2.0, LIVE)
+    BG->>CS: write_contract (md + design_contract.json + diagrams → GCS, one AlloyDB pointer)
+    BG->>FS: status → "completed"
 
     Note over Agent,MCP: Phase 3 — Retrieve (< 1s)
     Agent->>MCP: blueprint_status(taskId)
     MCP-->>Agent: { status: "completed" }
     Agent->>MCP: blueprint_result(taskId)
-    MCP->>FS: read result
-    FS-->>MCP: result bundle
-    MCP-->>Agent: app-blueprint.md + app-blueprint.json + design_contract.json + diagrams (.drawio.xml + .png)
+    MCP->>CS: read_contract (via AlloyDB pointer → GCS)
+    CS-->>MCP: app-blueprint.md + design_contract.json + diagrams
+    MCP-->>Agent: app-blueprint.md + design_contract.json + diagrams (.drawio.xml + .png)
 ```
 
 ### 9.3.1 Prompt-file orchestration
@@ -1958,3 +1959,39 @@ The brownfield JSON schema extends the greenfield schema (see greenfield Archite
 
 *→ Developer Guide: `csa-tsa-speckit-developerguide.md`*
 *→ Operating Playbook: `csa-tsa-speckit-operating-playbook.md`*
+
+
+---
+
+## Implementation Status (brownfield code)
+
+The brownfield archetype is implemented under `brownfield/` (self-contained module), built
+following `docs/brownfield/CLAUDE.brownfield.md` and `docs/brownfield/BROWNFIELD-IMPLEMENTATION-PLAN.md`.
+**26 brownfield tests passing (118 platform-wide), clean lint.** The vSphere MPA → AWS SPA reference
+case runs end-to-end.
+
+### ✅ Built and tested
+| Component | Where | Notes |
+|---|---|---|
+| Spec parser (8-signal integration blocks) | `brownfield/src/brownfield/spec_parser.py` | Parses the brownfield spec template |
+| `validate_spec` — 8-signal migration-readiness gate | `validate_spec.py` | PASS/WARN/BLOCK per signal; readiness score; phase-assignment preview |
+| Plan parser (R-factor + cutover + context) | `plan_parser.py` | Fixed R-factor vocabulary; rejects synonyms |
+| Tool 1 — `map_current_to_target` | `map_current_to_target.py` | Deterministic context-filtered decision table; most-specific-wins; priority tie-break; ties → review; unresolved → error (no LLM fallback); 12-dim ceiling |
+| Tool 3 — `adr_compliance_check` + predicate DSL | `adr_compliance_check.py`, `adr_predicate.py` | No-`eval()` parser-combinator interpreter; 25-identifier ceiling; ≥3/≥3 rule-test guard; pass/flag/reject |
+| Tool 4 — `assemble_blueprint` + design contract v2.0 | `assemble_blueprint.py` | One block per integration; four diagram DSLs; cross-cloud Phase-0 injection; contract validates against `schemas/design-contract.schema.json` |
+| Brownfield pipeline (chains all four tools) | `pipeline.py` | Readiness gate → substitution → recommend (seam) → ADR → assemble |
+| Migration code generator + skill + templates | `generator.py`, `skills/`, `templates/code/brownfield-migration/` | Strangler proxy / dual-write / cutover gate per strategy; every artifact has a rollback path + coexistence telemetry |
+| PRS rollback-path rule | `generator.check_rollback_paths` | Flags any migration artifact missing a rollback path |
+| Schemas | `brownfield/schemas/` | design-contract v2.0, tech-substitution-row, adr-rule |
+| Reference case | `brownfield/examples/vsphere-mpa-aws-spa/` | CSA→TSA inputs + generated outputs (blueprint, contract, diagram DSLs) |
+
+### ⚙️ Seams (logic built; live call wired separately — same pattern as greenfield)
+- **Tool 2 `recommend_architecture`** — the one LLM stage. Pipeline accepts an injected `recommend_fn`;
+  without it, pattern selection degrades to `requires_review` (live RAG + LlmAgent is the seam).
+- The CSA-diagram **parser** (csa-extractor) and the **Eraser MCP render** of the four diagram DSLs
+  reuse the platform's existing seams.
+
+### 🔴 Human-authored content (not code)
+- **Decision-table rows** and **ADR rule predicates** are authored by platform engineering / the EA
+  office (Operating Playbook §4–§5). The engines, schemas, and ≥3/≥3 test guards are built; the row/rule
+  CONTENT is the brownfield analogue of the greenfield "RAG corpus not built" gap and gates end-to-end runs.

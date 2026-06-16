@@ -161,6 +161,22 @@ EvalOps inner/outer loop see the Architecture doc (Layer 4).
 > Note: the inner-loop eval's Vertex AI Evaluation SDK call is a live seam (see Implementation status).
 > The lint hook and the golden-dataset quality gate run fully today; the eval SDK scoring needs wiring.
 
+## Brownfield archetype (CSA → TSA migration)
+
+The `brownfield/` folder implements the brownfield archetype: converting a Current-State Architecture
+(CSA) into a Target-State Architecture (TSA), wholly or selectively, driven by per-integration **scope**
+(`spec.md`) and **R-factor** (`plan.md`). It reuses the platform spine (async front door, OAuth, stores,
+generation gate) and adds the four migration tools.
+
+- **Generation context:** `docs/brownfield/CLAUDE.brownfield.md`
+- **Plan:** `docs/brownfield/BROWNFIELD-IMPLEMENTATION-PLAN.md`
+- **Code:** `brownfield/src/brownfield/` — spec/plan parsers, the 8-signal `validate_spec` gate, the four
+  tools (`map_current_to_target`, `recommend_architecture` seam, `adr_compliance_check` + no-`eval()`
+  predicate DSL, `assemble_blueprint` + design contract v2.0), the pipeline, and the migration generator.
+- **Reference case:** `brownfield/examples/vsphere-mpa-aws-spa/` (the brownfield FNOL).
+- **Status:** 26 brownfield tests passing (118 platform-wide). Tool 2 + live calls are seams; the
+  decision-table rows and ADR predicates are human-authored content.
+
 ## Spec-kit framework (`.specify/`)
 
 The installable preset that makes `/accelerator.*` commands execute in Claude Code:
@@ -213,7 +229,7 @@ and replace the seam. None require new design.
 
 | Seam | What's needed to wire it | Where |
 |---|---|---|
-| **Live LLM call** (Gemini) | ADK LlmAgent call **written + commented out** in `_live_invoke` (binds authored prompt, JSON output) + wiring checklist; inject `model_fn` in tests | `reasoning/llm_harness.py` |
+| **Live LLM reasoning** (Gemini) | **WIRED** (active code) via `reasoning/llm_provider.py` — calls Gemini (google-genai), binds the authored prompt verbatim, requests JSON, wraps in with_retry. Needs credentials (Vertex `GOOGLE_CLOUD_PROJECT`+ADC or `GEMINI_API_KEY`); degrades to a clear error when unconfigured. Tests inject `model_fn` | `reasoning/llm_harness.py`, `reasoning/llm_provider.py` |
 | **RAG retrieval** | Discovery Engine call **written + commented out** in `_live_search` + checklist; query/result shaping real; inject `_search` in tests | `clients/vertex_search.py` |
 | **API Hub discovery** | `discover_integrations` filters + shaping + A2A>MCP>Build priority (real + tested); `list_apis` **written + commented out** in `_live_search` + checklist | `clients/apigee_hub.py`, `reasoning/discover_integrations.py` |
 | **Catalog ingestion external calls** | GCS upload, Discovery Engine import, GitHub fetch, API Hub create_api | `services/catalog-ingestion/` |

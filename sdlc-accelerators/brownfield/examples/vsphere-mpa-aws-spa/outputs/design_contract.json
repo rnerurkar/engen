@@ -1,0 +1,151 @@
+{
+  "schema_version": "2.0",
+  "lifecycle": "LIVE",
+  "generated_at": "2026-06-16T05:11:55Z",
+  "last_refreshed_at": "2026-06-16T05:11:55Z",
+  "migration_readiness_score": 100,
+  "tech_substitutions": [
+    {
+      "integration_id": "INT-001",
+      "source_tokens": [
+        "jsp",
+        "tomcat"
+      ],
+      "r_factor": "refactor",
+      "context_matched": {
+        "data_size_class": "small"
+      },
+      "target_tokens": [
+        "aws-cloudfront",
+        "aws-s3",
+        "spa"
+      ],
+      "adr_ref": "ADR-210",
+      "transition_pattern_ref": "PAT-T-001-bigbang-ui",
+      "confidence": 1.0,
+      "requires_review": false
+    },
+    {
+      "integration_id": "INT-002",
+      "source_tokens": [
+        "tomcat",
+        "servlet"
+      ],
+      "r_factor": "refactor",
+      "context_matched": {
+        "compliance_regime": "pci-dss"
+      },
+      "target_tokens": [
+        "spring-boot",
+        "ecs-fargate"
+      ],
+      "adr_ref": "ADR-403",
+      "transition_pattern_ref": "PAT-T-004-strangler-bff",
+      "confidence": 0.95,
+      "requires_review": false
+    },
+    {
+      "integration_id": "INT-003",
+      "source_tokens": [
+        "ibm-api-connect",
+        "apic"
+      ],
+      "r_factor": "replatform",
+      "context_matched": {
+        "region_constraints": "cross-cloud"
+      },
+      "target_tokens": [
+        "apigee",
+        "privatelink",
+        "psc"
+      ],
+      "adr_ref": "ADR-101",
+      "transition_pattern_ref": "PAT-T-009-bluegreen-gateway",
+      "confidence": 1.0,
+      "requires_review": false
+    },
+    {
+      "integration_id": "INT-004",
+      "source_tokens": [
+        "ibm-mq",
+        "spring-jms"
+      ],
+      "r_factor": "refactor",
+      "context_matched": {
+        "messaging_pattern": "point-to-point"
+      },
+      "target_tokens": [
+        "aws-sqs",
+        "aws-sdk-v2"
+      ],
+      "adr_ref": "ADR-205",
+      "transition_pattern_ref": "PAT-T-007-dual-publish-mq-sqs",
+      "confidence": 1.0,
+      "requires_review": false
+    }
+  ],
+  "pattern_selections": [
+    {
+      "integration_id": "INT-001",
+      "pattern_ref": "PAT-T-001-bigbang-ui",
+      "confidence": 0.9,
+      "requires_review": false
+    },
+    {
+      "integration_id": "INT-002",
+      "pattern_ref": "PAT-T-004-strangler-bff",
+      "confidence": 0.9,
+      "requires_review": false
+    },
+    {
+      "integration_id": "INT-003",
+      "pattern_ref": "PAT-T-009-bluegreen-gateway",
+      "confidence": 0.9,
+      "requires_review": false
+    },
+    {
+      "integration_id": "INT-004",
+      "pattern_ref": "PAT-T-007-dual-publish-mq-sqs",
+      "confidence": 0.9,
+      "requires_review": false
+    }
+  ],
+  "attested_adrs": [],
+  "migration_phases": [
+    {
+      "phase": 0,
+      "name": "Cross-cloud plumbing (external-team coordination)",
+      "integration_ids": [
+        "INT-003"
+      ],
+      "coexistence": "none",
+      "cross_cloud_coordination": true
+    },
+    {
+      "phase": 1,
+      "name": "Phase 1",
+      "integration_ids": [
+        "INT-003"
+      ],
+      "coexistence": "dual-read",
+      "cross_cloud_coordination": true
+    },
+    {
+      "phase": 2,
+      "name": "Phase 2",
+      "integration_ids": [
+        "INT-001",
+        "INT-002",
+        "INT-004"
+      ],
+      "coexistence": "dual-write",
+      "cross_cloud_coordination": false
+    }
+  ],
+  "cutover_strategy": "INT-001:big-bang; INT-002:strangler-fig; INT-003:blue-green; INT-004:dual-publish",
+  "staleness_triggers": {
+    "adr_store_version": "v1",
+    "substitution_table_version": "v1",
+    "iac_manifest_version": "v1"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ADR Constraint Rule",
+  "description": "One ADR predicate rule. <=25 identifiers in the predicate DSL (CI-enforced); >=3 positive + >=3 negative tests mandatory.",
+  "type": "object",
+  "required": ["adr_id", "key", "predicate", "action", "tests"],
+  "properties": {
+    "adr_id": {"type": "string"},
+    "key": {
+      "type": "object",
+      "required": ["source_tech", "target_tech", "functional_category", "r_factor"],
+      "properties": {
+        "source_tech": {"type": "string"},
+        "target_tech": {"type": "string"},
+        "functional_category": {"type": "string"},
+        "r_factor": {"enum": ["rehost", "replatform", "refactor", "rearchitect", "retire"]}
+      }
+    },
+    "predicate": {"type": "string", "description": "Constrained DSL expression, no eval()."},
+    "action": {"enum": ["PASS", "FLAG", "REJECT"]},
+    "tests": {
+      "type": "object",
+      "required": ["positive", "negative"],
+      "properties": {
+        "positive": {"type": "array", "minItems": 3, "items": {"type": "object"}},
+        "negative": {"type": "array", "minItems": 3, "items": {"type": "object"}}
+      }
+    }
+  }
+}

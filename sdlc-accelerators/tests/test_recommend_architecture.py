@@ -1,10 +1,8 @@
 """recommend_architecture: signal extraction, validation gate, LLM harness, full pipeline.
 Spec/plan stay as markdown throughout (never JSON)."""
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "services/solution-accelerator/src"))
 
 from assembly.assemble import assemble_blueprint
 from clients.eraser_mcp import EraserMcpClient

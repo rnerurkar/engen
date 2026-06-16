@@ -16,7 +16,13 @@ ignore = ["UP042"]  # str+Enum is an intentional, widely-used pattern
 # Multi-service layout requires sys.path insertion before imports.
 "tests/*" = ["E402", "E501", "E702"]
 "services/*/src/**" = ["E402"]
+"brownfield/tests/*" = ["E402", "E501", "E702"]
+"brownfield/src/**" = ["E402"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "brownfield/tests"]
+filterwarnings = [
+    "ignore:SequentialAgent is deprecated.*:DeprecationWarning",
+    "ignore:BaseAgentConfig is deprecated.*:DeprecationWarning",
+]
 python_files = "test_*.py"

@@ -5,11 +5,9 @@ deliberately exercises dimensions FNOL lacks: LoopAgent at root, two A2A agents,
 function tools alongside A2A in the same tools[] list, strict screening.
 """
 import ast
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "services/accelerator-cli"))
 
 from src.commands.generate import run_generate
 

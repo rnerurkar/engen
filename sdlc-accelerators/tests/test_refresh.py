@@ -1,11 +1,9 @@
 """Refresh bidirectional sync: Step 0 detect, drawio parse, reconcile, validate, orchestrate.
 Deterministic engine fully tested; LLM seams injected as deterministic stand-ins.
 """
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "services/solution-accelerator/src"))
 
 from refresh.detect import Case, detect, write_hashes
 from refresh.drawio_parser import parse_drawio

@@ -112,10 +112,12 @@ def parse_selections(model_json: dict) -> ArchitectureSelections:
 
 def invoke_llm_agent(system_prompt: str, user_message: str,
                      model_fn: Callable[[str, str], dict] | None = None) -> dict:
-    """Invoke the LlmAgent. The single live seam.
+    """Invoke the LlmAgent reasoning. Resolution order:
+      1. an injected model_fn (tests / custom provider), else
+      2. the WIRED live Gemini provider (reasoning.llm_provider) when configured, else
+      3. a clear, actionable error explaining how to enable the live path.
 
-    model_fn lets tests inject a deterministic model. In production, model_fn wraps the
-    ADK LlmAgent / Gemini call with response_mime_type=application/json.
+    The system_prompt is the human-authored curated reasoning prompt, bound verbatim.
     """
     if model_fn is not None:
         return model_fn(system_prompt, user_message)
@@ -123,41 +125,22 @@ def invoke_llm_agent(system_prompt: str, user_message: str,
 
 
 def _live_invoke(system_prompt: str, user_message: str) -> dict:
-    """The actual ADK LlmAgent (Gemini) call. COMMENTED OUT until wired.
+    """The WIRED live reasoning call via the Gemini provider (reasoning.llm_provider.invoke).
 
-    TO WIRE (checklist):
-      1. `pip install google-adk` (the Agent Development Kit) — or `google-genai` if calling
-         Gemini directly without ADK.
-      2. Supply the model id (e.g. gemini-2.5-pro) and the GCP project/location for Vertex AI.
-      3. Credentials: Application Default Credentials (ADC) with the Vertex AI User role.
-      4. Ensure egress to aiplatform.googleapis.com (Vertex AI).
-      5. Request JSON output (response_mime_type=application/json) so the parser downstream
-         receives a clean dict. Uncomment the body and wrap the model call in with_retry(...).
-
-    NOTE (prompt is authored IP): the system_prompt passed here is the human-authored curated
-    reasoning prompt loaded from prompts/greenfield-system-prompt.md — do NOT inline or mutate
-    it here; bind it as the agent's instruction verbatim.
+    This is active code (no longer commented out). It is configured via env:
+      - GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT (+ ADC, Vertex AI User role,
+        egress to aiplatform.googleapis.com), OR
+      - GEMINI_API_KEY for the direct Gemini API.
+      - SDLC_LLM_MODEL overrides the model (default gemini-2.5-pro).
+    The provider requests response_mime_type=application/json so the parser gets a clean dict,
+    and wraps the call in with_retry. When the SDK/credentials aren't present, it raises a clear
+    error (callers in tests inject model_fn instead).
     """
-    # import json
-    # from google.adk.agents import LlmAgent
-    # from google.adk.runners import InMemoryRunner
-    # from clients.base import with_retry
-    #
-    # agent = LlmAgent(
-    #     model="gemini-2.5-pro",
-    #     name="solution_architect",
-    #     instruction=system_prompt,          # the authored prompt, verbatim
-    #     generate_content_config={"response_mime_type": "application/json"},
-    # )
-    # runner = InMemoryRunner(agent=agent)
-    #
-    # def _call() -> dict:
-    #     events = runner.run(user_message)            # drive the agent to completion
-    #     final_text = events[-1].content.parts[0].text
-    #     return json.loads(final_text)                # JSON output -> dict
-    #
-    # return with_retry(_call)
-    raise NotImplementedError(
-        "ADK LlmAgent (Gemini) call is written but commented out in _live_invoke. "
-        "Uncomment it (+ google-adk + model id + credentials), or pass model_fn in tests."
-    )
+    from reasoning.llm_provider import available, invoke
+    ok, reason = available()
+    if not ok:
+        raise NotImplementedError(
+            f"Live LLM reasoning is wired but not configured in this environment: {reason}. "
+            "Configure credentials (see reasoning/llm_provider.py), or pass model_fn in tests."
+        )
+    return invoke(system_prompt, user_message)

@@ -1,0 +1,21 @@
+{
+  "_note": "FIXTURE — sample decision-table rows for the reference case. Real rows are human-authored by platform engineering via the authoring UI (Operating Playbook §5).",
+  "rows": [
+    {"source_tokens": ["jsp", "tomcat"], "r_factor": "refactor",
+     "context_matched": {"data_size_class": "small"},
+     "target_tokens": ["aws-cloudfront", "aws-s3", "spa"], "adr_ref": "ADR-210",
+     "transition_pattern_ref": "PAT-T-001-bigbang-ui", "priority": 1, "confidence": 1.0},
+    {"source_tokens": ["tomcat", "servlet"], "r_factor": "refactor",
+     "context_matched": {"compliance_regime": "pci-dss"},
+     "target_tokens": ["spring-boot", "ecs-fargate"], "adr_ref": "ADR-403",
+     "transition_pattern_ref": "PAT-T-004-strangler-bff", "priority": 2, "confidence": 0.95},
+    {"source_tokens": ["ibm-api-connect", "apic"], "r_factor": "replatform",
+     "context_matched": {"region_constraints": "cross-cloud"},
+     "target_tokens": ["apigee", "privatelink", "psc"], "adr_ref": "ADR-101",
+     "transition_pattern_ref": "PAT-T-009-bluegreen-gateway", "priority": 1, "confidence": 1.0},
+    {"source_tokens": ["ibm-mq", "spring-jms"], "r_factor": "refactor",
+     "context_matched": {"messaging_pattern": "point-to-point"},
+     "target_tokens": ["aws-sqs", "aws-sdk-v2"], "adr_ref": "ADR-205",
+     "transition_pattern_ref": "PAT-T-007-dual-publish-mq-sqs", "priority": 1, "confidence": 1.0}
+  ]
+}
