@@ -27,9 +27,16 @@ brownfield/
     map_current_to_target.py        — Tool 1: deterministic context-filtered decision table
     adr_predicate.py                — no-eval() predicate DSL interpreter
     adr_compliance_check.py         — Tool 3: deterministic ADR policy (pass/flag/reject)
+    recommend_architecture.py       — Tool 2: the one LLM stage (reuses the platform Gemini provider)
     assemble_blueprint.py           — Tool 4: blueprint + design contract v2.0 + four diagram DSLs
-    pipeline.py                     — chains the four tools (Tool 2 is the LLM seam)
+    pipeline.py                     — chains the four tools (the default execution path)
     generator.py                    — migration code generator + rollback-path PRS rule
+    server/                         — MCP server: blueprint_start/status/result + task_store (OAuth + group gating)
+    artifact_store/                 — DesignContractStore: contract + blueprint + diagrams → GCS + AlloyDB pointer
+    orchestrator/                   — OPT-IN ADK SequentialAgent wrapper (see Implementation status)
+      migration_orchestrator.py     — brownfield_migration_orchestrator + brownfield_pattern_recommender (LlmAgent)
+      adk_steps.py                  — deterministic steps that run the tested tools
+      pattern_search_tool.py        — ADK FunctionTool: transition-pattern retrieval (on the recommender)
   schemas/                          — design-contract v2.0, tech-substitution-row, adr-rule
   templates/
     spec/spec-template.brownfield.md
@@ -65,6 +72,9 @@ PY
 
 ## The flow (10 stages → four tools)
 
+![Brownfield 10-step migration flow](../docs/brownfield-10-step-flow.png)
+
+
 1. **CSA Agent (upstream)** produces a validated CSA diagram — external dependency, not built here.
 2. **`/speckit.specify`** — the csa-extractor parses the diagram, pre-fills integration blocks; you
    add the 8-signal fields. → `spec.md`.
@@ -86,7 +96,7 @@ If a module can't process this case end-to-end, it isn't done.
 
 ## Implementation status
 
-**26 brownfield tests passing (118 platform-wide), clean lint.** The reference case runs end-to-end.
+**42 brownfield tests passing (161 platform-wide), clean lint.** The reference case runs end-to-end.
 
 ### ✅ Fully implemented and tested
 | Component | Where |
@@ -96,7 +106,10 @@ If a module can't process this case end-to-end, it isn't done.
 | Tool 1 `map_current_to_target` (most-specific-wins, priority tie-break, ties→review, unresolved→error, 12-dim ceiling, token normalization) | `map_current_to_target.py` |
 | Tool 3 `adr_compliance_check` + no-`eval()` predicate DSL (25-id ceiling, ≥3/≥3 rule-test guard) | `adr_compliance_check.py`, `adr_predicate.py` |
 | Tool 4 `assemble_blueprint` (one block/integration, four diagram DSLs, cross-cloud Phase-0, contract v2.0) | `assemble_blueprint.py` |
-| Brownfield pipeline (chains the four tools) | `pipeline.py` |
+| Brownfield pipeline (chains the four tools — the default execution path) | `pipeline.py` |
+| MCP server (`blueprint_start/status/result`, OAuth + Solution Architect group gating, owner isolation) | `server/app.py`, `server/task_store.py` |
+| Design Contract Store (contract + blueprint + diagrams → GCS + AlloyDB pointer) | `artifact_store/store.py` |
+| **OPT-IN** ADK orchestrator: `brownfield_migration_orchestrator` (SequentialAgent) wrapping the tested tools, with `brownfield_pattern_recommender` (LlmAgent) + a pattern-search FunctionTool. Off by default (`_USE_ADK_ORCHESTRATOR = False`); the pipeline is the default path | `orchestrator/` |
 | Migration generator + rollback-path PRS rule | `generator.py` |
 | Skill + migration templates (strangler/dual-write/cutover) | `skills/`, `templates/code/brownfield-migration/` |
 | Schemas (design-contract v2.0, substitution-row, adr-rule) | `schemas/` |

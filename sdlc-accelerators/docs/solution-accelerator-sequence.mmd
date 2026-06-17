@@ -27,11 +27,13 @@ sequenceDiagram
         BA-->>CA: { status: running, stage: "reasoning..." }
     end
 
-    BG->>VS: search_patterns(spec signals)
+    %% Default: BG runs the stages directly. OPT-IN: runs as greenfield_blueprint_orchestrator
+    %% (SequentialAgent); greenfield_architecture_recommender (LlmAgent) calls the pattern-search tool.
+    BG->>VS: search_architecture_patterns(spec signals) [FunctionTool]
     VS-->>BG: matched patterns + confidence
     BG->>AH: discover_integrations(spec §4-§5)
     AH-->>BG: MCP servers + A2A agents + REST APIs
-    BG->>BG: recommend_architecture (LlmAgent)
+    BG->>BG: recommend_architecture (LlmAgent selects + scores)
     BG->>BG: validate_composition (adjacency)
     BG->>BG: adr_compliance_check (deterministic)
     BG->>BG: assemble_blueprint (.md + .json + Eraser DSL)

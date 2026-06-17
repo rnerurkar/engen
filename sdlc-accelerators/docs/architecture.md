@@ -107,6 +107,9 @@ Every GCP service used by SDLC Accelerators is Generally Available with SLA back
 
 ## End-to-end thread (read this first)
 
+![Greenfield 10-step build flow](greenfield-10-step-flow.png)
+
+
 Before diving into the five layers, here is the complete flow as a narrative. No jargon, no architecture diagrams — just what happens step by step from the developer's perspective.
 
 A developer is asked to build an AI agent that processes auto insurance claims (FNOL). She opens VSCode with her preferred coding agent — Claude Code, in her case — and installs the SDLC Accelerators preset: `specify preset add sdlc-accelerators-enterprise`. This installs a structured spec template, a plan template, custom commands (`/accelerator.blueprint`, `/accelerator.assess`, `/accelerator.generate`), memory files with company reference material, company overlay skills, and an `adk-agents` domain skill.
@@ -493,11 +496,13 @@ sequenceDiagram
         BA-->>CA: { status: running, stage: "reasoning..." }
     end
 
-    BG->>VS: search_patterns(spec signals)
+    %% Default: BG runs the stages directly. OPT-IN: runs as greenfield_blueprint_orchestrator
+    %% (SequentialAgent); greenfield_architecture_recommender (LlmAgent) calls the pattern-search tool.
+    BG->>VS: search_architecture_patterns(spec signals) [FunctionTool]
     VS-->>BG: matched patterns + confidence
     BG->>AH: discover_integrations(spec §4-§5)
     AH-->>BG: MCP servers + A2A agents + REST APIs
-    BG->>BG: recommend_architecture (LlmAgent)
+    BG->>BG: recommend_architecture (LlmAgent selects + scores)
     BG->>BG: validate_composition (adjacency)
     BG->>BG: adr_compliance_check (deterministic)
     BG->>BG: assemble_blueprint (.md + .json + Eraser DSL)

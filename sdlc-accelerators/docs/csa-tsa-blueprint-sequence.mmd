@@ -30,13 +30,16 @@ sequenceDiagram
     end
 
     Note over BG,IAC: Background — 4-tool pipeline (1–30 min)
+    %% Default path: BG runs the tools directly. OPT-IN: the same pipeline can run as the
+    %% brownfield_migration_orchestrator (ADK SequentialAgent); its brownfield_pattern_recommender
+    %% (LlmAgent) calls the pattern-search FunctionTool for the retrieval shown below.
     BG->>FS: status → "substituting"
     BG->>TS: map_current_to_target (deterministic, per integration)
     TS-->>BG: tech_substitutions[]
     BG->>FS: status → "recommending"
-    BG->>PC: hybrid_search (per integration)
+    BG->>PC: search_transition_patterns (FunctionTool, per integration)
     PC-->>BG: candidate_patterns[]
-    BG->>BG: recommend_architecture (LLM) + validate_composition
+    BG->>BG: recommend_architecture (LlmAgent selects + scores) + validate_composition
     BG->>FS: status → "checking"
     BG->>ADR: adr_compliance_check (deterministic predicate DSL)
     ADR-->>BG: compliance_results[] + attested_adrs[]

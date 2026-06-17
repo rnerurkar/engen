@@ -170,6 +170,9 @@ The diagram above shows the complete flow from CSA Agent through Solution Accele
 
 ## 6. Flow Walkthrough — The Ten Stages
 
+![Brownfield 10-step migration flow](brownfield-10-step-flow.png)
+
+
 ### ⓪ CSA Agent (upstream) — Produce a validated CSA diagram
 
 → *§7 covers the handoff boundary. The CSA Agent is a separate system with its own documentation.*
@@ -505,13 +508,15 @@ sequenceDiagram
     end
 
     Note over BG,IAC: Background — 4-tool pipeline (1–30 min)
+    %% Default: BG runs the tools directly. OPT-IN: runs as brownfield_migration_orchestrator
+    %% (SequentialAgent); brownfield_pattern_recommender (LlmAgent) calls the pattern-search tool.
     BG->>FS: status → "substituting"
     BG->>TS: map_current_to_target (deterministic, per integration)
     TS-->>BG: tech_substitutions[]
     BG->>FS: status → "recommending"
-    BG->>PC: hybrid_search (per integration)
+    BG->>PC: search_transition_patterns (FunctionTool, per integration)
     PC-->>BG: candidate_patterns[]
-    BG->>BG: recommend_architecture (LLM) + validate_composition
+    BG->>BG: recommend_architecture (LlmAgent selects + scores) + validate_composition
     BG->>FS: status → "checking"
     BG->>ADR: adr_compliance_check (deterministic predicate DSL)
     ADR-->>BG: compliance_results[] + attested_adrs[]
@@ -1979,7 +1984,10 @@ case runs end-to-end.
 | Tool 1 — `map_current_to_target` | `map_current_to_target.py` | Deterministic context-filtered decision table; most-specific-wins; priority tie-break; ties → review; unresolved → error (no LLM fallback); 12-dim ceiling |
 | Tool 3 — `adr_compliance_check` + predicate DSL | `adr_compliance_check.py`, `adr_predicate.py` | No-`eval()` parser-combinator interpreter; 25-identifier ceiling; ≥3/≥3 rule-test guard; pass/flag/reject |
 | Tool 4 — `assemble_blueprint` + design contract v2.0 | `assemble_blueprint.py` | One block per integration; four diagram DSLs; cross-cloud Phase-0 injection; contract validates against `schemas/design-contract.schema.json` |
-| Brownfield pipeline (chains all four tools) | `pipeline.py` | Readiness gate → substitution → recommend (seam) → ADR → assemble |
+| Brownfield pipeline (chains all four tools) | `pipeline.py` | Readiness gate → substitution → recommend → ADR → assemble (the default execution path) |
+| MCP server (`blueprint_start/status/result`) | `server/app.py`, `server/task_store.py` | OAuth 2.1 + Solution Architect group gating; owner-id isolation; runs the pipeline server-side |
+| Design Contract Store | `artifact_store/store.py` | Contract + blueprint + diagram DSLs → GCS + one AlloyDB pointer; `blueprint_result` reads it back |
+| **OPT-IN** ADK orchestrator | `orchestrator/` | `brownfield_migration_orchestrator` (SequentialAgent) wraps the tested tools; `brownfield_pattern_recommender` (LlmAgent) + a pattern-search FunctionTool; deterministic steps run the real tools. Off by default (`_USE_ADK_ORCHESTRATOR = False`) — the pipeline is the default path |
 | Migration code generator + skill + templates | `generator.py`, `skills/`, `templates/code/brownfield-migration/` | Strangler proxy / dual-write / cutover gate per strategy; every artifact has a rollback path + coexistence telemetry |
 | PRS rollback-path rule | `generator.check_rollback_paths` | Flags any migration artifact missing a rollback path |
 | Schemas | `brownfield/schemas/` | design-contract v2.0, tech-substitution-row, adr-rule |

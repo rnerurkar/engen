@@ -63,6 +63,9 @@ code .
 - The `.specify/` folder (preset.yml, templates, commands, `memory/constitution.md`) is created in the repo.
 - Type `/specify` → `/plan` → `/accelerator.blueprint` → `/accelerator.assess` → `/accelerator.generate`.
 
+![Greenfield 10-step build flow](docs/greenfield-10-step-flow.png)
+
+
 ### Path B — VS Code + Claude Code extension
 
 ```bash
@@ -193,7 +196,7 @@ Install into a project: `specify init --preset sdlc-accelerators` (copies `.spec
 
 ## Implementation status
 
-**69 tests passing, clean lint.** The platform is built in three tiers: logic that is fully
+**161 tests passing, clean lint.** The platform is built in three tiers: logic that is fully
 implemented and tested, seams that are deliberately built-around (real interface, live call
 marked `TODO`), and a few items not yet built. This section is exhaustive and honest — it is
 the single source of truth for what remains to complete the platform.
@@ -221,6 +224,7 @@ Legend: ✅ implemented & tested · ⚙️ logic built, live call is a marked se
 | PDF round-trip | app-blueprint.md → PDF (sections + embedded PNGs); Eraser findings PDF → MD (Critical/High/Medium/Low) | `governance-guardian/pdf/` |
 | Generation governance gate | Server-side: findings.md → GCS + AlloyDB pointer; block on Critical/High with resolve+refresh message; write tech-debt JSON per Medium/Low | `governance-guardian/findings_store/` |
 | Blueprint artifact store | All blueprint artifacts (md, json, .drawio.xml, .png) → GCS; one AlloyDB pointer per task; `blueprint_result` reads back combined, owner_id-isolated | `solution-accelerator/artifact_store/` |
+| **OPT-IN** ADK orchestrators | `greenfield_blueprint_orchestrator` / `brownfield_migration_orchestrator` (SequentialAgent) wrap the tested pipeline; one reasoning LlmAgent each (`*_architecture_recommender` / `*_pattern_recommender`) with a pattern-search FunctionTool; deterministic steps run the real tools. Off by default — the direct pipeline is the default path | `solution-accelerator/reasoning/blueprint_orchestrator.py`, `brownfield/.../orchestrator/` |
 
 ### ⚙️ Logic built — live call is a marked seam (the "wiring" work)
 
