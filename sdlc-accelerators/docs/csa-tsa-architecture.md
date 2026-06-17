@@ -170,7 +170,7 @@ The diagram above shows the complete flow from CSA Agent through Solution Accele
 
 ## 6. Flow Walkthrough — The Ten Stages
 
-![Brownfield 10-step migration flow](brownfield-10-step-flow.png)
+![Brownfield full lifecycle — build, govern, deploy, operate](brownfield-10-step-flow.png)
 
 
 ### ⓪ CSA Agent (upstream) — Produce a validated CSA diagram
@@ -359,6 +359,19 @@ If showstoppers exist, the developer fixes them (e.g., adds cross-region DR for 
 → *§11 covers the full lifecycle. Developer Guide §15 covers usage.*
 
 Re-runs the Solution Accelerator against the existing spec/plan, diffs the design contract, and surfaces changes. Required at every PR if the contract is stale. The pre-commit hook blocks commit on an expired contract.
+
+### ⑩–⑮ Merge → Harness CI/CD → deploy & promote per environment
+
+→ *Operating Playbook §8 covers deployment, scaling, and observability in operational detail.*
+
+The platform GENERATES — it never deploys (Constitution Rule 1). After the developer commits the generated migration code, Terraform, `.harness/pipeline.yaml`, and eval assets and the PR is merged, the **Harness pipeline** takes over and runs end to end:
+
+1. **PRS + EvalOps gate** — Production Readiness Scan, then the brownfield Phase-1 eval gate against the golden dataset.
+2. **Sign & Attest** — cosign + Binary Authorization (never-swappable).
+3. **Build, deploy & promote per environment** — for each environment in turn (non-prod → pre-prod → prod), Harness runs `terraform apply` (infra, approval-gated), builds a Docker image per migration agent, deploys to **Agent Engine**, publishes the proxy API to the **Apigee Gateway**, and registers the agent as an **API Product in API Hub for that environment**. Promotion uses canary (10%) into pre-prod and progressive rollout into prod, with automatic rollback on regression.
+4. **Comes alive in prod** — the generated boilerplate (Dynatrace APM, Phoenix/Arize tracing, golden-dataset eval hooks, AWS Config compliance rules derived from ADR attestations) activates in production, closing the runtime-compliance loop (§12).
+
+Each environment gets its own API Hub registration, so the agent is discoverable as an API Product per environment. `/accelerator.refresh` is required before deploy — the Harness pipeline gate enforces a LIVE contract.
 
 ---
 
@@ -1260,7 +1273,7 @@ This appendix contains every template file in the `sdlc-accelerators-brownfield`
 │   ├── bff-backend/SKILL.md                ← S3: Spring Boot BFF generation
 │   ├── company-terraform/SKILL.md          ← S4: IaC overlay (AWS modules for brownfield)
 │   ├── company-observability/SKILL.md      ← S5: Monitoring overlay (Dynatrace + Splunk)
-│   ├── company-cicd/SKILL.md               ← S6: CI/CD overlay (Jenkins + Harness)
+│   ├── company-cicd/SKILL.md               ← S6: CI/CD overlay (Harness pipeline)
 │   └── company-security/SKILL.md           ← S7: Security overlay (Model Armor + VPC-SC)
 ├── memory/
 │   ├── csa-patterns.md                     ← M1: CSA diagram parsing patterns
@@ -1428,7 +1441,7 @@ archetype: brownfield-migration
 - **Fallback LLM:** <!-- e.g., gemini-2.0-flash-lite -->
 
 ## CI/CD
-- **Infrastructure pipeline:** <!-- Jenkins | Cloud Build -->
+- **Infrastructure pipeline:** <!-- Harness -->
 - **Application pipeline:** <!-- Harness | Cloud Deploy -->
 - **IaC module source:** <!-- e.g., github.com/[company]/terraform-modules -->
 

@@ -1166,7 +1166,7 @@ use_case: insurance-mpa-to-spa
 - **Fallback LLM:** gemini-2.0-flash-lite
 
 ## CI/CD
-- **Infrastructure pipeline:** Jenkins
+- **Infrastructure pipeline:** Harness
 - **Application pipeline:** Harness
 - **IaC module source:** github.com/[company]/terraform-modules
 

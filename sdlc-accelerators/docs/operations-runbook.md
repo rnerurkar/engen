@@ -778,10 +778,10 @@ Apigee proxy routes, per-agent Workload Identity IAM bindings, and API Hub regis
 
 | Failure | Detection | Resolution |
 |---|---|---|
-| API Hub entry not created | Post-deployment check fails | Run the `apihub register` step manually from the CI/CD pipeline definition. |
+| API Hub entry not created for an environment | Per-env registration check fails | Each environment (non-prod → pre-prod → prod) has its own API Hub registration. Run the `apihub register` step manually for the affected environment from the Harness pipeline definition. |
 | Stale entry (agent retired but still listed as active) | API Hub shows `active` but Cloud Run has no instances | Update API Hub lifecycle to `retired`. Run cleanup. |
 
-**The flywheel:** Every agent deployed via SDLC Accelerators registers in API Hub. Future Solution Accelerator runs query API Hub via `search_a2a_agents()` and discover these agents for A2A delegation — reusing deployed agents instead of rebuilding. The more agents deployed, the richer the API Hub catalog, the more the Solution Accelerator can recommend A2A reuse.
+**The flywheel:** Every agent deployed via SDLC Accelerators registers as an API Product in API Hub in each environment (non-prod → pre-prod → prod). Future Solution Accelerator runs query API Hub via `search_a2a_agents()` and discover these agents for A2A delegation — reusing deployed agents instead of rebuilding. The more agents deployed, the richer the API Hub catalog, the more the Solution Accelerator can recommend A2A reuse.
 
 ---
 

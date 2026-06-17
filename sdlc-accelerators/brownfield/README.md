@@ -72,7 +72,7 @@ PY
 
 ## The flow (10 stages → four tools)
 
-![Brownfield 10-step migration flow](../docs/brownfield-10-step-flow.png)
+![Brownfield full lifecycle — build, govern, deploy, operate](../docs/brownfield-10-step-flow.png)
 
 
 1. **CSA Agent (upstream)** produces a validated CSA diagram — external dependency, not built here.

@@ -159,7 +159,7 @@ gemini skills install github.com/company/sdlc-accelerators-skills --scope user
 #   model-armor          [user]  Model Armor content screening
 #   company-terraform    [user]  Company Terraform modules
 #   company-observability[user]  Dynatrace + Splunk + OTel
-#   company-cicd         [user]  Jenkins + Harness (NO direct deploy)
+#   company-cicd         [user]  Harness pipeline (NO direct deploy)
 #   company-security     [user]  VPC-SC + CMEK + Secret Manager
 ```
 
@@ -243,7 +243,7 @@ Type `/specify`. The coding agent presents the 6-section template. Fill in each 
 
 **Internal Capabilities:** Proprietary fraud detection model, proprietary severity classifier, claim notification service
 
-**Infrastructure:** us-central1, gemini-2.0-flash, Jenkins + Harness, Model Armor + DLP + CMEK + VPC-SC
+**Infrastructure:** us-central1, gemini-2.0-flash, Harness CI/CD, Model Armor + DLP + CMEK + VPC-SC
 
 Saved as `spec.md`. (~15 min)
 
@@ -258,8 +258,7 @@ Region:          us-central1
 Model:           gemini-2.0-flash
 Garden Template: adk_a2a
 TF Modules:      github.com/company/tf-modules
-Jenkins:         agent-infra-plan-apply-v3
-Harness:         agent-deploy-canary-v4
+Harness:         agent-infra-build-deploy-promote-v4 (infra + docker build + Agent Engine deploy + per-env promote & API Hub registration)
 Security:        Model Armor yes, DLP yes, CMEK yes, VPC-SC yes
 Observability:   Dynatrace yes, OTel yes, Cloud Trace yes
 ```
@@ -479,7 +478,7 @@ Type `/tasks`. See the 80/20 split:
 > **What the new generated artifacts do for you:**
 > - **Apigee proxy routes** — each tool binding in your blueprint topology (§2, derived into app-blueprint.json) generates one Apigee proxy route with the correct authentication (mTLS, OAuth, API Key). A2A agent connections discovered via API Hub generate A2A-specific proxy routes. You don't configure Apigee manually.
 > - **Per-agent Workload Identity** — each agent in your topology (§3) gets its own GCP service account with IAM bindings ONLY for the tools assigned to it in §5. If `extract_details` is assigned to `claims-db-mcp`, it gets `roles/cloudsql.client` but cannot access `policy-api-mcp`. Least-privilege by default.
-> - **API Hub registration** — after deployment, the CI/CD pipeline registers your agent in Apigee API Hub with capabilities and an Agent Card URL. Future Solution Accelerator runs discover your agent and can recommend A2A delegation to it — reusing your agent instead of rebuilding.
+> - **API Hub registration (per environment)** — during promotion, the Harness pipeline registers your agent as an API Product in Apigee API Hub in each environment (non-prod → pre-prod → prod), with capabilities and an Agent Card URL. Future Solution Accelerator runs discover your agent and can recommend A2A delegation to it — reusing your agent instead of rebuilding.
 > See Architecture Document Layer 3 for Terraform examples and derivation logic. See Operations Runbook §11 for health checks and failure modes.
 
 **You implement:** System prompts, `severity_classifier()`, `coverage_calculator()`, `notification_sender()`, test data
@@ -594,9 +593,8 @@ fnol-agent/
 ├── observability/
 │   ├── dynatrace/
 │   └── otel/
-├── ci-cd/
-│   ├── Jenkinsfile                       ← Company template ref
-│   └── harness-pipeline.yaml             ← Canary deployment
+├── .harness/
+│   └── pipeline.yaml                     ← Harness: infra + build + deploy + promote + API Hub
 ├── pyproject.toml
 ├── README.md
 └── app-blueprint.md
@@ -604,8 +602,8 @@ fnol-agent/
 
 **What `/accelerator.generate` did NOT do:**
 - It did NOT deploy to GCP — no `agents-cli deploy`, no direct provisioning
-- It did NOT generate Cloud Build config — company uses Jenkins
-- It generated Jenkinsfile + harness-pipeline.yaml instead — your CI/CD takes over after you merge
+- It did NOT generate Cloud Build config — company uses Harness
+- It generated `.harness/pipeline.yaml` instead — your Harness CI/CD takes over after you merge (infra + build + deploy + promote)
 
 #### What the generated code looks like
 
@@ -711,16 +709,20 @@ module "agent_stack" {
 
 **If you need to customize Terraform:** Edit `terraform.tfvars` to change values (regions, instance sizes). To change the module structure itself, edit `main.tf` — but be aware that `/accelerator.generate` will overwrite it if you re-run. For persistent customizations, request module parameter additions from the platform team.
 
-**Jenkinsfile** (guided by `company-cicd` skill):
+**Harness pipeline** (guided by `company-cicd` skill):
 
-```groovy
-// ci-cd/Jenkinsfile — DO NOT use agents-cli deploy
-@Library('company-pipeline-lib') _
-agentInfraPlanApply(
-    template: 'agent-infra-plan-apply-v3',
-    terraformDir: 'deployment/terraform',
-    environment: params.ENVIRONMENT
-)
+```yaml
+# .harness/pipeline.yaml — DO NOT use agents-cli deploy
+# Single Harness pipeline: provision infra → build per-agent image → deploy → promote → register.
+stages:
+  - prs_scan                       # Production Readiness Scan
+  - evalops_gate                   # 3-phase EvalOps (Arize → AutoSxS → HITL triage)
+  - sign_and_attest                # cosign + Binary Authorization
+  - terraform_apply                # infra (approval-gated)
+  - docker_build                   # one image per agent
+  - deploy_agent_engine            # deploy to Agent Engine + publish proxy API to Apigee
+  - promote                        # non-prod → pre-prod (canary 10%) → prod
+                                   # each env registers the agent as an API Product in API Hub
 ```
 
 ### 2.9 Write the 20%
@@ -764,7 +766,7 @@ def severity_classifier(claim_data: dict) -> dict:
 git add . && git commit -m "feat: FNOL agent generated by SDLC Accelerators"
 git push origin feature/fnol-agent
 # Open PR → Team reviews → Merge
-# Jenkins runs Terraform → Harness deploys Non-Prod → Pre-Prod → Prod
+# Harness pipeline: terraform apply → docker build → deploy to Agent Engine → promote Non-Prod → Pre-Prod → Prod (each env registers in API Hub)
 ```
 
 ---
@@ -1952,8 +1954,8 @@ Your reports become test cases in the regression suite — preventing future reg
 | Deploy directly from your machine | Commit → PR → Jenkins → Harness |
 | Run `agents-cli deploy` (if installed) | Company-cicd skill generates pipeline files instead |
 | Run `agents-cli eval` or `agents-cli simulate` | Write evalsets locally; Harness runs them via Arize against the deployed agent |
-| Generate Cloud Build config | Company uses Jenkins |
-| Provision GCP/AWS resources manually | Jenkins runs Terraform after PR merge |
+| Generate Cloud Build config | Company uses Harness |
+| Provision GCP/AWS resources manually | The Harness pipeline runs Terraform after PR merge |
 
 The `company-cicd` skill explicitly tells the coding agent: "Generate pipeline files. Do not deploy directly. Do not call preview GCP services." Three override layers (skill + GEMINI.md + command) reinforce this.
 

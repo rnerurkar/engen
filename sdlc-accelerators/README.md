@@ -63,7 +63,7 @@ code .
 - The `.specify/` folder (preset.yml, templates, commands, `memory/constitution.md`) is created in the repo.
 - Type `/specify` → `/plan` → `/accelerator.blueprint` → `/accelerator.assess` → `/accelerator.generate`.
 
-![Greenfield 10-step build flow](docs/greenfield-10-step-flow.png)
+![Greenfield full lifecycle — build, govern, deploy, operate](docs/greenfield-10-step-flow.png)
 
 
 ### Path B — VS Code + Claude Code extension
