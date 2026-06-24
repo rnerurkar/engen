@@ -18,29 +18,46 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from clients.eraser_mcp import EraserMcpClient
 from models.blueprint import AppBlueprint
 from pipeline.dsl_builder import build_component_dsl, build_hadr_dsl
-from reasoning.recommend_architecture import RecommendArchitecture
 
 
-def run_pipeline(spec: str, plan: str, eraser_mcp=None) -> dict:
-    """Execute the Solution Accelerator pipeline.
+def run_pipeline(spec: str, plan: str, eraser_mcp=None, model_fn=None) -> dict:
+    """Execute the full Solution Accelerator pipeline end to end.
 
-    The recommend_architecture stage requires the human-authored curated system prompt;
-    until wired it raises NotImplementedError (surfaced by blueprint_start). Stages 8-11
-    (DSL + assemble, diagrams via the Eraser MCP server) are deterministic and fully
-    implemented (see run_deterministic_stages / assemble_from_selections).
+    validate_spec -> retrieve (RAG + API Hub) -> recommend_architecture (the single LlmAgent,
+    live Gemini via reasoning.llm_provider) -> parse selections -> validate_composition ->
+    assemble_blueprint (deterministic; renders diagrams via the Eraser MCP server).
+
+    The reasoning stage runs the WIRED live path: RecommendArchitecture.run() binds the
+    human-authored curated system prompt and calls Gemini. `model_fn` injects a model in tests;
+    in production it is None and the live provider is used (configure credentials per
+    reasoning/llm_provider.py). If the live path is unconfigured, invoke_llm_agent raises
+    NotImplementedError with actionable guidance, which blueprint_start surfaces as task failure.
+
+    Returns {markdown, json, diagrams} for blueprint_start to persist to the artifact store.
     """
-    # Stage 0: validate_spec would run here (quality gate).
-    signals = {"ordering_words": [], "data_systems": []}
+    from assembly.validate_composition import validate_composition
+    from reasoning.recommend_architecture import RecommendArchitecture
 
-    # Stage 1: recommend_architecture — single RAG-grounded reasoning stage (HUMAN-AUTHORED)
-    ra = RecommendArchitecture()
-    retrieved = ra.retrieve(signals)
-    ra.reason(spec, plan, retrieved)  # raises until the curated prompt is wired
+    # Stages 0-3: validate_spec -> retrieve -> the LlmAgent reasons -> parse selections.
+    selections = RecommendArchitecture().run(spec, plan, model_fn=model_fn)
 
-    # Stage 2: discover_integrations (deterministic) — not reached until stage 1 authored.
-    raise NotImplementedError(
-        "Pipeline reaches assemble once recommend_architecture's curated prompt is wired."
-    )
+    # Stage 4: deterministic composition check (LoopAgent cannot nest in ParallelAgent, etc.).
+    comp = validate_composition(_agent_tree_dict(selections.agent_tree))
+    if not comp.valid:
+        raise ValueError("validate_composition failed: "
+                         + "; ".join(v.detail for v in comp.violations))
+
+    # Stages 5-8: deterministic assembly (.md + .json + diagrams via the Eraser MCP server).
+    return assemble_from_selections(selections, spec, plan, eraser_mcp=eraser_mcp)
+
+
+def _agent_tree_dict(node) -> dict:
+    """Shape an AgentSelection tree into the dict validate_composition expects."""
+    return {
+        "type": getattr(node, "type", ""),
+        "name": getattr(node, "name", ""),
+        "children": [_agent_tree_dict(c) for c in getattr(node, "children", [])],
+    }
 
 
 def run_deterministic_stages(bp: AppBlueprint, eraser_mcp=None) -> dict:

@@ -480,6 +480,20 @@ Internally, the background task runs the 4-stage pipeline described in §9.4–�
 
 Rate limiting applies to `blueprint_start` (10 starts/hour per user, 200/hour per org) but not to `blueprint_status` or `blueprint_result` (polling is lightweight).
 
+#### One MCP Server, one Agent — how the four tools are distributed (steps 4–7 internals)
+
+The Solution Accelerator is **one MCP Server containing exactly one `LlmAgent`** (`brownfield_pattern_recommender`) — there is no fleet of agents behind the server. The four tools that the full-lifecycle diagram labels steps 4–7 (Tools 1–4) run in a **fixed order** inside the background job, and only one of them — Tool 2 — invokes the model. The fixed order is itself a governance control: substitution and ADR compliance must run deterministically and in sequence, never at an LLM's discretion.
+
+![Brownfield steps 4–7 internals — one MCP Server, one Agent](brownfield-steps-4-7-internals.png)
+
+- **`validate_spec` (Step 0)** — deterministic 8-signal migration-readiness gate (readiness score + PASS/WARN/BLOCK + phase preview).
+- **Tool 1 · `map_current_to_target`** — deterministic context-filtered decision table. Unresolved substitutions raise an error with **no LLM fallback** — a wrong CSA→TSA substitution would lose production data, so the LLM is never allowed to guess here.
+- **Tool 2 · `recommend_architecture`** — the only stage that touches the LLM, and even it is `retrieve()` (deterministic RAG) → **the single `LlmAgent`** picks a transition pattern with a confidence → deterministic parse + guard (confidence `< 0.65` → `requires_review`, never a fabricated selection).
+- **Tool 3 · `adr_compliance_check`** — deterministic no-`eval()` predicate DSL (pass / flag / reject + attested ADRs), preserved as a **separate gate** rather than folded into the LLM.
+- **Tool 4 · `assemble_blueprint`** — deterministic: `design_contract.json` v2.0 + four diagram DSLs + cross-cloud Phase-0 injection; *calls* the Eraser MCP server to render diagrams.
+
+As in greenfield, **the agent reasons but never acts** — substitution, ADR enforcement, and assembly are deterministic server stages. (No meta-skills, no signed Design Contracts — that is AgentForge IP, kept on the other side of the boundary.)
+
 ### 9.2 Component view
 
 ![Solution Accelerator — Async Internal Architecture (MCP Tasks)](solution-accelerator-components.png)

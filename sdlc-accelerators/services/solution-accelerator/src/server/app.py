@@ -72,7 +72,9 @@ def blueprint_start(spec: str, plan: str, *, principal) -> dict:
         _store.update(task.task_id, status="completed",
                       result={"artifacts_stored": True}, stage="done")
     except NotImplementedError as e:
-        _store.update(task.task_id, status="failed", error=f"reasoning_not_wired: {e}")
+        # Reasoning is wired to the live Gemini provider; this means the live path isn't
+        # CONFIGURED in this environment (no credentials). See reasoning/llm_provider.py.
+        _store.update(task.task_id, status="failed", error=f"reasoning_not_configured: {e}")
     except Exception as e:  # noqa: BLE001
         _store.update(task.task_id, status="failed", error=str(e))
     return {"taskId": task.task_id, "pollInterval": 5, "status": "queued"}

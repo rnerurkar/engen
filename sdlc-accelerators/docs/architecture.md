@@ -342,6 +342,19 @@ The Solution Accelerator is an LlmAgent running on Cloud Run, **exposed as an MC
 
 The first three tools implement the async MCP Tasks pattern. The last two are called after the developer has reviewed and edited the blueprint — they remain synchronous because they are fast and deterministic.
 
+#### Inside the server: one MCP Server, one Agent (steps 4–7 internals)
+
+A common question is whether there is a fleet of agents behind the MCP Server. There is not. The Solution Accelerator is **one MCP Server containing exactly one `LlmAgent`** (`greenfield_architecture_recommender`). When `blueprint_start` runs the pipeline in its background job, the four phases that the full-lifecycle diagram labels steps 4–7 are distributed as follows — and only one narrow sub-stage actually invokes the model:
+
+![Greenfield steps 4–7 internals — one MCP Server, one Agent](greenfield-steps-4-7-internals.png)
+
+- **Step 4 · `validate_spec`** runs server-side (Layer-2 quality gate) — deterministic signal extraction and checks against the Pattern Catalog, API Hub, and ADR Store.
+- **Step 5 · `recommend_architecture`** is the only stage that touches the LLM, and even it is three sub-stages: `retrieve()` (deterministic RAG + API Hub discovery), `invoke_llm_agent()` (**the single `LlmAgent`** — the human-authored system prompt bound to Gemini, the one place model reasoning happens), and `parse_selections()` (deterministic parse into a typed `ArchitectureSelections`).
+- **Step 6 · `validate_composition`** is a deterministic MCP tool — pattern-tree adjacency checks (e.g. a `LoopAgent` may not nest directly inside a `ParallelAgent`).
+- **Step 7 · `assemble_blueprint`** is deterministic — it builds the `.md` + `.json` + DSLs and *calls* the Eraser MCP server to render diagrams (tool use, not LLM authorship).
+
+The design deliberately keeps the agent's authority minimal: **it reasons but never acts.** It does not validate the spec, enforce composition rules, assemble the artifact, or render diagrams — those are deterministic server stages, for reproducibility and governance. (This is also where the IP boundary sits: no meta-skills, no Skill Tool Library, no signed Design Contracts — those belong to AgentForge.)
+
 **Task lifecycle:**
 
 | Status | Meaning |
