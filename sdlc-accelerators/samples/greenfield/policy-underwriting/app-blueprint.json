@@ -1,0 +1,76 @@
+{
+  "metadata": {
+    "name": "policy-underwriting-agent",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "description": "Concurrent multi-assessment new-policy underwriting — Parallel + synthesizer",
+    "team": "underwriting-engineering",
+    "lob": "P&C Underwriting"
+  },
+  "pattern_composition": {
+    "root_pattern": "Parallel",
+    "composition": ["Sequential", "Parallel"]
+  },
+  "agents": [
+    { "name": "policy_underwriting_flow", "type": "SequentialAgent", "role": "Root — fan-out then synthesize", "parent": null, "model": null, "tools": [] },
+    { "name": "risk_fanout", "type": "ParallelAgent", "role": "Four concurrent independent assessments", "parent": "policy_underwriting_flow", "model": null, "tools": [] },
+    { "name": "actuarial_pricing", "type": "LlmAgent", "role": "Compute price from rating tables", "parent": "risk_fanout", "model": "gemini-2.0-flash", "tools": ["pricing-engine-mcp"] },
+    { "name": "claims_history_check", "type": "LlmAgent", "role": "Prior loss + fraud-signal check", "parent": "risk_fanout", "model": "gemini-2.0-flash", "tools": ["claims-db-mcp", "fraud-signals-a2a"] },
+    { "name": "inspection_review", "type": "LlmAgent", "role": "Review property inspection", "parent": "risk_fanout", "model": "gemini-2.0-flash", "tools": ["inspection-store-mcp"] },
+    { "name": "reinsurance_check", "type": "LlmAgent", "role": "Treaty eligibility", "parent": "risk_fanout", "model": "gemini-2.0-flash", "tools": ["reinsurance-api-mcp"] },
+    { "name": "underwriting_synthesizer", "type": "LlmAgent", "role": "Reconcile 4 results into one package; write policy admin", "parent": "policy_underwriting_flow", "model": "gemini-2.0-flash", "tools": ["policy-admin-mcp", "synthesis_fn"] }
+  ],
+  "tools": {
+    "mcp_servers": [
+      { "name": "pricing-engine-mcp", "endpoint": "mcp://pricing.internal:8080", "auth_method": "oauth2", "assigned_to": "actuarial_pricing", "timeout": "15s", "retry": 3, "discovered_via": "Apigee API Hub" },
+      { "name": "claims-db-mcp", "endpoint": "mcp://claims-db.internal:8080", "auth_method": "mtls", "assigned_to": "claims_history_check", "timeout": "20s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "inspection-store-mcp", "endpoint": "mcp://inspection.internal:8080", "auth_method": "mtls", "assigned_to": "inspection_review", "timeout": "20s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "reinsurance-api-mcp", "endpoint": "mcp://reinsurance.internal:8080", "auth_method": "api_key", "assigned_to": "reinsurance_check", "timeout": "15s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "policy-admin-mcp", "endpoint": "mcp://policy-admin.internal:8080", "auth_method": "mtls", "assigned_to": "underwriting_synthesizer", "timeout": "30s", "retry": 3, "discovered_via": "Apigee API Hub" }
+    ],
+    "a2a_agents": [
+      { "name": "fraud-signals-a2a", "endpoint": "https://fraud.consortium.org/a2a", "agent_card_url": "https://fraud.consortium.org/.well-known/agent.json", "capabilities": ["fraud-score", "watchlist-hit"], "assigned_to": "claims_history_check", "discovered_via": "Apigee API Hub (a2a_agent)" }
+    ],
+    "function_tools": [
+      { "name": "synthesis_fn", "assigned_to": "underwriting_synthesizer", "business_rules_ref": "spec §7 decision rules" }
+    ]
+  },
+  "infrastructure": {
+    "modules": [
+      { "name": "tf-cloud-run-agent", "source": "github.com/company/terraform-modules/cloud-run-agent", "version": "v4.1.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-alloydb", "source": "github.com/company/terraform-modules/alloydb", "version": "v3.0.0", "assigned_to": "policy-admin-mcp", "dr_aware": true },
+      { "name": "tf-apigee-proxy", "source": "github.com/company/terraform-modules/apigee-proxy", "version": "v2.5.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-workload-identity", "source": "github.com/company/terraform-modules/workload-identity", "version": "v2.2.0", "assigned_to": "all", "dr_aware": false },
+      { "name": "tf-vpc-sc-cmek", "source": "github.com/company/terraform-modules/vpc-sc-cmek", "version": "v1.4.0", "assigned_to": "all", "dr_aware": true }
+    ],
+    "dr_strategy": "hot-standby",
+    "primary_region": "us-east4",
+    "dr_region": "us-central1"
+  },
+  "business_rules": {
+    "synthesis_fn": [
+      { "condition": "fraud_signal_score >= 0.8", "action": "add flag refer_to_siu" },
+      { "condition": "any assessment == decline", "action": "decision = refer_to_underwriter" },
+      { "condition": "all four ok AND price computed", "action": "decision = auto_bind_eligible" },
+      { "condition": "reinsurance_eligible == false AND coverage > treaty_limit", "action": "add flag no_reinsurance" }
+    ]
+  },
+  "screening_config": {
+    "agents_with_input_screening": ["policy_underwriting_flow", "claims_history_check"],
+    "agents_with_output_screening": ["underwriting_synthesizer"],
+    "pii_fields": ["applicant_name", "property_address", "tax_id", "policy_number"]
+  },
+  "evalops": {
+    "golden_dataset": { "entries": [], "min_count": 5 },
+    "eval_frequency": "pre-commit",
+    "hitl_reviewers": 2,
+    "autosxs_baseline": "serial-underwriting-v0"
+  },
+  "nfrs": [
+    { "category": "latency", "requirement": "full assessment (4 concurrent)", "target": "<5min p95" },
+    { "category": "latency", "requirement": "speedup vs serial", "target": ">=3.5x" },
+    { "category": "resilience", "requirement": "single-branch failure", "target": "non-blocking" },
+    { "category": "data_retention", "requirement": "application + decision", "target": "10 years" }
+  ],
+  "blueprint_hash": "sha256:policy-uw-4d5e6f70..."
+}

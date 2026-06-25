@@ -1,0 +1,80 @@
+{
+  "metadata": {
+    "name": "greeting-service",
+    "version": "1.0.0",
+    "archetype": "brownfield-microservices",
+    "description": "Angular + Spring Boot Hello World reference proving the existing ECS Fargate + Oracle RDS + ALB stack end to end.",
+    "team": "Platform Engineering",
+    "lob": "Reference"
+  },
+  "service": {
+    "name": "greeting-service",
+    "frontend": "angular",
+    "backend": "spring-boot",
+    "database": "oracle-rds-existing"
+  },
+  "api_contracts": [
+    {
+      "method": "GET",
+      "path": "/api/greetings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/greetings",
+      "body": {
+        "name": "string",
+        "message": "string"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/greetings/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health"
+    }
+  ],
+  "data_model": {
+    "entity": "Greeting",
+    "fields": [
+      {
+        "name": "id",
+        "type": "NUMBER",
+        "generated": true
+      },
+      {
+        "name": "name",
+        "type": "VARCHAR2(100)"
+      },
+      {
+        "name": "message",
+        "type": "VARCHAR2(500)"
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "generated": true
+      }
+    ]
+  },
+  "infrastructure": {
+    "mode": "EXISTING",
+    "note": "No Terraform generated. Uses existing ECS Fargate + Oracle RDS + ALB + ECR + Jenkins + Harness.",
+    "datasource": "boilerplate/backend/src/main/resources/application.yml"
+  },
+  "generated_code_only": [
+    "spring-boot-controller",
+    "spring-boot-service",
+    "spring-boot-repository",
+    "jpa-entity",
+    "angular-component",
+    "angular-service",
+    "flyway-migration"
+  ],
+  "cicd": {
+    "terraform": "jenkins (unchanged)",
+    "deploy": "harness (ECS Fargate blue-green)"
+  },
+  "blueprint_hash": "676459ec5b4591f4"
+}

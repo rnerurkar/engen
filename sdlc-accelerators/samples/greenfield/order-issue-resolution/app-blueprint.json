@@ -1,0 +1,66 @@
+{
+  "metadata": {
+    "name": "order-issue-resolution-agent",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "description": "Single-agent order issue resolution with dynamic tool use",
+    "team": "retail-support-engineering",
+    "lob": "Retail Customer Support"
+  },
+  "pattern_composition": {
+    "root_pattern": "Single LlmAgent (dynamic tool use)",
+    "composition": []
+  },
+  "agents": [
+    { "name": "order_resolution_agent", "type": "LlmAgent", "role": "Single agent — reason over tools, act, observe, adapt; 8-step cap then escalate", "parent": null, "model": "gemini-2.0-flash", "tools": ["order-mgmt-mcp", "inventory-api-mcp", "payments-api-mcp", "carrier-tracking-mcp", "reverse-logistics-a2a", "goodwill_credit_fn", "escalation-mcp"] }
+  ],
+  "tools": {
+    "mcp_servers": [
+      { "name": "order-mgmt-mcp", "endpoint": "mcp://order-mgmt.internal:8080", "auth_method": "mtls", "assigned_to": "order_resolution_agent", "timeout": "20s", "retry": 3, "discovered_via": "Apigee API Hub" },
+      { "name": "inventory-api-mcp", "endpoint": "mcp://inventory.internal:8080", "auth_method": "oauth2", "assigned_to": "order_resolution_agent", "timeout": "15s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "payments-api-mcp", "endpoint": "mcp://payments.internal:8080", "auth_method": "mtls", "assigned_to": "order_resolution_agent", "timeout": "20s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "carrier-tracking-mcp", "endpoint": "mcp://carrier-tracking.internal:8080", "auth_method": "api_key", "assigned_to": "order_resolution_agent", "timeout": "15s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "escalation-mcp", "endpoint": "mcp://escalation.internal:8080", "auth_method": "mtls", "assigned_to": "order_resolution_agent", "timeout": "10s", "retry": 1, "discovered_via": "Apigee API Hub" }
+    ],
+    "a2a_agents": [
+      { "name": "reverse-logistics-a2a", "endpoint": "https://returns.partner.com/a2a", "agent_card_url": "https://returns.partner.com/.well-known/agent.json", "capabilities": ["schedule-pickup", "return-status"], "assigned_to": "order_resolution_agent", "discovered_via": "Apigee API Hub (a2a_agent)" }
+    ],
+    "function_tools": [
+      { "name": "goodwill_credit_fn", "assigned_to": "order_resolution_agent", "business_rules_ref": "spec §7 goodwill rule (<= $25)" }
+    ]
+  },
+  "infrastructure": {
+    "modules": [
+      { "name": "tf-cloud-run-agent", "source": "github.com/company/terraform-modules/cloud-run-agent", "version": "v4.1.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-alloydb", "source": "github.com/company/terraform-modules/alloydb", "version": "v3.0.0", "assigned_to": "order-mgmt-mcp", "dr_aware": true },
+      { "name": "tf-apigee-proxy", "source": "github.com/company/terraform-modules/apigee-proxy", "version": "v2.5.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-workload-identity", "source": "github.com/company/terraform-modules/workload-identity", "version": "v2.2.0", "assigned_to": "all", "dr_aware": false },
+      { "name": "tf-vpc-sc-cmek", "source": "github.com/company/terraform-modules/vpc-sc-cmek", "version": "v1.4.0", "assigned_to": "all", "dr_aware": true }
+    ],
+    "dr_strategy": "hot-standby",
+    "primary_region": "us-east4",
+    "dr_region": "us-central1"
+  },
+  "business_rules": {
+    "goodwill_credit_fn": [
+      { "condition": "delay_days > 5", "action": "apply goodwill_credit (cap 2500_cents)", "else_action": "no credit" }
+    ]
+  },
+  "screening_config": {
+    "agents_with_input_screening": ["order_resolution_agent"],
+    "agents_with_output_screening": ["order_resolution_agent"],
+    "pii_fields": ["customer_name", "email", "order_id", "card_last4"]
+  },
+  "evalops": {
+    "golden_dataset": { "entries": [], "min_count": 5 },
+    "eval_frequency": "pre-commit",
+    "hitl_reviewers": 1,
+    "autosxs_baseline": "scripted-resolver-v0"
+  },
+  "nfrs": [
+    { "category": "latency", "requirement": "typical resolution", "target": "<30s p95" },
+    { "category": "termination", "requirement": "reasoning loop", "target": "<=8 steps then escalate" },
+    { "category": "data_retention", "requirement": "interactions", "target": "3 years" }
+  ],
+  "blueprint_hash": "sha256:order-issue-2b3c4d5e..."
+}

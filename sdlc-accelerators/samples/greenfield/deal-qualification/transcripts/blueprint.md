@@ -1,0 +1,19 @@
+You: /accelerator.blueprint
+
+Agent: Blueprint generation started. Checking progress...
+Agent: Searching pattern catalog (Workflow ordering words: "simultaneously", "concurrently", "then combine")...
+Agent: Discovering integrations in API Hub for firmographics, intent data, data enrichment, pipeline DB, CRM...
+Agent: Searching skill catalog for matching skills...
+Agent: LLM reasoning: mapping tools to assessment agents by co-occurrence; CRM write at synthesizer level...
+Agent: Validating composition (validate_composition)... synthesizer is a sibling after ParallelAgent (not nested) ✓
+Agent: Assembling blueprint (assemble_blueprint)...
+Agent: Blueprint ready! Saved app-blueprint.md + app-blueprint.json + diagrams to your workspace.
+
+Solution Accelerator recommends:
+  7 agents: SequentialAgent (root), ParallelAgent (fanout), 4 LlmAgent assessments, LlmAgent (synthesizer)
+  4 MCP servers: firmographics, intent-data, pipeline-db, crm-writeback
+  1 A2A agent: data-enrichment (partner)
+  1 FunctionTool: consensus_fn  ← YOUR CODE HERE
+  2 skills: alloydb v2.1.0, icp-scoring v1.0.0
+
+Review app-blueprint.md (§1–§9), then run /accelerator.assess.

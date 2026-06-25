@@ -1,0 +1,356 @@
+{
+  "metadata": {
+    "name": "LoanOrigination-Monolith",
+    "version": "1.0.0",
+    "archetype": "brownfield-modernization",
+    "description": "Decompose a Java loan-origination monolith into domain microservices using strangler-fig, preserving the applicant journey, the credit-bureau contract (cross-cloud via Apigee), and the retained mainframe core-banking link.",
+    "team": "Lending Platform Engineering",
+    "lob": "Consumer Lending",
+    "current_host": "AWS EC2 (legacy lift-and-shift, 8x m5.2xlarge behind ALB)",
+    "business_criticality": "Tier 1",
+    "data_classification": "Restricted (PII + financial)",
+    "compliance_regimes": [
+      "SOX",
+      "GLBA",
+      "internal data-protection standard"
+    ]
+  },
+  "modernization_scope": {
+    "integrations_in_scope": [
+      "INT-001",
+      "INT-002",
+      "INT-003",
+      "INT-004"
+    ],
+    "integrations_out_of_scope": [],
+    "target_aws_account": "633444555666 (lending-prod)",
+    "target_region_primary": "us-east-1",
+    "target_region_dr": "us-west-2",
+    "cross_cloud_dependencies": [
+      "Apigee on GCP enterprise-apigee-prod (credit bureau proxy)"
+    ]
+  },
+  "integrations": [
+    {
+      "id": "INT-001",
+      "name": "Applicant portal",
+      "functional_categories": [
+        "spa_external_facing"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS",
+        "Transport": "server-rendered (JSP + jQuery)",
+        "Auth": "OIDC via ForgeRock (public customers)",
+        "Payload": "HTML + partial AJAX",
+        "Stack": "Spring MVC 4 monolith, Tomcat 8.5",
+        "SLA": "p95 < 2s, 60 RPS peak",
+        "Criticality": "Tier 1",
+        "Failure today": "degraded form, save-and-resume"
+      },
+      "target_intent": {
+        "Preserve": "same OIDC flow, same save-and-resume, WCAG 2.1 AA",
+        "Downtime": "0 min (canary)",
+        "Regression": "p95 <= 2.2s",
+        "Reject": "no full-page reloads"
+      },
+      "dependencies": "INT-002",
+      "r_factor": "Refactor",
+      "cutover_strategy": "Canary",
+      "validation_gates": "canary SLO board green 48h; a11y scan pass",
+      "coexistence": "SPA + legacy pages co-served behind CloudFront path rules"
+    },
+    {
+      "id": "INT-002",
+      "name": "Origination core",
+      "functional_categories": [
+        "app_to_app_internal"
+      ],
+      "current_state": {
+        "Protocol": "in-process (monolith modules)",
+        "Auth": "internal",
+        "Payload": "Java method calls + shared DB",
+        "Stack": "Spring 4 monolith, PostgreSQL 12",
+        "SLA": "p95 < 700ms, 60 RPS peak",
+        "Criticality": "Tier 1",
+        "Failure today": "monolith restart, ~3 min recovery"
+      },
+      "target_intent": {
+        "Preserve": "decisioning parity (approve/decline/refer), same audit events",
+        "Downtime": "0 min",
+        "Regression": "+60ms p95 during strangle",
+        "Reject": "no shared-DB writes across new + old"
+      },
+      "dependencies": "none - anchors strangle",
+      "r_factor": "Refactor",
+      "cutover_strategy": "Strangler-fig",
+      "validation_gates": "decision-parity harness (shadow 14 days, mismatch < 0.05%)",
+      "coexistence": "anti-corruption layer + outbox to keep monolith DB in sync during strangle"
+    },
+    {
+      "id": "INT-003",
+      "name": "Credit bureau API (cross-cloud)",
+      "functional_categories": [
+        "app_to_app_external",
+        "app_to_app_cross_cloud",
+        "sync_request_response"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS REST",
+        "Auth": "mTLS + OAuth2 to bureau via on-prem APIC",
+        "Payload": "/docs/bureau-v2.openapi.yaml",
+        "Stack": "APIC SDK, RestTemplate",
+        "SLA": "p95 < 1.5s, 20 RPS peak",
+        "Criticality": "Tier 1",
+        "Failure today": "circuit breaker -> soft-pull cache, manual review queue"
+      },
+      "target_intent": {
+        "Preserve": "same bureau contract, same consent + audit logging, circuit-breaker semantics",
+        "Downtime": "0 min",
+        "Regression": "+100ms p95 cross-cloud",
+        "Reject": "no AWS API Gateway (standard is Apigee)"
+      },
+      "dependencies": "independent after Apigee provisioned",
+      "r_factor": "Replatform",
+      "cutover_strategy": "Blue-green",
+      "validation_gates": "parity validator (shadow 21 days, diff < 0.05%); consent-audit reconciliation 100%",
+      "cross_cloud": {
+        "Source": "on-prem APIC, DC-East",
+        "Target": "GCP Apigee enterprise-apigee-prod",
+        "Latency budget": "100ms p95 added",
+        "Transit": "AWS PrivateLink -> GCP PSC -> Apigee (per ADR-019)"
+      },
+      "coexistence": "APIC + Apigee parallel during soak; single consent ledger"
+    },
+    {
+      "id": "INT-004",
+      "name": "Core-banking host link",
+      "functional_categories": [
+        "app_to_app_internal",
+        "event_driven_async"
+      ],
+      "current_state": {
+        "Protocol": "MQ (JMS)",
+        "Transport": "IBM MQ to mainframe CICS (LOAN.BOOK.REQ)",
+        "Auth": "TLS + channel cert",
+        "Payload": "fixed-format copybook",
+        "Stack": "Spring JMS + MQ client 9.x",
+        "SLA": "200 msg/min, 2000/min peak",
+        "Criticality": "Tier 1",
+        "Failure today": "spill-to-file + replay; ops paged"
+      },
+      "target_intent": {
+        "Preserve": "exact copybook contract, at-least-once, ordering per account",
+        "Downtime": "0 min (dual-publish)",
+        "Regression": "none",
+        "Reject": "no mainframe changes (out of scope - Retain)"
+      },
+      "dependencies": "after INT-002",
+      "r_factor": "Retain",
+      "cutover_strategy": "Dual-publish",
+      "validation_gates": "72h soak; copybook byte-parity 100%; zero dropped bookings",
+      "coexistence": "mainframe consumes from one publisher; dedupe by request_id"
+    }
+  ],
+  "services": [
+    {
+      "name": "loan-origination-applicant-portal",
+      "type": "angular-spa",
+      "role": "Applicant portal",
+      "replaces": "INT-001 (CSA)",
+      "r_factor": "Refactor"
+    },
+    {
+      "name": "loan-origination-origination-core",
+      "type": "spring-boot-service",
+      "role": "Origination core",
+      "replaces": "INT-002 (CSA)",
+      "r_factor": "Refactor"
+    },
+    {
+      "name": "loan-origination-credit-bureau-api",
+      "type": "spring-boot-service",
+      "role": "Credit bureau API (cross-cloud)",
+      "replaces": "INT-003 (CSA)",
+      "r_factor": "Replatform"
+    },
+    {
+      "name": "loan-origination-core-banking-host-link",
+      "type": "spring-boot-service",
+      "role": "Core-banking host link",
+      "replaces": "INT-004 (CSA)",
+      "r_factor": "Retain"
+    }
+  ],
+  "infrastructure": {
+    "modules": [
+      {
+        "name": "ecs-fargate-service",
+        "source": "github.com/company/tf-modules//ecs-fargate-service",
+        "version": "v3.1.0",
+        "dr_aware": true
+      },
+      {
+        "name": "cloudfront-spa",
+        "source": "github.com/company/tf-modules//cloudfront-spa",
+        "version": "v2.4.0",
+        "dr_aware": true
+      },
+      {
+        "name": "sqs-producer",
+        "source": "github.com/company/tf-modules//sqs-producer",
+        "version": "v3.3.0",
+        "dr_aware": true
+      },
+      {
+        "name": "secrets-manager",
+        "source": "github.com/company/tf-modules//secrets-manager",
+        "version": "v2.2.0",
+        "dr_aware": false
+      },
+      {
+        "name": "privatelink-psc",
+        "source": "github.com/company/tf-modules//privatelink-psc",
+        "version": "v1.6.0",
+        "dr_aware": true
+      }
+    ],
+    "dr_strategy": "warm-standby",
+    "primary_region": "us-east-1",
+    "dr_region": "us-west-2"
+  },
+  "migration_phases": [
+    {
+      "phase": 0,
+      "name": "Cross-cloud + landing-zone plumbing",
+      "integrations": [],
+      "depends_on": [],
+      "gate": "PrivateLink->PSC up; VPC/Secrets ready"
+    },
+    {
+      "phase": 1,
+      "name": "Service tier (anchor)",
+      "integrations": [
+        "INT-002"
+      ],
+      "depends_on": [
+        0
+      ],
+      "gate": "parity harness green"
+    },
+    {
+      "phase": 2,
+      "name": "UI cutover",
+      "integrations": [
+        "INT-001"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "UI regression + SLO green"
+    },
+    {
+      "phase": 3,
+      "name": "Remaining integrations",
+      "integrations": [
+        "INT-003",
+        "INT-004"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "per-integration validation"
+    }
+  ],
+  "coexistence_constraints": [
+    {
+      "applies_to": "INT-001",
+      "constraint": "SPA + legacy pages co-served behind CloudFront path rules"
+    },
+    {
+      "applies_to": "INT-002",
+      "constraint": "anti-corruption layer + outbox to keep monolith DB in sync during strangle"
+    },
+    {
+      "applies_to": "INT-003",
+      "constraint": "APIC + Apigee parallel during soak; single consent ledger"
+    },
+    {
+      "applies_to": "INT-004",
+      "constraint": "mainframe consumes from one publisher; dedupe by request_id"
+    }
+  ],
+  "adr_compliance": [
+    {
+      "adr": "ADR-019",
+      "title": "Cross-cloud transit via AWS PrivateLink -> GCP PSC (no public egress)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-244",
+      "title": "Enterprise API gateway is Apigee (no AWS API Gateway for domain APIs)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-110",
+      "title": "Cutover strategy must define an automated rollback trigger + procedure",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-205",
+      "title": "Tier-1/Tier-2 apps require cross-region DR (primary -> DR region)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-310",
+      "title": "All secrets in AWS Secrets Manager; no secrets in env/AMI/image",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-401",
+      "title": "Observability: Splunk logs + Dynatrace APM + OTel traces on every service",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-512",
+      "title": "Terraform must reference company tf-modules; no raw aws_* resources",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-630",
+      "title": "Async contract changes require at-least-once + downstream dedupe by event_id",
+      "status": "PASS"
+    }
+  ],
+  "nfrs": [
+    {
+      "category": "Auth",
+      "requirement": "OIDC via ForgeRock (customers); SAML for staff"
+    },
+    {
+      "category": "Authz",
+      "requirement": "scope-based + role claims"
+    },
+    {
+      "category": "Observability",
+      "requirement": "Splunk + Dynatrace + OTel; SLO p95 < 2.2s"
+    },
+    {
+      "category": "DR",
+      "requirement": "Warm Standby (Tier 1, us-east-1 -> us-west-2)"
+    },
+    {
+      "category": "RTO/RPO",
+      "requirement": "1h / 5m"
+    }
+  ],
+  "screening_config": {
+    "pii_fields": [
+      "customer_name",
+      "address",
+      "ssn_or_tax_id",
+      "dob"
+    ],
+    "secrets_store": "aws-secrets-manager"
+  },
+  "blueprint_hash": "27a4c838eb0ae242"
+}

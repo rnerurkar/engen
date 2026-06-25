@@ -1,0 +1,350 @@
+{
+  "metadata": {
+    "name": "ClaimsPortal-MPA",
+    "version": "1.0.0",
+    "archetype": "brownfield-modernization",
+    "description": "Refactor a server-rendered JSP/Spring-MVC claims portal (MPA) into an Angular SPA + Spring Boot BFF on ECS Fargate, preserving SSO, REST contracts, the cross-cloud domain API, and the async notify stream.",
+    "team": "Claims Platform Engineering",
+    "lob": "Claims",
+    "current_host": "vSphere on-prem (DC-East cluster, 4 VMs behind F5 LTM)",
+    "business_criticality": "Tier 2",
+    "data_classification": "Confidential (PII)",
+    "compliance_regimes": [
+      "SOX",
+      "internal data-protection standard"
+    ]
+  },
+  "modernization_scope": {
+    "integrations_in_scope": [
+      "INT-001",
+      "INT-002",
+      "INT-003",
+      "INT-004"
+    ],
+    "integrations_out_of_scope": [],
+    "target_aws_account": "411222333444 (claims-prod)",
+    "target_region_primary": "us-east-1",
+    "target_region_dr": "us-west-2",
+    "cross_cloud_dependencies": [
+      "Apigee on GCP enterprise-apigee-prod"
+    ]
+  },
+  "integrations": [
+    {
+      "id": "INT-001",
+      "name": "UI rendering",
+      "functional_categories": [
+        "spa_internal_facing"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS",
+        "Transport": "server-rendered HTML (JSP)",
+        "Auth": "SAML SSO via on-prem Ping Federate (session cookie)",
+        "Payload": "HTML pages",
+        "Stack": "Tomcat 9 + Spring MVC 5 + JSP",
+        "SLA": "p95 < 2s, 30 RPS peak",
+        "Criticality": "Tier 2",
+        "Failure today": "blank page, full outage"
+      },
+      "target_intent": {
+        "Preserve": "same URL paths, same SSO experience",
+        "Downtime": "15 min (after-hours)",
+        "Regression": "p95 <= 2.5s first week",
+        "Reject": "no CSR for /print/* pages"
+      },
+      "dependencies": "INT-002",
+      "r_factor": "Refactor",
+      "cutover_strategy": "Big-bang",
+      "validation_gates": "Selenium suite 100%; synthetic p95 < 2.5s"
+    },
+    {
+      "id": "INT-002",
+      "name": "Server-side application logic",
+      "functional_categories": [
+        "app_to_app_internal"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS REST",
+        "Auth": "SAML session, internal AD",
+        "Payload": "JSON (/docs/openapi-v3.yaml)",
+        "Stack": "Spring MVC 5, Spring Data JPA, Oracle 19c",
+        "SLA": "p95 < 500ms, 30 RPS peak",
+        "Criticality": "Tier 2",
+        "Failure today": "5xx to UI"
+      },
+      "target_intent": {
+        "Preserve": "same REST contract /api/v1/*, Oracle retained on-prem (out of scope)",
+        "Downtime": "15 min (paired with INT-001)",
+        "Regression": "+50ms p95",
+        "Reject": "no Lambda (sustained traffic)"
+      },
+      "dependencies": "none - anchors cutover",
+      "r_factor": "Refactor",
+      "cutover_strategy": "Strangler-fig",
+      "validation_gates": "API replay 5000 requests, p95 < 600ms",
+      "coexistence": "BFF -> on-prem Oracle (DB retained, +25ms hop)"
+    },
+    {
+      "id": "INT-003",
+      "name": "Domain API consumption",
+      "functional_categories": [
+        "app_to_app_external",
+        "app_to_app_cross_cloud",
+        "sync_request_response"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS REST",
+        "Auth": "OAuth2 client_credentials via APIC, mTLS to APIC edge",
+        "Payload": "/docs/domain-api-v2.openapi.yaml",
+        "Stack": "Spring RestTemplate, APIC SDK 5.x",
+        "SLA": "p95 < 1s, 12 RPS peak",
+        "Criticality": "Tier 2",
+        "Failure today": "circuit breaker -> cached read-only view"
+      },
+      "target_intent": {
+        "Preserve": "same OpenAPI v2, same OAuth flow, same circuit-breaker semantics",
+        "Downtime": "0 min (parallel gateway swap)",
+        "Regression": "+100ms p95 cross-cloud hop",
+        "Reject": "no AWS API Gateway (standard is Apigee)"
+      },
+      "dependencies": "independent of INT-001/002 after Apigee provisioned",
+      "r_factor": "Replatform",
+      "cutover_strategy": "Blue-green",
+      "validation_gates": "parity validator (shadow 14 days, diff < 0.1%); latency <= +100ms",
+      "cross_cloud": {
+        "Source": "on-prem APIC, DC-East",
+        "Target": "GCP Apigee enterprise-apigee-prod",
+        "Latency budget": "100ms p95 added",
+        "Transit": "AWS PrivateLink -> GCP PSC -> Apigee (per ADR-019)"
+      },
+      "coexistence": "APIC + Apigee live in parallel during soak"
+    },
+    {
+      "id": "INT-004",
+      "name": "Async messaging",
+      "functional_categories": [
+        "app_to_app_internal",
+        "event_driven_async"
+      ],
+      "current_state": {
+        "Protocol": "JMS",
+        "Transport": "IBM MQ (CLAIMS.OUT.NOTIFY)",
+        "Auth": "TLS + MQ channel cert",
+        "Payload": "/docs/notify-event-v1.json",
+        "Stack": "Spring JMS + IBM MQ client 9.1",
+        "SLA": "500 msg/min sustained, 5000/min peak",
+        "Criticality": "Tier 2",
+        "Failure today": "backoff; spill to file + replay after 5 min"
+      },
+      "target_intent": {
+        "Preserve": "at-least-once, existing message contract unchanged",
+        "Downtime": "0 min (dual-publish covers)",
+        "Regression": "none",
+        "Reject": "no SNS (downstream wants point-to-point)"
+      },
+      "dependencies": "after INT-002 (BFF must exist to publish)",
+      "r_factor": "Refactor",
+      "cutover_strategy": "Dual-publish",
+      "validation_gates": "24h load test; SQS publish p95 < 50ms",
+      "coexistence": "downstream deduplicates by event_id (ticket DSN-4471)"
+    }
+  ],
+  "services": [
+    {
+      "name": "claims-portal-mpa-ui-rendering",
+      "type": "angular-spa",
+      "role": "UI rendering",
+      "replaces": "INT-001 (CSA)",
+      "r_factor": "Refactor"
+    },
+    {
+      "name": "claims-portal-mpa-server-side-application-logic",
+      "type": "spring-boot-service",
+      "role": "Server-side application logic",
+      "replaces": "INT-002 (CSA)",
+      "r_factor": "Refactor"
+    },
+    {
+      "name": "claims-portal-mpa-domain-api-consumption",
+      "type": "spring-boot-service",
+      "role": "Domain API consumption",
+      "replaces": "INT-003 (CSA)",
+      "r_factor": "Replatform"
+    },
+    {
+      "name": "claims-portal-mpa-async-messaging",
+      "type": "spring-boot-service",
+      "role": "Async messaging",
+      "replaces": "INT-004 (CSA)",
+      "r_factor": "Refactor"
+    }
+  ],
+  "infrastructure": {
+    "modules": [
+      {
+        "name": "ecs-fargate-service",
+        "source": "github.com/company/tf-modules//ecs-fargate-service",
+        "version": "v3.1.0",
+        "dr_aware": true
+      },
+      {
+        "name": "cloudfront-spa",
+        "source": "github.com/company/tf-modules//cloudfront-spa",
+        "version": "v2.4.0",
+        "dr_aware": true
+      },
+      {
+        "name": "sqs-producer",
+        "source": "github.com/company/tf-modules//sqs-producer",
+        "version": "v3.3.0",
+        "dr_aware": true
+      },
+      {
+        "name": "secrets-manager",
+        "source": "github.com/company/tf-modules//secrets-manager",
+        "version": "v2.2.0",
+        "dr_aware": false
+      },
+      {
+        "name": "privatelink-psc",
+        "source": "github.com/company/tf-modules//privatelink-psc",
+        "version": "v1.6.0",
+        "dr_aware": true
+      }
+    ],
+    "dr_strategy": "pilot-light",
+    "primary_region": "us-east-1",
+    "dr_region": "us-west-2"
+  },
+  "migration_phases": [
+    {
+      "phase": 0,
+      "name": "Cross-cloud + landing-zone plumbing",
+      "integrations": [],
+      "depends_on": [],
+      "gate": "PrivateLink->PSC up; VPC/Secrets ready"
+    },
+    {
+      "phase": 1,
+      "name": "Service tier (anchor)",
+      "integrations": [
+        "INT-002"
+      ],
+      "depends_on": [
+        0
+      ],
+      "gate": "parity harness green"
+    },
+    {
+      "phase": 2,
+      "name": "UI cutover",
+      "integrations": [
+        "INT-001"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "UI regression + SLO green"
+    },
+    {
+      "phase": 3,
+      "name": "Remaining integrations",
+      "integrations": [
+        "INT-003",
+        "INT-004"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "per-integration validation"
+    }
+  ],
+  "coexistence_constraints": [
+    {
+      "applies_to": "INT-002",
+      "constraint": "BFF -> on-prem Oracle (DB retained, +25ms hop)"
+    },
+    {
+      "applies_to": "INT-003",
+      "constraint": "APIC + Apigee live in parallel during soak"
+    },
+    {
+      "applies_to": "INT-004",
+      "constraint": "downstream deduplicates by event_id (ticket DSN-4471)"
+    }
+  ],
+  "adr_compliance": [
+    {
+      "adr": "ADR-019",
+      "title": "Cross-cloud transit via AWS PrivateLink -> GCP PSC (no public egress)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-244",
+      "title": "Enterprise API gateway is Apigee (no AWS API Gateway for domain APIs)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-110",
+      "title": "Cutover strategy must define an automated rollback trigger + procedure",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-205",
+      "title": "Tier-1/Tier-2 apps require cross-region DR (primary -> DR region)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-310",
+      "title": "All secrets in AWS Secrets Manager; no secrets in env/AMI/image",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-401",
+      "title": "Observability: Splunk logs + Dynatrace APM + OTel traces on every service",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-512",
+      "title": "Terraform must reference company tf-modules; no raw aws_* resources",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-630",
+      "title": "Async contract changes require at-least-once + downstream dedupe by event_id",
+      "status": "PASS"
+    }
+  ],
+  "nfrs": [
+    {
+      "category": "Auth",
+      "requirement": "SAML SSO via Ping Federate (Cognito deferred)"
+    },
+    {
+      "category": "Authz",
+      "requirement": "RBAC from AD groups in SAML assertion"
+    },
+    {
+      "category": "Observability",
+      "requirement": "Splunk logs, Dynatrace APM, OTel traces; SLO p95 < 2.5s"
+    },
+    {
+      "category": "DR",
+      "requirement": "Pilot Light (us-east-1 -> us-west-2)"
+    },
+    {
+      "category": "RTO/RPO",
+      "requirement": "4h / 1h"
+    }
+  ],
+  "screening_config": {
+    "pii_fields": [
+      "customer_name",
+      "address",
+      "ssn_or_tax_id",
+      "dob"
+    ],
+    "secrets_store": "aws-secrets-manager"
+  },
+  "blueprint_hash": "45a32d707638fbc6"
+}

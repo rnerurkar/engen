@@ -1,0 +1,345 @@
+{
+  "metadata": {
+    "name": "PolicyAdmin-WebForms",
+    "version": "1.0.0",
+    "archetype": "brownfield-modernization",
+    "description": "Modernize a legacy .NET WebForms policy-administration application into an Angular SPA + Java Spring Boot service tier on ECS Fargate, preserving the rating contract (now cross-cloud via Apigee) and the external document-print feed.",
+    "team": "Policy Platform Engineering",
+    "lob": "Policy Administration",
+    "current_host": "vSphere on-prem (DC-West, 6 VMs behind NetScaler)",
+    "business_criticality": "Tier 2",
+    "data_classification": "Confidential (PII)",
+    "compliance_regimes": [
+      "SOX",
+      "internal data-protection standard"
+    ]
+  },
+  "modernization_scope": {
+    "integrations_in_scope": [
+      "INT-001",
+      "INT-002",
+      "INT-003",
+      "INT-004"
+    ],
+    "integrations_out_of_scope": [],
+    "target_aws_account": "522333444555 (policy-prod)",
+    "target_region_primary": "us-east-1",
+    "target_region_dr": "us-west-2",
+    "cross_cloud_dependencies": [
+      "Apigee on GCP enterprise-apigee-prod (rating API)"
+    ]
+  },
+  "integrations": [
+    {
+      "id": "INT-001",
+      "name": "Policy admin UI",
+      "functional_categories": [
+        "spa_internal_facing"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS",
+        "Transport": "server postbacks (ASPX)",
+        "Auth": "Windows Integrated Auth (Kerberos)",
+        "Payload": "HTML + ViewState",
+        "Stack": "ASP.NET WebForms 4.8, IIS 10",
+        "SLA": "p95 < 2.5s, 20 RPS peak",
+        "Criticality": "Tier 2",
+        "Failure today": "ViewState error -> session loss"
+      },
+      "target_intent": {
+        "Preserve": "same navigation map, same role-gated screens",
+        "Downtime": "20 min (after-hours)",
+        "Regression": "p95 <= 3s first week",
+        "Reject": "no postback model"
+      },
+      "dependencies": "INT-002",
+      "r_factor": "Rewrite",
+      "cutover_strategy": "Big-bang",
+      "validation_gates": "Playwright regression 100%; synthetic p95 < 3s"
+    },
+    {
+      "id": "INT-002",
+      "name": "Policy rules + service tier",
+      "functional_categories": [
+        "app_to_app_internal"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS SOAP",
+        "Auth": "WS-Security, internal AD",
+        "Payload": "SOAP/XML (policy.wsdl)",
+        "Stack": ".NET WCF 4.8, SQL Server 2017",
+        "SLA": "p95 < 800ms, 20 RPS peak",
+        "Criticality": "Tier 2",
+        "Failure today": "SOAP fault -> UI error banner"
+      },
+      "target_intent": {
+        "Preserve": "behavioural parity of policy lifecycle transitions; SQL Server retained on-prem (out of scope)",
+        "Downtime": "20 min",
+        "Regression": "+75ms p95",
+        "Reject": "no business logic in the SPA"
+      },
+      "dependencies": "none - anchors cutover",
+      "r_factor": "Rewrite",
+      "cutover_strategy": "Strangler-fig",
+      "validation_gates": "transition-parity harness (shadow 7 days, diff < 0.1%)",
+      "coexistence": "BFF -> on-prem SQL Server via VPN (DB retained, +30ms)"
+    },
+    {
+      "id": "INT-003",
+      "name": "Rating service (cross-cloud)",
+      "functional_categories": [
+        "app_to_app_external",
+        "app_to_app_cross_cloud",
+        "sync_request_response"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS REST",
+        "Auth": "API key (header) to on-prem rating engine",
+        "Payload": "/docs/rating-v3.openapi.yaml",
+        "Stack": "internal rating engine, mTLS",
+        "SLA": "p95 < 1.2s, 8 RPS peak",
+        "Criticality": "Tier 2",
+        "Failure today": "fallback to last-good quote (cached)"
+      },
+      "target_intent": {
+        "Preserve": "same rating OpenAPI v3, same idempotency keys, same cache-fallback semantics",
+        "Downtime": "0 min",
+        "Regression": "+120ms p95 cross-cloud",
+        "Reject": "no AWS API Gateway (standard is Apigee)"
+      },
+      "dependencies": "independent after Apigee provisioned",
+      "r_factor": "Replatform",
+      "cutover_strategy": "Blue-green",
+      "validation_gates": "parity validator (shadow 10 days, diff < 0.1%); latency <= +120ms",
+      "cross_cloud": {
+        "Source": "on-prem rating engine, DC-West",
+        "Target": "GCP Apigee enterprise-apigee-prod",
+        "Latency budget": "120ms p95 added",
+        "Transit": "AWS PrivateLink -> GCP PSC -> Apigee (per ADR-019)"
+      },
+      "coexistence": "on-prem rating + Apigee proxy in parallel during soak"
+    },
+    {
+      "id": "INT-004",
+      "name": "Document print feed",
+      "functional_categories": [
+        "app_to_app_external",
+        "file_transfer_external"
+      ],
+      "current_state": {
+        "Protocol": "SFTP",
+        "Transport": "batch file drop to external print vendor",
+        "Auth": "SSH key",
+        "Payload": "fixed-width + PDF bundle",
+        "Stack": "Windows scheduled task + WinSCP",
+        "SLA": "nightly batch, 50k docs",
+        "Criticality": "Tier 3",
+        "Failure today": "retry next window; ops paged on 2nd failure"
+      },
+      "target_intent": {
+        "Preserve": "same file format, same vendor SFTP endpoint, same nightly SLA",
+        "Downtime": "1 window",
+        "Regression": "none",
+        "Reject": "no change to vendor contract"
+      },
+      "dependencies": "after INT-002",
+      "r_factor": "Replatform",
+      "cutover_strategy": "Dual-run",
+      "validation_gates": "3-night manifest diff = 0; checksum match",
+      "coexistence": "vendor receives from one source per night (manifest reconciliation)"
+    }
+  ],
+  "services": [
+    {
+      "name": "policy-admin-policy-admin-ui",
+      "type": "angular-spa",
+      "role": "Policy admin UI",
+      "replaces": "INT-001 (CSA)",
+      "r_factor": "Rewrite"
+    },
+    {
+      "name": "policy-admin-policy-rules-+-service-tier",
+      "type": "spring-boot-service",
+      "role": "Policy rules + service tier",
+      "replaces": "INT-002 (CSA)",
+      "r_factor": "Rewrite"
+    },
+    {
+      "name": "policy-admin-rating-service",
+      "type": "spring-boot-service",
+      "role": "Rating service (cross-cloud)",
+      "replaces": "INT-003 (CSA)",
+      "r_factor": "Replatform"
+    },
+    {
+      "name": "policy-admin-document-print-feed",
+      "type": "spring-boot-service",
+      "role": "Document print feed",
+      "replaces": "INT-004 (CSA)",
+      "r_factor": "Replatform"
+    }
+  ],
+  "infrastructure": {
+    "modules": [
+      {
+        "name": "ecs-fargate-service",
+        "source": "github.com/company/tf-modules//ecs-fargate-service",
+        "version": "v3.1.0",
+        "dr_aware": true
+      },
+      {
+        "name": "cloudfront-spa",
+        "source": "github.com/company/tf-modules//cloudfront-spa",
+        "version": "v2.4.0",
+        "dr_aware": true
+      },
+      {
+        "name": "sqs-producer",
+        "source": "github.com/company/tf-modules//sqs-producer",
+        "version": "v3.3.0",
+        "dr_aware": true
+      },
+      {
+        "name": "secrets-manager",
+        "source": "github.com/company/tf-modules//secrets-manager",
+        "version": "v2.2.0",
+        "dr_aware": false
+      },
+      {
+        "name": "privatelink-psc",
+        "source": "github.com/company/tf-modules//privatelink-psc",
+        "version": "v1.6.0",
+        "dr_aware": true
+      }
+    ],
+    "dr_strategy": "pilot-light",
+    "primary_region": "us-east-1",
+    "dr_region": "us-west-2"
+  },
+  "migration_phases": [
+    {
+      "phase": 0,
+      "name": "Cross-cloud + landing-zone plumbing",
+      "integrations": [],
+      "depends_on": [],
+      "gate": "PrivateLink->PSC up; VPC/Secrets ready"
+    },
+    {
+      "phase": 1,
+      "name": "Service tier (anchor)",
+      "integrations": [
+        "INT-002"
+      ],
+      "depends_on": [
+        0
+      ],
+      "gate": "parity harness green"
+    },
+    {
+      "phase": 2,
+      "name": "UI cutover",
+      "integrations": [
+        "INT-001"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "UI regression + SLO green"
+    },
+    {
+      "phase": 3,
+      "name": "Remaining integrations",
+      "integrations": [
+        "INT-003",
+        "INT-004"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "per-integration validation"
+    }
+  ],
+  "coexistence_constraints": [
+    {
+      "applies_to": "INT-002",
+      "constraint": "BFF -> on-prem SQL Server via VPN (DB retained, +30ms)"
+    },
+    {
+      "applies_to": "INT-003",
+      "constraint": "on-prem rating + Apigee proxy in parallel during soak"
+    },
+    {
+      "applies_to": "INT-004",
+      "constraint": "vendor receives from one source per night (manifest reconciliation)"
+    }
+  ],
+  "adr_compliance": [
+    {
+      "adr": "ADR-019",
+      "title": "Cross-cloud transit via AWS PrivateLink -> GCP PSC (no public egress)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-244",
+      "title": "Enterprise API gateway is Apigee (no AWS API Gateway for domain APIs)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-110",
+      "title": "Cutover strategy must define an automated rollback trigger + procedure",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-205",
+      "title": "Tier-1/Tier-2 apps require cross-region DR (primary -> DR region)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-310",
+      "title": "All secrets in AWS Secrets Manager; no secrets in env/AMI/image",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-401",
+      "title": "Observability: Splunk logs + Dynatrace APM + OTel traces on every service",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-512",
+      "title": "Terraform must reference company tf-modules; no raw aws_* resources",
+      "status": "PASS"
+    }
+  ],
+  "nfrs": [
+    {
+      "category": "Auth",
+      "requirement": "SAML SSO via Ping Federate"
+    },
+    {
+      "category": "Authz",
+      "requirement": "RBAC from AD groups"
+    },
+    {
+      "category": "Observability",
+      "requirement": "Splunk + Dynatrace + OTel; SLO p95 < 3s"
+    },
+    {
+      "category": "DR",
+      "requirement": "Pilot Light (us-east-1 -> us-west-2)"
+    },
+    {
+      "category": "RTO/RPO",
+      "requirement": "4h / 1h"
+    }
+  ],
+  "screening_config": {
+    "pii_fields": [
+      "customer_name",
+      "address",
+      "ssn_or_tax_id",
+      "dob"
+    ],
+    "secrets_store": "aws-secrets-manager"
+  },
+  "blueprint_hash": "cfa2655c6b5788d3"
+}

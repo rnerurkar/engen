@@ -1,0 +1,351 @@
+{
+  "metadata": {
+    "name": "CustomerOnboarding-ESB",
+    "version": "1.0.0",
+    "archetype": "brownfield-modernization",
+    "description": "Modernize an ESB-orchestrated onboarding flow into an API-first Angular SPA + Spring Boot orchestration BFF, retaining the third-party identity-verification vendor and routing sanctions screening cross-cloud via Apigee, under GDPR + AML controls.",
+    "team": "Onboarding Platform Engineering",
+    "lob": "Customer Onboarding",
+    "current_host": "On-prem WebSphere ESB + Struts UI (DC-West), 5 nodes",
+    "business_criticality": "Tier 1",
+    "data_classification": "Restricted (PII + KYC)",
+    "compliance_regimes": [
+      "GDPR",
+      "SOX",
+      "GLBA",
+      "BSA/AML"
+    ]
+  },
+  "modernization_scope": {
+    "integrations_in_scope": [
+      "INT-001",
+      "INT-002",
+      "INT-003",
+      "INT-004"
+    ],
+    "integrations_out_of_scope": [],
+    "target_aws_account": "855666777888 (onboarding-prod)",
+    "target_region_primary": "us-east-1",
+    "target_region_dr": "us-west-2",
+    "cross_cloud_dependencies": [
+      "Apigee on GCP enterprise-apigee-prod (sanctions screening)"
+    ]
+  },
+  "integrations": [
+    {
+      "id": "INT-001",
+      "name": "Onboarding UI",
+      "functional_categories": [
+        "spa_external_facing"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS",
+        "Transport": "server-rendered (Struts 2)",
+        "Auth": "OIDC via ForgeRock",
+        "Payload": "HTML + AJAX",
+        "Stack": "Struts 2, Tomcat 8",
+        "SLA": "p95 < 2s, 40 RPS peak",
+        "Criticality": "Tier 1",
+        "Failure today": "save-and-resume; degraded form"
+      },
+      "target_intent": {
+        "Preserve": "same OIDC, same save-and-resume, GDPR consent capture, WCAG 2.1 AA",
+        "Downtime": "0 min (canary)",
+        "Regression": "p95 <= 2.3s",
+        "Reject": "no PII in client logs"
+      },
+      "dependencies": "INT-002",
+      "r_factor": "Rewrite",
+      "cutover_strategy": "Canary",
+      "validation_gates": "canary SLO green 48h; consent-capture audit 100%",
+      "coexistence": "SPA + legacy co-served behind CloudFront path rules"
+    },
+    {
+      "id": "INT-002",
+      "name": "KYC orchestration",
+      "functional_categories": [
+        "app_to_app_internal"
+      ],
+      "current_state": {
+        "Protocol": "SOAP/JMS (ESB mediation)",
+        "Auth": "WS-Security",
+        "Payload": "BPEL flows + canonical XML",
+        "Stack": "WebSphere ESB + BPEL",
+        "SLA": "p95 < 1.5s, 40 RPS peak",
+        "Criticality": "Tier 1",
+        "Failure today": "flow suspends; ops resumes"
+      },
+      "target_intent": {
+        "Preserve": "same onboarding state machine, same audit + AML hold semantics",
+        "Downtime": "0 min",
+        "Regression": "+90ms p95",
+        "Reject": "no ESB; no BPEL"
+      },
+      "dependencies": "none - anchors",
+      "r_factor": "Rewrite",
+      "cutover_strategy": "Strangler-fig",
+      "validation_gates": "state-parity harness (shadow 14 days, mismatch < 0.05%)",
+      "coexistence": "old ESB + new BFF share the case ledger via outbox during strangle"
+    },
+    {
+      "id": "INT-003",
+      "name": "Identity verification vendor",
+      "functional_categories": [
+        "app_to_app_external",
+        "sync_request_response"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS REST",
+        "Auth": "OAuth2 to vendor",
+        "Payload": "/docs/idv-v2.openapi.yaml",
+        "Stack": "ESB outbound adapter",
+        "SLA": "p95 < 2s, 20 RPS peak",
+        "Criticality": "Tier 1",
+        "Failure today": "retry; manual review fallback"
+      },
+      "target_intent": {
+        "Preserve": "same vendor contract, same data-minimization (GDPR), same retry policy",
+        "Downtime": "0 min",
+        "Regression": "none",
+        "Reject": "no change to vendor data-processing agreement"
+      },
+      "dependencies": "after INT-002",
+      "r_factor": "Retain",
+      "cutover_strategy": "Strangler-fig",
+      "validation_gates": "contract tests green; vendor invoice reconciliation = expected",
+      "coexistence": "one caller per case (ESB or BFF) - no double-charge to vendor"
+    },
+    {
+      "id": "INT-004",
+      "name": "Sanctions screening (cross-cloud)",
+      "functional_categories": [
+        "app_to_app_external",
+        "app_to_app_cross_cloud",
+        "sync_request_response"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS REST",
+        "Auth": "mTLS to on-prem screening",
+        "Payload": "/docs/sanctions-v1.openapi.yaml",
+        "Stack": "ESB adapter + on-prem screening",
+        "SLA": "p95 < 1.8s, 15 RPS peak",
+        "Criticality": "Tier 1",
+        "Failure today": "fail-closed -> AML hold"
+      },
+      "target_intent": {
+        "Preserve": "same screening contract, same fail-closed AML hold, same audit",
+        "Downtime": "0 min",
+        "Regression": "+100ms p95 cross-cloud",
+        "Reject": "no AWS API Gateway; screening stays GCP"
+      },
+      "dependencies": "independent after Apigee provisioned",
+      "r_factor": "Replatform",
+      "cutover_strategy": "Blue-green",
+      "validation_gates": "parity validator (shadow 21 days, decision diff = 0); AML audit reconciliation 100%",
+      "cross_cloud": {
+        "Source": "on-prem screening, DC-West",
+        "Target": "GCP Apigee enterprise-apigee-prod -> sanctions screening",
+        "Latency budget": "100ms p95 added",
+        "Transit": "AWS PrivateLink -> GCP PSC -> Apigee (per ADR-019)"
+      },
+      "coexistence": "on-prem + GCP screening parallel; single AML decision ledger"
+    }
+  ],
+  "services": [
+    {
+      "name": "customer-onboarding-kyc-onboarding-ui",
+      "type": "angular-spa",
+      "role": "Onboarding UI",
+      "replaces": "INT-001 (CSA)",
+      "r_factor": "Rewrite"
+    },
+    {
+      "name": "customer-onboarding-kyc-kyc-orchestration",
+      "type": "spring-boot-service",
+      "role": "KYC orchestration",
+      "replaces": "INT-002 (CSA)",
+      "r_factor": "Rewrite"
+    },
+    {
+      "name": "customer-onboarding-kyc-identity-verification-vendor",
+      "type": "spring-boot-service",
+      "role": "Identity verification vendor",
+      "replaces": "INT-003 (CSA)",
+      "r_factor": "Retain"
+    },
+    {
+      "name": "customer-onboarding-kyc-sanctions-screening",
+      "type": "spring-boot-service",
+      "role": "Sanctions screening (cross-cloud)",
+      "replaces": "INT-004 (CSA)",
+      "r_factor": "Replatform"
+    }
+  ],
+  "infrastructure": {
+    "modules": [
+      {
+        "name": "ecs-fargate-service",
+        "source": "github.com/company/tf-modules//ecs-fargate-service",
+        "version": "v3.1.0",
+        "dr_aware": true
+      },
+      {
+        "name": "cloudfront-spa",
+        "source": "github.com/company/tf-modules//cloudfront-spa",
+        "version": "v2.4.0",
+        "dr_aware": true
+      },
+      {
+        "name": "sqs-producer",
+        "source": "github.com/company/tf-modules//sqs-producer",
+        "version": "v3.3.0",
+        "dr_aware": true
+      },
+      {
+        "name": "secrets-manager",
+        "source": "github.com/company/tf-modules//secrets-manager",
+        "version": "v2.2.0",
+        "dr_aware": false
+      },
+      {
+        "name": "privatelink-psc",
+        "source": "github.com/company/tf-modules//privatelink-psc",
+        "version": "v1.6.0",
+        "dr_aware": true
+      }
+    ],
+    "dr_strategy": "warm-standby",
+    "primary_region": "us-east-1",
+    "dr_region": "us-west-2"
+  },
+  "migration_phases": [
+    {
+      "phase": 0,
+      "name": "Cross-cloud + landing-zone plumbing",
+      "integrations": [],
+      "depends_on": [],
+      "gate": "PrivateLink->PSC up; VPC/Secrets ready"
+    },
+    {
+      "phase": 1,
+      "name": "Service tier (anchor)",
+      "integrations": [
+        "INT-002"
+      ],
+      "depends_on": [
+        0
+      ],
+      "gate": "parity harness green"
+    },
+    {
+      "phase": 2,
+      "name": "UI cutover",
+      "integrations": [
+        "INT-001"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "UI regression + SLO green"
+    },
+    {
+      "phase": 3,
+      "name": "Remaining integrations",
+      "integrations": [
+        "INT-003",
+        "INT-004"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "per-integration validation"
+    }
+  ],
+  "coexistence_constraints": [
+    {
+      "applies_to": "INT-001",
+      "constraint": "SPA + legacy co-served behind CloudFront path rules"
+    },
+    {
+      "applies_to": "INT-002",
+      "constraint": "old ESB + new BFF share the case ledger via outbox during strangle"
+    },
+    {
+      "applies_to": "INT-003",
+      "constraint": "one caller per case (ESB or BFF) - no double-charge to vendor"
+    },
+    {
+      "applies_to": "INT-004",
+      "constraint": "on-prem + GCP screening parallel; single AML decision ledger"
+    }
+  ],
+  "adr_compliance": [
+    {
+      "adr": "ADR-019",
+      "title": "Cross-cloud transit via AWS PrivateLink -> GCP PSC (no public egress)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-244",
+      "title": "Enterprise API gateway is Apigee (no AWS API Gateway for domain APIs)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-110",
+      "title": "Cutover strategy must define an automated rollback trigger + procedure",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-205",
+      "title": "Tier-1/Tier-2 apps require cross-region DR (primary -> DR region)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-310",
+      "title": "All secrets in AWS Secrets Manager; no secrets in env/AMI/image",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-401",
+      "title": "Observability: Splunk logs + Dynatrace APM + OTel traces on every service",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-512",
+      "title": "Terraform must reference company tf-modules; no raw aws_* resources",
+      "status": "PASS"
+    }
+  ],
+  "nfrs": [
+    {
+      "category": "Auth",
+      "requirement": "OIDC via ForgeRock (customers); SAML for staff"
+    },
+    {
+      "category": "Authz",
+      "requirement": "scope + role claims; AML segregation of duties"
+    },
+    {
+      "category": "Observability",
+      "requirement": "Splunk + Dynatrace + OTel; GDPR data-minimization in logs; SLO p95 < 2.3s"
+    },
+    {
+      "category": "DR",
+      "requirement": "Warm Standby (Tier 1, us-east-1 -> us-west-2)"
+    },
+    {
+      "category": "RTO/RPO",
+      "requirement": "1h / 5m"
+    }
+  ],
+  "screening_config": {
+    "pii_fields": [
+      "customer_name",
+      "address",
+      "ssn_or_tax_id",
+      "dob"
+    ],
+    "secrets_store": "aws-secrets-manager"
+  },
+  "blueprint_hash": "57142194673f9f4c"
+}

@@ -1,0 +1,328 @@
+{
+  "metadata": {
+    "name": "BillingCollections-Forms",
+    "version": "1.0.0",
+    "archetype": "brownfield-modernization",
+    "description": "Modernize an Oracle Forms billing UI + PL/SQL collections batch into an Angular SPA + Spring Boot services with scheduled jobs on ECS Fargate, retaining the external PCI payment gateway and moving dunning notifications from MQ to SQS.",
+    "team": "Billing Platform Engineering",
+    "lob": "Billing & Collections",
+    "current_host": "vSphere on-prem (DC-East), Oracle Forms + PL/SQL batch, 4 VMs",
+    "business_criticality": "Tier 2",
+    "data_classification": "Confidential (PII + PCI for stored tokens)",
+    "compliance_regimes": [
+      "PCI-DSS",
+      "SOX"
+    ]
+  },
+  "modernization_scope": {
+    "integrations_in_scope": [
+      "INT-001",
+      "INT-002",
+      "INT-003",
+      "INT-004"
+    ],
+    "integrations_out_of_scope": [],
+    "target_aws_account": "966777888999 (billing-prod)",
+    "target_region_primary": "us-east-1",
+    "target_region_dr": "us-west-2",
+    "cross_cloud_dependencies": []
+  },
+  "integrations": [
+    {
+      "id": "INT-001",
+      "name": "Billing UI",
+      "functional_categories": [
+        "spa_internal_facing"
+      ],
+      "current_state": {
+        "Protocol": "Oracle Forms runtime",
+        "Transport": "Forms applet over HTTPS",
+        "Auth": "Oracle SSO",
+        "Payload": "Forms messages",
+        "Stack": "Oracle Forms 12c, WebLogic",
+        "SLA": "p95 < 3s, 15 RPS peak",
+        "Criticality": "Tier 2",
+        "Failure today": "applet hang -> relaunch"
+      },
+      "target_intent": {
+        "Preserve": "same billing screens + role gating",
+        "Downtime": "30 min (after-hours)",
+        "Regression": "p95 <= 3s",
+        "Reject": "no browser plugin / applet"
+      },
+      "dependencies": "INT-002",
+      "r_factor": "Rewrite",
+      "cutover_strategy": "Big-bang",
+      "validation_gates": "Playwright regression 100%; synthetic p95 < 3s"
+    },
+    {
+      "id": "INT-002",
+      "name": "Collections engine",
+      "functional_categories": [
+        "data_pipeline",
+        "app_to_app_internal"
+      ],
+      "current_state": {
+        "Protocol": "in-DB (PL/SQL)",
+        "Transport": "scheduled DBMS_SCHEDULER jobs",
+        "Auth": "DB roles",
+        "Payload": "PL/SQL packages over Oracle 19c",
+        "Stack": "PL/SQL batch, Oracle 19c",
+        "SLA": "hourly + nightly dunning runs",
+        "Criticality": "Tier 2",
+        "Failure today": "job rerun; ops paged"
+      },
+      "target_intent": {
+        "Preserve": "same dunning rules + aging buckets + ledger postings; Oracle retained on-prem (out of scope)",
+        "Downtime": "1 run window",
+        "Regression": "+5% run time acceptable",
+        "Reject": "no business logic left in DB triggers"
+      },
+      "dependencies": "none - anchors",
+      "r_factor": "Rewrite",
+      "cutover_strategy": "Dual-run",
+      "validation_gates": "5-cycle ledger parity (diff = 0); aging-bucket reconciliation 100%",
+      "coexistence": "ledger written by one engine per cycle (run-token lock)"
+    },
+    {
+      "id": "INT-003",
+      "name": "Payment gateway",
+      "functional_categories": [
+        "app_to_app_external",
+        "sync_request_response"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS REST",
+        "Auth": "API key + mTLS to external PSP",
+        "Payload": "/docs/psp-v2.openapi.yaml (tokenized PAN)",
+        "Stack": "PL/SQL + UTL_HTTP",
+        "SLA": "p95 < 1.2s, 10 RPS peak",
+        "Criticality": "Tier 2",
+        "Failure today": "retry; queue for next cycle"
+      },
+      "target_intent": {
+        "Preserve": "same PSP contract, tokenization unchanged, PCI scope minimized",
+        "Downtime": "0 min",
+        "Regression": "none",
+        "Reject": "no PAN at rest outside the PSP token vault"
+      },
+      "dependencies": "after INT-002",
+      "r_factor": "Retain",
+      "cutover_strategy": "Strangler-fig",
+      "validation_gates": "PCI scope review pass; contract tests green; settlement reconciliation = expected",
+      "coexistence": "one caller per transaction; idempotency key reused"
+    },
+    {
+      "id": "INT-004",
+      "name": "Dunning notifications",
+      "functional_categories": [
+        "app_to_app_internal",
+        "event_driven_async"
+      ],
+      "current_state": {
+        "Protocol": "JMS",
+        "Transport": "IBM MQ (DUN.NOTIFY)",
+        "Auth": "TLS + channel cert",
+        "Payload": "/docs/dun-notify-v1.json",
+        "Stack": "PL/SQL AQ -> MQ bridge",
+        "SLA": "300 msg/min, 3000/min peak",
+        "Criticality": "Tier 3",
+        "Failure today": "backoff; spill to table"
+      },
+      "target_intent": {
+        "Preserve": "at-least-once, contract unchanged",
+        "Downtime": "0 min",
+        "Regression": "none",
+        "Reject": "no SNS"
+      },
+      "dependencies": "after INT-002",
+      "r_factor": "Refactor",
+      "cutover_strategy": "Dual-publish",
+      "validation_gates": "24h load test; SQS publish p95 < 50ms",
+      "coexistence": "downstream dedupe by event_id (per ADR-630)"
+    }
+  ],
+  "services": [
+    {
+      "name": "billing-collections-billing-ui",
+      "type": "angular-spa",
+      "role": "Billing UI",
+      "replaces": "INT-001 (CSA)",
+      "r_factor": "Rewrite"
+    },
+    {
+      "name": "billing-collections-collections-engine",
+      "type": "spring-boot-service",
+      "role": "Collections engine",
+      "replaces": "INT-002 (CSA)",
+      "r_factor": "Rewrite"
+    },
+    {
+      "name": "billing-collections-payment-gateway",
+      "type": "spring-boot-service",
+      "role": "Payment gateway",
+      "replaces": "INT-003 (CSA)",
+      "r_factor": "Retain"
+    },
+    {
+      "name": "billing-collections-dunning-notifications",
+      "type": "spring-boot-service",
+      "role": "Dunning notifications",
+      "replaces": "INT-004 (CSA)",
+      "r_factor": "Refactor"
+    }
+  ],
+  "infrastructure": {
+    "modules": [
+      {
+        "name": "ecs-fargate-service",
+        "source": "github.com/company/tf-modules//ecs-fargate-service",
+        "version": "v3.1.0",
+        "dr_aware": true
+      },
+      {
+        "name": "cloudfront-spa",
+        "source": "github.com/company/tf-modules//cloudfront-spa",
+        "version": "v2.4.0",
+        "dr_aware": true
+      },
+      {
+        "name": "sqs-producer",
+        "source": "github.com/company/tf-modules//sqs-producer",
+        "version": "v3.3.0",
+        "dr_aware": true
+      },
+      {
+        "name": "secrets-manager",
+        "source": "github.com/company/tf-modules//secrets-manager",
+        "version": "v2.2.0",
+        "dr_aware": false
+      }
+    ],
+    "dr_strategy": "pilot-light",
+    "primary_region": "us-east-1",
+    "dr_region": "us-west-2"
+  },
+  "migration_phases": [
+    {
+      "phase": 0,
+      "name": "Cross-cloud + landing-zone plumbing",
+      "integrations": [],
+      "depends_on": [],
+      "gate": "PrivateLink->PSC up; VPC/Secrets ready"
+    },
+    {
+      "phase": 1,
+      "name": "Service tier (anchor)",
+      "integrations": [
+        "INT-002"
+      ],
+      "depends_on": [
+        0
+      ],
+      "gate": "parity harness green"
+    },
+    {
+      "phase": 2,
+      "name": "UI cutover",
+      "integrations": [
+        "INT-001"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "UI regression + SLO green"
+    },
+    {
+      "phase": 3,
+      "name": "Remaining integrations",
+      "integrations": [
+        "INT-003",
+        "INT-004"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "per-integration validation"
+    }
+  ],
+  "coexistence_constraints": [
+    {
+      "applies_to": "INT-002",
+      "constraint": "ledger written by one engine per cycle (run-token lock)"
+    },
+    {
+      "applies_to": "INT-003",
+      "constraint": "one caller per transaction; idempotency key reused"
+    },
+    {
+      "applies_to": "INT-004",
+      "constraint": "downstream dedupe by event_id (per ADR-630)"
+    }
+  ],
+  "adr_compliance": [
+    {
+      "adr": "ADR-110",
+      "title": "Cutover strategy must define an automated rollback trigger + procedure",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-205",
+      "title": "Tier-1/Tier-2 apps require cross-region DR (primary -> DR region)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-310",
+      "title": "All secrets in AWS Secrets Manager; no secrets in env/AMI/image",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-401",
+      "title": "Observability: Splunk logs + Dynatrace APM + OTel traces on every service",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-512",
+      "title": "Terraform must reference company tf-modules; no raw aws_* resources",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-630",
+      "title": "Async contract changes require at-least-once + downstream dedupe by event_id",
+      "status": "PASS"
+    }
+  ],
+  "nfrs": [
+    {
+      "category": "Auth",
+      "requirement": "SAML SSO via Ping Federate"
+    },
+    {
+      "category": "Authz",
+      "requirement": "RBAC; PCI scope segregation"
+    },
+    {
+      "category": "Observability",
+      "requirement": "Splunk + Dynatrace + OTel; no PAN in logs; SLO p95 < 3s"
+    },
+    {
+      "category": "DR",
+      "requirement": "Pilot Light (us-east-1 -> us-west-2)"
+    },
+    {
+      "category": "RTO/RPO",
+      "requirement": "4h / 1h"
+    }
+  ],
+  "screening_config": {
+    "pii_fields": [
+      "customer_name",
+      "address",
+      "ssn_or_tax_id",
+      "dob",
+      "card_token"
+    ],
+    "secrets_store": "aws-secrets-manager"
+  },
+  "blueprint_hash": "6a232b1a0c832924"
+}

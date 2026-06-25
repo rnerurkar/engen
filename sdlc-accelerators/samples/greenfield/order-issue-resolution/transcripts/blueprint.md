@@ -1,0 +1,19 @@
+You: /accelerator.blueprint
+
+Agent: Blueprint generation started. Checking progress...
+Agent: Searching pattern catalog (Workflow has no fan-out/sequence ordering words — one agent choosing tools dynamically)...
+Agent: Discovering integrations in API Hub for order management, inventory, payments, carrier tracking, reverse logistics...
+Agent: Searching skill catalog for matching skills...
+Agent: LLM reasoning: all tools co-occur with the single resolver — assigning them to order_resolution_agent...
+Agent: Validating composition (validate_composition)... single-node tree valid ✓
+Agent: Assembling blueprint (assemble_blueprint)...
+Agent: Blueprint ready! Saved app-blueprint.md + app-blueprint.json + diagrams to your workspace.
+
+Solution Accelerator recommends:
+  1 agent: LlmAgent (order_resolution_agent) — dynamic tool use, 8-step cap
+  5 MCP servers: order-mgmt, inventory, payments, carrier-tracking, escalation
+  1 A2A agent: reverse-logistics (partner)
+  1 FunctionTool: goodwill_credit_fn  ← YOUR CODE HERE
+  2 skills: alloydb v2.1.0, refund-policy v1.1.0
+
+Review app-blueprint.md (§1–§9), then run /accelerator.assess.

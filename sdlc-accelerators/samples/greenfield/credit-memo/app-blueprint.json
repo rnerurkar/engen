@@ -1,0 +1,66 @@
+{
+  "metadata": {
+    "name": "credit-memo-refiner-agent",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "description": "Single-artifact iterative credit-memo refinement to a quality bar (LoopAgent)",
+    "team": "commercial-lending-engineering",
+    "lob": "Commercial Lending"
+  },
+  "pattern_composition": {
+    "root_pattern": "Loop",
+    "composition": ["Loop"]
+  },
+  "agents": [
+    { "name": "credit_memo_refiner", "type": "LoopAgent", "role": "Root — refinement loop; exit score>=0.90 OR 4 passes", "parent": null, "model": null, "tools": [] },
+    { "name": "memo_refiner", "type": "LlmAgent", "role": "Draft then progressively refine the SAME stored memo; self-score", "parent": "credit_memo_refiner", "model": "gemini-2.0-flash", "tools": ["loan-origination-mcp", "memo-store-mcp", "quality_score_fn"] }
+  ],
+  "tools": {
+    "mcp_servers": [
+      { "name": "loan-origination-mcp", "endpoint": "mcp://loan-origination.internal:8080", "auth_method": "mtls", "assigned_to": "memo_refiner", "timeout": "20s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "memo-store-mcp", "endpoint": "mcp://memo-store.internal:8080", "auth_method": "mtls", "assigned_to": "memo_refiner", "timeout": "15s", "retry": 3, "discovered_via": "Apigee API Hub" }
+    ],
+    "a2a_agents": [],
+    "function_tools": [
+      { "name": "quality_score_fn", "assigned_to": "memo_refiner", "business_rules_ref": "spec §7 rubric" }
+    ]
+  },
+  "infrastructure": {
+    "modules": [
+      { "name": "tf-cloud-run-agent", "source": "github.com/company/terraform-modules/cloud-run-agent", "version": "v4.1.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-alloydb", "source": "github.com/company/terraform-modules/alloydb", "version": "v3.0.0", "assigned_to": "loan-origination-mcp", "dr_aware": true },
+      { "name": "tf-firestore", "source": "github.com/company/terraform-modules/firestore", "version": "v1.5.0", "assigned_to": "memo-store-mcp", "dr_aware": true },
+      { "name": "tf-apigee-proxy", "source": "github.com/company/terraform-modules/apigee-proxy", "version": "v2.5.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-workload-identity", "source": "github.com/company/terraform-modules/workload-identity", "version": "v2.2.0", "assigned_to": "all", "dr_aware": false },
+      { "name": "tf-vpc-sc-cmek", "source": "github.com/company/terraform-modules/vpc-sc-cmek", "version": "v1.4.0", "assigned_to": "all", "dr_aware": true }
+    ],
+    "dr_strategy": "hot-standby",
+    "primary_region": "us-east4",
+    "dr_region": "us-central1"
+  },
+  "business_rules": {
+    "quality_score_fn": [
+      { "condition": "quality_score >= 0.90", "action": "refinement_complete = true (exit)" },
+      { "condition": "pass_count >= 4", "action": "stop (max_passes_reached)" },
+      { "condition": "no improvement across 2 consecutive passes", "action": "stop (stalled_refinement)" }
+    ]
+  },
+  "screening_config": {
+    "agents_with_input_screening": ["memo_refiner"],
+    "agents_with_output_screening": ["memo_refiner"],
+    "pii_fields": ["borrower_name", "ein", "deal_id", "financial_statements"]
+  },
+  "evalops": {
+    "golden_dataset": { "entries": [], "min_count": 5 },
+    "eval_frequency": "pre-commit",
+    "hitl_reviewers": 2,
+    "autosxs_baseline": "single-draft-v0"
+  },
+  "nfrs": [
+    { "category": "quality", "requirement": "exit quality bar", "target": "quality_score >= 0.90" },
+    { "category": "termination", "requirement": "hard pass cap", "target": "<=4 passes" },
+    { "category": "latency", "requirement": "full refinement", "target": "<4min p95" },
+    { "category": "data_retention", "requirement": "memo versions + scores", "target": "7 years" }
+  ],
+  "blueprint_hash": "sha256:credit-memo-5e6f7081..."
+}

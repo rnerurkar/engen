@@ -1,0 +1,79 @@
+{
+  "metadata": {
+    "name": "loan-underwriting-agent",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "description": "Tiered loan underwriting — coordinator composing Sequential/Parallel/Loop/HITL",
+    "team": "consumer-lending-engineering",
+    "lob": "Consumer & Small-Business Lending"
+  },
+  "pattern_composition": {
+    "root_pattern": "LlmAgent coordinator",
+    "composition": ["Sequential", "Parallel", "Loop", "HITL"]
+  },
+  "agents": [
+    { "name": "loan_coordinator", "type": "LlmAgent", "role": "Root — determine tier, orchestrate sub-flows", "parent": null, "model": "gemini-2.0-flash", "tools": ["core-banking-mcp", "kyc-aml-a2a", "tier_router", "decision_fn"] },
+    { "name": "fasttrack_intake", "type": "SequentialAgent", "role": "Small loans: credit pull then auto-decision", "parent": "loan_coordinator", "model": null, "tools": [] },
+    { "name": "assessment_fanout", "type": "ParallelAgent", "role": "Mid/large: concurrent document collection + risk scoring", "parent": "loan_coordinator", "model": null, "tools": [] },
+    { "name": "risk_convergence", "type": "LoopAgent", "role": "Large loans: refine risk until stable (delta<0.02 OR 5 passes)", "parent": "loan_coordinator", "model": null, "tools": [] },
+    { "name": "underwriter_review", "type": "LlmAgent", "role": "Human-in-the-loop underwriter / credit-committee review", "parent": "loan_coordinator", "model": "gemini-2.0-flash", "tools": ["core-banking-mcp"] },
+    { "name": "credit_pull", "type": "LlmAgent", "role": "Pull credit", "parent": "fasttrack_intake", "model": "gemini-2.0-flash", "tools": ["credit-bureau-mcp"] },
+    { "name": "auto_decision", "type": "LlmAgent", "role": "Automated decision for small loans", "parent": "fasttrack_intake", "model": "gemini-2.0-flash", "tools": ["decision_fn"] },
+    { "name": "doc_collection", "type": "LlmAgent", "role": "Collect supporting documents", "parent": "assessment_fanout", "model": "gemini-2.0-flash", "tools": ["core-banking-mcp"] },
+    { "name": "risk_scoring", "type": "LlmAgent", "role": "Score risk (+ multi-bureau/collateral for large)", "parent": "assessment_fanout", "model": "gemini-2.0-flash", "tools": ["credit-bureau-mcp", "collateral-valuation-mcp"] }
+  ],
+  "tools": {
+    "mcp_servers": [
+      { "name": "core-banking-mcp", "endpoint": "mcp://core-banking.internal:8080", "auth_method": "mtls", "assigned_to": "loan_coordinator", "timeout": "30s", "retry": 3, "discovered_via": "Apigee API Hub" },
+      { "name": "credit-bureau-mcp", "endpoint": "mcp://credit-bureau.internal:8080", "auth_method": "oauth2", "assigned_to": "credit_pull", "timeout": "20s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "collateral-valuation-mcp", "endpoint": "mcp://collateral.internal:8080", "auth_method": "api_key", "assigned_to": "risk_scoring", "timeout": "20s", "retry": 2, "discovered_via": "Apigee API Hub" }
+    ],
+    "a2a_agents": [
+      { "name": "kyc-aml-a2a", "endpoint": "https://kyc.partner.com/a2a", "agent_card_url": "https://kyc.partner.com/.well-known/agent.json", "capabilities": ["kyc-verdict", "aml-screen"], "assigned_to": "loan_coordinator", "discovered_via": "Apigee API Hub (a2a_agent)" }
+    ],
+    "function_tools": [
+      { "name": "tier_router", "assigned_to": "loan_coordinator", "business_rules_ref": "spec §7 tier determination" },
+      { "name": "decision_fn", "assigned_to": "loan_coordinator", "business_rules_ref": "spec §7 decision rules" }
+    ]
+  },
+  "infrastructure": {
+    "modules": [
+      { "name": "tf-cloud-run-agent", "source": "github.com/company/terraform-modules/cloud-run-agent", "version": "v4.1.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-alloydb", "source": "github.com/company/terraform-modules/alloydb", "version": "v3.0.0", "assigned_to": "core-banking-mcp", "dr_aware": true },
+      { "name": "tf-apigee-proxy", "source": "github.com/company/terraform-modules/apigee-proxy", "version": "v2.5.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-workload-identity", "source": "github.com/company/terraform-modules/workload-identity", "version": "v2.2.0", "assigned_to": "all", "dr_aware": false },
+      { "name": "tf-vpc-sc-cmek", "source": "github.com/company/terraform-modules/vpc-sc-cmek", "version": "v1.4.0", "assigned_to": "all", "dr_aware": true }
+    ],
+    "dr_strategy": "hot-standby",
+    "primary_region": "us-east4",
+    "dr_region": "us-central1"
+  },
+  "business_rules": {
+    "tier_router": [
+      { "condition": "loan_amount <= 50000_USD", "action": "tier = small" },
+      { "condition": "loan_amount <= 500000_USD", "action": "tier = mid", "else_action": "tier = large" }
+    ],
+    "decision_fn": [
+      { "condition": "kyc_aml_verdict == 'hit'", "action": "decision = decline (reason kyc_aml)" },
+      { "condition": "tier == small AND credit_ok", "action": "decision = auto_approve", "else_action": "route to human review" }
+    ]
+  },
+  "screening_config": {
+    "agents_with_input_screening": ["loan_coordinator"],
+    "agents_with_output_screening": ["underwriter_review", "auto_decision"],
+    "pii_fields": ["applicant_name", "ssn", "account_number", "loan_id"]
+  },
+  "evalops": {
+    "golden_dataset": { "entries": [], "min_count": 5 },
+    "eval_frequency": "pre-commit",
+    "hitl_reviewers": 2,
+    "autosxs_baseline": "tier-routing-v0"
+  },
+  "nfrs": [
+    { "category": "latency", "requirement": "small-loan fast-track", "target": "<3min p95" },
+    { "category": "latency", "requirement": "large-loan full assessment", "target": "<12min p95" },
+    { "category": "termination", "requirement": "risk loop", "target": "delta<0.02 OR 5 passes" },
+    { "category": "data_retention", "requirement": "decision + inputs", "target": "7 years" }
+  ],
+  "blueprint_hash": "sha256:loan-uw-1a2b3c4d..."
+}

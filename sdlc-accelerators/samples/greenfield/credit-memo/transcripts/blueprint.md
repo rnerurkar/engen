@@ -1,0 +1,19 @@
+You: /accelerator.blueprint
+
+Agent: Blueprint generation started. Checking progress...
+Agent: Searching pattern catalog (Workflow ordering words: "refine... until [quality bar]")...
+Agent: Discovering integrations in API Hub for loan origination, memo store...
+Agent: Searching skill catalog for matching skills...
+Agent: LLM reasoning: single refinement agent self-scores the same artifact — no separate reviewer...
+Agent: Validating composition (validate_composition)... LoopAgent body well-formed with termination predicate ✓
+Agent: Assembling blueprint (assemble_blueprint)...
+Agent: Blueprint ready! Saved app-blueprint.md + app-blueprint.json + diagrams to your workspace.
+
+Solution Accelerator recommends:
+  2 agents: LoopAgent (credit_memo_refiner), LlmAgent (memo_refiner)
+  2 MCP servers: loan-origination (read), memo-store (read/write)
+  0 A2A agents
+  1 FunctionTool: quality_score_fn  ← YOUR CODE HERE
+  3 skills: alloydb v2.1.0, memo-drafting v1.0.0, quality-rubric v1.1.0
+
+Review app-blueprint.md (§1–§9), then run /accelerator.assess.

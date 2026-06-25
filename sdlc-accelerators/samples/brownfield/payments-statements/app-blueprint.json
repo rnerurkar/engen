@@ -1,0 +1,350 @@
+{
+  "metadata": {
+    "name": "PaymentsStatements-MainframeFront",
+    "version": "1.0.0",
+    "archetype": "brownfield-modernization",
+    "description": "Replatform a mainframe-fronted statements + payment-posting service into containerized Spring Boot APIs on ECS Fargate, preserving the host statement contract, moving PDF rendering off batch, and routing payment posting through cross-cloud fraud scoring.",
+    "team": "Payments Platform Engineering",
+    "lob": "Deposits & Payments",
+    "current_host": "On-prem WebSphere fronting mainframe (DC-East), 4 nodes",
+    "business_criticality": "Tier 1",
+    "data_classification": "Restricted (PCI + PII)",
+    "compliance_regimes": [
+      "PCI-DSS",
+      "SOX",
+      "GLBA"
+    ]
+  },
+  "modernization_scope": {
+    "integrations_in_scope": [
+      "INT-001",
+      "INT-002",
+      "INT-003",
+      "INT-004"
+    ],
+    "integrations_out_of_scope": [],
+    "target_aws_account": "744555666777 (payments-prod)",
+    "target_region_primary": "us-east-1",
+    "target_region_dr": "us-west-2",
+    "cross_cloud_dependencies": [
+      "Apigee on GCP enterprise-apigee-prod (fraud scoring)"
+    ]
+  },
+  "integrations": [
+    {
+      "id": "INT-001",
+      "name": "Statement retrieval API",
+      "functional_categories": [
+        "app_to_app_internal",
+        "sync_request_response"
+      ],
+      "current_state": {
+        "Protocol": "MQ request/reply",
+        "Transport": "IBM MQ to CICS/COBOL (STMT.GET)",
+        "Auth": "channel cert",
+        "Payload": "copybook -> JSON adapter",
+        "Stack": "WebSphere MDB + COBOL",
+        "SLA": "p95 < 1.5s, 40 RPS peak",
+        "Criticality": "Tier 1",
+        "Failure today": "timeout -> retry; cached last statement"
+      },
+      "target_intent": {
+        "Preserve": "same statement schema, same masking of PAN, host call retained",
+        "Downtime": "0 min",
+        "Regression": "+80ms p95",
+        "Reject": "no PAN in logs or traces"
+      },
+      "dependencies": "none - anchors",
+      "r_factor": "Replatform",
+      "cutover_strategy": "Strangler-fig",
+      "validation_gates": "field-level parity (shadow 10 days); PAN-masking audit 100%",
+      "coexistence": "new service + WebSphere consume same MQ reply queue (correlation id)"
+    },
+    {
+      "id": "INT-002",
+      "name": "Statement PDF rendering",
+      "functional_categories": [
+        "data_pipeline",
+        "app_to_app_internal"
+      ],
+      "current_state": {
+        "Protocol": "batch",
+        "Transport": "nightly batch render to NAS",
+        "Auth": "n/a (internal)",
+        "Payload": "AFP -> PDF",
+        "Stack": "on-prem batch (Java + AFP toolkit)",
+        "SLA": "nightly, 2M docs",
+        "Criticality": "Tier 2",
+        "Failure today": "rerun window; ops paged"
+      },
+      "target_intent": {
+        "Preserve": "byte-equivalent PDF output, same archive path",
+        "Downtime": "1 window",
+        "Regression": "none",
+        "Reject": "no change to archive retention"
+      },
+      "dependencies": "after INT-001",
+      "r_factor": "Refactor",
+      "cutover_strategy": "Dual-run",
+      "validation_gates": "5-night checksum match; PDF visual-diff < 0.01%",
+      "coexistence": "archive ingests from one pipeline per night"
+    },
+    {
+      "id": "INT-003",
+      "name": "Payment posting + fraud (cross-cloud)",
+      "functional_categories": [
+        "app_to_app_external",
+        "app_to_app_cross_cloud",
+        "sync_request_response"
+      ],
+      "current_state": {
+        "Protocol": "HTTPS REST",
+        "Auth": "mTLS to on-prem fraud engine",
+        "Payload": "/docs/post-v1.openapi.yaml",
+        "Stack": "WebSphere REST + fraud SDK",
+        "SLA": "p95 < 900ms, 50 RPS peak",
+        "Criticality": "Tier 1",
+        "Failure today": "fail-closed -> hold for manual review"
+      },
+      "target_intent": {
+        "Preserve": "same posting contract, same fail-closed rule, same score thresholds",
+        "Downtime": "0 min",
+        "Regression": "+110ms p95 cross-cloud",
+        "Reject": "no AWS API Gateway; fraud stays GCP"
+      },
+      "dependencies": "independent after Apigee provisioned",
+      "r_factor": "Replatform",
+      "cutover_strategy": "Blue-green",
+      "validation_gates": "parity validator (shadow 14 days, decision diff < 0.05%); latency <= +110ms",
+      "cross_cloud": {
+        "Source": "on-prem fraud engine, DC-East",
+        "Target": "GCP Apigee enterprise-apigee-prod -> fraud scoring",
+        "Latency budget": "110ms p95 added",
+        "Transit": "AWS PrivateLink -> GCP PSC -> Apigee (per ADR-019)"
+      },
+      "coexistence": "on-prem + GCP fraud parallel; single decision ledger"
+    },
+    {
+      "id": "INT-004",
+      "name": "Posting notifications",
+      "functional_categories": [
+        "app_to_app_internal",
+        "event_driven_async"
+      ],
+      "current_state": {
+        "Protocol": "JMS",
+        "Transport": "IBM MQ (POST.NOTIFY)",
+        "Auth": "TLS + channel cert",
+        "Payload": "/docs/post-notify-v1.json",
+        "Stack": "WebSphere JMS",
+        "SLA": "1000 msg/min, 8000/min peak",
+        "Criticality": "Tier 1",
+        "Failure today": "backoff; spill to file"
+      },
+      "target_intent": {
+        "Preserve": "at-least-once, contract unchanged",
+        "Downtime": "0 min",
+        "Regression": "none",
+        "Reject": "no SNS (point-to-point downstream)"
+      },
+      "dependencies": "after INT-003",
+      "r_factor": "Refactor",
+      "cutover_strategy": "Dual-publish",
+      "validation_gates": "24h load test; SQS publish p95 < 50ms",
+      "coexistence": "downstream dedupe by event_id (per ADR-630)"
+    }
+  ],
+  "services": [
+    {
+      "name": "payments-statements-statement-retrieval-api",
+      "type": "spring-boot-service",
+      "role": "Statement retrieval API",
+      "replaces": "INT-001 (CSA)",
+      "r_factor": "Replatform"
+    },
+    {
+      "name": "payments-statements-statement-pdf-rendering",
+      "type": "spring-boot-service",
+      "role": "Statement PDF rendering",
+      "replaces": "INT-002 (CSA)",
+      "r_factor": "Refactor"
+    },
+    {
+      "name": "payments-statements-payment-posting-+-fraud",
+      "type": "spring-boot-service",
+      "role": "Payment posting + fraud (cross-cloud)",
+      "replaces": "INT-003 (CSA)",
+      "r_factor": "Replatform"
+    },
+    {
+      "name": "payments-statements-posting-notifications",
+      "type": "spring-boot-service",
+      "role": "Posting notifications",
+      "replaces": "INT-004 (CSA)",
+      "r_factor": "Refactor"
+    }
+  ],
+  "infrastructure": {
+    "modules": [
+      {
+        "name": "ecs-fargate-service",
+        "source": "github.com/company/tf-modules//ecs-fargate-service",
+        "version": "v3.1.0",
+        "dr_aware": true
+      },
+      {
+        "name": "cloudfront-spa",
+        "source": "github.com/company/tf-modules//cloudfront-spa",
+        "version": "v2.4.0",
+        "dr_aware": true
+      },
+      {
+        "name": "sqs-producer",
+        "source": "github.com/company/tf-modules//sqs-producer",
+        "version": "v3.3.0",
+        "dr_aware": true
+      },
+      {
+        "name": "secrets-manager",
+        "source": "github.com/company/tf-modules//secrets-manager",
+        "version": "v2.2.0",
+        "dr_aware": false
+      },
+      {
+        "name": "privatelink-psc",
+        "source": "github.com/company/tf-modules//privatelink-psc",
+        "version": "v1.6.0",
+        "dr_aware": true
+      }
+    ],
+    "dr_strategy": "warm-standby",
+    "primary_region": "us-east-1",
+    "dr_region": "us-west-2"
+  },
+  "migration_phases": [
+    {
+      "phase": 0,
+      "name": "Cross-cloud + landing-zone plumbing",
+      "integrations": [],
+      "depends_on": [],
+      "gate": "PrivateLink->PSC up; VPC/Secrets ready"
+    },
+    {
+      "phase": 1,
+      "name": "Service tier (anchor)",
+      "integrations": [
+        "INT-001"
+      ],
+      "depends_on": [
+        0
+      ],
+      "gate": "parity harness green"
+    },
+    {
+      "phase": 3,
+      "name": "Remaining integrations",
+      "integrations": [
+        "INT-002",
+        "INT-003",
+        "INT-004"
+      ],
+      "depends_on": [
+        1
+      ],
+      "gate": "per-integration validation"
+    }
+  ],
+  "coexistence_constraints": [
+    {
+      "applies_to": "INT-001",
+      "constraint": "new service + WebSphere consume same MQ reply queue (correlation id)"
+    },
+    {
+      "applies_to": "INT-002",
+      "constraint": "archive ingests from one pipeline per night"
+    },
+    {
+      "applies_to": "INT-003",
+      "constraint": "on-prem + GCP fraud parallel; single decision ledger"
+    },
+    {
+      "applies_to": "INT-004",
+      "constraint": "downstream dedupe by event_id (per ADR-630)"
+    }
+  ],
+  "adr_compliance": [
+    {
+      "adr": "ADR-019",
+      "title": "Cross-cloud transit via AWS PrivateLink -> GCP PSC (no public egress)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-244",
+      "title": "Enterprise API gateway is Apigee (no AWS API Gateway for domain APIs)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-110",
+      "title": "Cutover strategy must define an automated rollback trigger + procedure",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-205",
+      "title": "Tier-1/Tier-2 apps require cross-region DR (primary -> DR region)",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-310",
+      "title": "All secrets in AWS Secrets Manager; no secrets in env/AMI/image",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-401",
+      "title": "Observability: Splunk logs + Dynatrace APM + OTel traces on every service",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-512",
+      "title": "Terraform must reference company tf-modules; no raw aws_* resources",
+      "status": "PASS"
+    },
+    {
+      "adr": "ADR-630",
+      "title": "Async contract changes require at-least-once + downstream dedupe by event_id",
+      "status": "PASS"
+    }
+  ],
+  "nfrs": [
+    {
+      "category": "Auth",
+      "requirement": "SAML SSO (staff); mTLS service auth"
+    },
+    {
+      "category": "Authz",
+      "requirement": "RBAC + PCI scope segregation"
+    },
+    {
+      "category": "Observability",
+      "requirement": "Splunk + Dynatrace + OTel; PAN never logged; SLO p95 < 1.6s"
+    },
+    {
+      "category": "DR",
+      "requirement": "Warm Standby (Tier 1, us-east-1 -> us-west-2)"
+    },
+    {
+      "category": "RTO/RPO",
+      "requirement": "1h / 5m"
+    }
+  ],
+  "screening_config": {
+    "pii_fields": [
+      "customer_name",
+      "address",
+      "ssn_or_tax_id",
+      "dob",
+      "card_token"
+    ],
+    "secrets_store": "aws-secrets-manager"
+  },
+  "blueprint_hash": "4609a523523ed6eb"
+}

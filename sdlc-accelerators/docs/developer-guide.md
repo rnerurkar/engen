@@ -1284,6 +1284,11 @@ The Solution Accelerator reads your Workflow section and searches the pattern ca
 | "If [condition], route to [human]" | `human approval async routing` | HITL (LlmAgent + LongRunningFunctionTool) |
 | "Coordinate across multiple domains" | `coordinator dispatcher multi-domain` | LlmAgent as root with sub_agents |
 | "Search documents and reason" | `agentic RAG retrieval reasoning` | LlmAgent + Vertex AI Search |
+| "Decide which tool to call based on the result" | `react reason act dynamic tool-use` | LlmAgent + tools (ReAct) |
+| "When [event] occurs / triggered by / on message" | `event-driven trigger pubsub async` | LlmAgent + Pub/Sub (Event-Driven) |
+| "Oversee / monitor / quality-gate the agents" | `supervisor oversight escalation` | LlmAgent + delegation (Supervisor) |
+| "Validate / score / grade the output" | `critic evaluator score validate` | LlmAgent (Critic / Evaluator) |
+| "Using our proprietary / internal model" | (no search — ownership signal) | LlmAgent + FunctionTool (Custom Tool Agent) |
 
 ### Words that trigger tool discovery
 

@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "name": "deal-qualification-agent",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "description": "Multi-perspective deal qualification — Parallel assessments + consensus synthesizer",
+    "team": "revenue-operations-engineering",
+    "lob": "Sales / Revenue Operations"
+  },
+  "pattern_composition": {
+    "root_pattern": "Parallel",
+    "composition": ["Sequential", "Parallel"]
+  },
+  "agents": [
+    { "name": "deal_qualification_flow", "type": "SequentialAgent", "role": "Root — fan-out then synthesize", "parent": null, "model": null, "tools": [] },
+    { "name": "qualification_fanout", "type": "ParallelAgent", "role": "Four concurrent independent assessments", "parent": "deal_qualification_flow", "model": null, "tools": [] },
+    { "name": "account_researcher", "type": "LlmAgent", "role": "Company research", "parent": "qualification_fanout", "model": "gemini-2.0-flash", "tools": ["firmographics-mcp", "data-enrichment-a2a", "pipeline-db-mcp"] },
+    { "name": "fit_scorer", "type": "LlmAgent", "role": "ICP fit scoring", "parent": "qualification_fanout", "model": "gemini-2.0-flash", "tools": ["firmographics-mcp", "intent-data-mcp"] },
+    { "name": "risk_analyst", "type": "LlmAgent", "role": "Deal risk analysis", "parent": "qualification_fanout", "model": "gemini-2.0-flash", "tools": ["pipeline-db-mcp"] },
+    { "name": "champion_mapper", "type": "LlmAgent", "role": "Champion / stakeholder mapping", "parent": "qualification_fanout", "model": "gemini-2.0-flash", "tools": ["intent-data-mcp"] },
+    { "name": "consensus_synthesizer", "type": "LlmAgent", "role": "Combine 4 results into a consensus recommendation; write CRM", "parent": "deal_qualification_flow", "model": "gemini-2.0-flash", "tools": ["pipeline-db-mcp", "crm-writeback-mcp", "consensus_fn"] }
+  ],
+  "tools": {
+    "mcp_servers": [
+      { "name": "firmographics-mcp", "endpoint": "mcp://firmographics.internal:8080", "auth_method": "oauth2", "assigned_to": "account_researcher", "timeout": "15s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "intent-data-mcp", "endpoint": "mcp://intent-data.internal:8080", "auth_method": "oauth2", "assigned_to": "fit_scorer", "timeout": "15s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "pipeline-db-mcp", "endpoint": "mcp://pipeline-db.internal:8080", "auth_method": "mtls", "assigned_to": "consensus_synthesizer", "timeout": "20s", "retry": 3, "discovered_via": "Apigee API Hub" },
+      { "name": "crm-writeback-mcp", "endpoint": "mcp://crm-writeback.internal:8080", "auth_method": "mtls", "assigned_to": "consensus_synthesizer", "timeout": "20s", "retry": 3, "discovered_via": "Apigee API Hub" }
+    ],
+    "a2a_agents": [
+      { "name": "data-enrichment-a2a", "endpoint": "https://enrich.partner.com/a2a", "agent_card_url": "https://enrich.partner.com/.well-known/agent.json", "capabilities": ["company-enrich", "tech-stack-detect"], "assigned_to": "account_researcher", "discovered_via": "Apigee API Hub (a2a_agent)" }
+    ],
+    "function_tools": [
+      { "name": "consensus_fn", "assigned_to": "consensus_synthesizer", "business_rules_ref": "spec §7 consensus rules" }
+    ]
+  },
+  "infrastructure": {
+    "modules": [
+      { "name": "tf-cloud-run-agent", "source": "github.com/company/terraform-modules/cloud-run-agent", "version": "v4.1.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-alloydb-multiregion", "source": "github.com/company/terraform-modules/alloydb-multiregion", "version": "v3.1.0", "assigned_to": "pipeline-db-mcp", "dr_aware": true },
+      { "name": "tf-apigee-proxy", "source": "github.com/company/terraform-modules/apigee-proxy", "version": "v2.5.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-workload-identity", "source": "github.com/company/terraform-modules/workload-identity", "version": "v2.2.0", "assigned_to": "all", "dr_aware": false },
+      { "name": "tf-vpc-sc-cmek", "source": "github.com/company/terraform-modules/vpc-sc-cmek", "version": "v1.4.0", "assigned_to": "all", "dr_aware": true }
+    ],
+    "dr_strategy": "hot-standby",
+    "primary_region": "us-east4",
+    "dr_region": "us-central1"
+  },
+  "business_rules": {
+    "consensus_fn": [
+      { "condition": "agreeing_assessments >= 3", "action": "recommendation = majority (confidence high)" },
+      { "condition": "split 2-2", "action": "recommendation = needs_human (confidence low)" },
+      { "condition": "one assessment failed", "action": "use remaining results, lower confidence" }
+    ]
+  },
+  "screening_config": {
+    "agents_with_input_screening": ["account_researcher", "fit_scorer"],
+    "agents_with_output_screening": ["consensus_synthesizer"],
+    "pii_fields": ["contact_name", "contact_email", "company_domain", "lead_id"]
+  },
+  "evalops": {
+    "golden_dataset": { "entries": [], "min_count": 5 },
+    "eval_frequency": "pre-commit",
+    "hitl_reviewers": 1,
+    "autosxs_baseline": "rules-scoring-v0"
+  },
+  "nfrs": [
+    { "category": "latency", "requirement": "full qualification (4 concurrent)", "target": "<90s p95" },
+    { "category": "latency", "requirement": "speedup vs serial", "target": ">=3x" },
+    { "category": "resilience", "requirement": "single assessment failure", "target": "non-blocking" },
+    { "category": "data_retention", "requirement": "prospect data", "target": "2 years or opt-out" }
+  ],
+  "blueprint_hash": "sha256:deal-qual-3c4d5e6f..."
+}

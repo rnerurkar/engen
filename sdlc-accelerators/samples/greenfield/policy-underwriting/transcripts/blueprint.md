@@ -1,0 +1,19 @@
+You: /accelerator.blueprint
+
+Agent: Blueprint generation started. Checking progress...
+Agent: Searching pattern catalog (Workflow ordering words: "simultaneously", "concurrently", "then combine")...
+Agent: Discovering integrations in API Hub for pricing engine, claims DB, inspection store, reinsurance API, fraud consortium, policy admin...
+Agent: Searching skill catalog for matching skills...
+Agent: LLM reasoning: mapping tools to assessment agents by co-occurrence; policy-admin write at synthesizer level...
+Agent: Validating composition (validate_composition)... synthesizer sibling after ParallelAgent (not nested) ✓
+Agent: Assembling blueprint (assemble_blueprint)...
+Agent: Blueprint ready! Saved app-blueprint.md + app-blueprint.json + diagrams to your workspace.
+
+Solution Accelerator recommends:
+  7 agents: SequentialAgent (root), ParallelAgent (risk_fanout), 4 LlmAgent assessments, LlmAgent (synthesizer)
+  5 MCP servers: pricing-engine, claims-db, inspection-store, reinsurance-api, policy-admin
+  1 A2A agent: fraud-signals (consortium)
+  1 FunctionTool: synthesis_fn  ← YOUR CODE HERE
+  3 skills: alloydb v2.1.0, actuarial-pricing v2.1.0, fraud-detection v2.0.1
+
+Review app-blueprint.md (§1–§9) and the assignment audit, then run /accelerator.assess.
