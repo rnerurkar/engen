@@ -69,4 +69,10 @@
   <text x="1000" y="385" class="edge-label">bridge</text>
 
   <line x1="1350" y1="393" x2="1478" y2="393" class="edge-blue"/>
+
+  <!-- Stable component IDs — the join key for the Epic's Modernization Scope table -->
+  <text x="438" y="263" font-size="13" font-weight="bold" fill="#7E3F0E">CSA-COMP-001</text>
+  <text x="805" y="204" font-size="13" font-weight="bold" fill="#7E3F0E">CSA-COMP-002</text>
+  <text x="805" y="369" font-size="13" font-weight="bold" fill="#7E3F0E">CSA-COMP-003</text>
+  <text x="700" y="455" text-anchor="middle" font-size="14" fill="#555">Component IDs (CSA-COMP-xxx, from architecture.md) are the join key the Epic's Modernization Scope table references — see the TSA for per-component Refactor/Rehost dispositions.</text>
 </svg>

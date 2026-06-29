@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1260" font-family="Arial">
 <rect width="1680" height="1260" fill="#0f1626"/>
 <text x="40" y="50" font-size="30" font-weight="800" fill="#e6edf7">Brownfield (CSA → TSA) — Full Lifecycle</text>
-<text x="40" y="80" font-size="15" fill="#9fb0c8">Optional Rally Epic front door (Step 0) → author &amp; govern (1–13, 2 HITL loops) via the Solution Accelerator Agent → Harness CI/CD builds, deploys &amp; promotes per environment (14–18)</text>
+<text x="40" y="80" font-size="15" fill="#9fb0c8">CSA Agent + BA/SA Epic (Step 0) → /accelerator.epic-to-spec fuses Epic + CSA architecture.md → spec.md (Step 1) → author &amp; govern (2–13, 2 HITL loops) → Harness CI/CD builds, deploys &amp; promotes (14–18)</text>
 <rect x="40" y="95" width="1600" height="3" fill="#f5a623"/>
 <rect x="40" y="118" width="13" height="13" rx="3" fill="#f5a623"/>
 <text x="59" y="129" font-size="12.5" fill="#9fb0c8">Input/front door</text>
@@ -19,24 +19,24 @@
 <text x="781.4" y="129" font-size="12.5" fill="#9fb0c8">Per-env promote</text>
 <rect x="898.4" y="118" width="13" height="13" rx="3" fill="#37c98b"/>
 <text x="917.4" y="129" font-size="12.5" fill="#9fb0c8">Operate</text>
-<text x="40" y="172" font-size="17" font-weight="800" fill="#f5a623">BUILD &amp; GOVERN — Epic front door + 2 HITL review loops</text>
+<text x="40" y="172" font-size="17" font-weight="800" fill="#f5a623">BUILD &amp; GOVERN — Epic-to-Spec front door + 2 HITL review loops</text>
 <text x="880" y="172" font-size="17" font-weight="800" fill="#39b0ff">HARNESS CI/CD — BUILD, DEPLOY &amp; PROMOTE</text>
 <rect x="74" y="190" width="766" height="78" rx="9" fill="#1c2740" stroke="#f5a623" stroke-opacity="0.5" stroke-width="1.2"/>
 <circle cx="56" cy="229.0" r="15" fill="#f5a623"/>
 <text x="56" y="234.0" font-size="15" font-weight="700" fill="#0f1626" text-anchor="middle" font-family="Arial">0</text>
-<text x="84" y="215" font-size="16" font-weight="700" fill="#f5a623" font-family="Arial">/accelerator.ingest-epic  (OPTIONAL Epic front door)</text>
-<text x="84" y="235" font-size="12.5" fill="#9fb0c8" font-family="Arial">Rally Epic → integration-inventory spec.md via the Solution Accelerator Agent</text>
-<text x="84" y="252" font-size="12.5" fill="#9fb0c8" font-family="Arial">create_epic_signal_ledger (extractive, span-grounded) → reviewed, then /speckit.specify</text>
+<text x="84" y="215" font-size="16" font-weight="700" fill="#f5a623" font-family="Arial">Step 0 · CSA Agent (upstream) + BA/SA Rally Epic</text>
+<text x="84" y="235" font-size="12.5" fill="#9fb0c8" font-family="Arial">CSA Agent reverse-engineers legacy app → CSA diagram + architecture.md (CSA-COMP / INT IDs)</text>
+<text x="84" y="252" font-size="12.5" fill="#9fb0c8" font-family="Arial">BA/SA authors Epic — Modernization Scope table: per-component Refactor | Rehost + AWS target</text>
 <rect x="74" y="280" width="766" height="64" rx="9" fill="#1c2740" stroke="#37c98b" stroke-opacity="0.5" stroke-width="1.2"/>
 <circle cx="56" cy="312.0" r="15" fill="#37c98b"/>
 <text x="56" y="317.0" font-size="15" font-weight="700" fill="#0f1626" text-anchor="middle" font-family="Arial">1</text>
-<text x="84" y="305" font-size="16" font-weight="700" fill="#e6edf7" font-family="Arial">CSA Agent (upstream)</text>
-<text x="84" y="325" font-size="12.5" fill="#9fb0c8" font-family="Arial">Validated CSA diagram — authoritative current state</text>
+<text x="84" y="305" font-size="16" font-weight="700" fill="#e6edf7" font-family="Arial">/accelerator.epic-to-spec  (FRONT DOOR — replaces /speckit.specify)</text>
+<text x="84" y="325" font-size="12.5" fill="#9fb0c8" font-family="Arial">Fuse Epic + CSA architecture.md → spec.md. 3 phases: resolve &amp; cross-walk → compose → gate &amp; trace</text>
 <rect x="74" y="356" width="766" height="64" rx="9" fill="#1c2740" stroke="#37c98b" stroke-opacity="0.5" stroke-width="1.2"/>
 <circle cx="56" cy="388.0" r="15" fill="#37c98b"/>
 <text x="56" y="393.0" font-size="15" font-weight="700" fill="#0f1626" text-anchor="middle" font-family="Arial">2</text>
-<text x="84" y="381" font-size="16" font-weight="700" fill="#e6edf7" font-family="Arial">/speckit.specify</text>
-<text x="84" y="401" font-size="12.5" fill="#9fb0c8" font-family="Arial">csa-extractor reconciles inventory; 8-signal blocks → spec.md</text>
+<text x="84" y="381" font-size="16" font-weight="700" fill="#9fb0c8" font-family="Arial">/speckit.specify  (no-Epic fallback)</text>
+<text x="84" y="401" font-size="12.5" fill="#9fb0c8" font-family="Arial">When no Epic: csa-extractor parses the CSA diagram → 8-signal spec.md</text>
 <rect x="74" y="432" width="766" height="64" rx="9" fill="#1c2740" stroke="#ec4f8f" stroke-opacity="0.5" stroke-width="1.2"/>
 <circle cx="56" cy="464.0" r="15" fill="#ec4f8f"/>
 <text x="56" y="469.0" font-size="15" font-weight="700" fill="#0f1626" text-anchor="middle" font-family="Arial">3</text>
@@ -115,6 +115,6 @@
 <text x="886" y="573.0" font-size="15" font-weight="700" fill="#0f1626" text-anchor="middle" font-family="Arial">18</text>
 <text x="914" y="561" font-size="16" font-weight="700" fill="#e6edf7" font-family="Arial">Comes alive in prod</text>
 <text x="914" y="581" font-size="12.5" fill="#9fb0c8" font-family="Arial">Dynatrace APM · Phoenix/Arize traces · AWS Config · golden-dataset eval</text>
-<text x="40" y="1228" font-size="12.5" fill="#9fb0c8">Two HITL points: (1) SA edits the .md/.drawio then /accelerator.refresh; (2) /accelerator.assess loops until NO Critical/High remain. The optional Step-0 Epic front door and Tool 2 both run on the ONE Solution Accelerator Agent.</text>
+<text x="40" y="1228" font-size="12.5" fill="#9fb0c8">Two HITL points: (1) SA edits the .md/.drawio then /accelerator.refresh; (2) /accelerator.assess loops until NO Critical/High remain. The Step-1 epic-to-spec fusion is deterministic (no LLM); Tool 2 runs on the Solution Accelerator Agent.</text>
 <text x="40" y="1248" font-size="12.5" fill="#9fb0c8">/accelerator.generate is blocked until the gate is clean. Harness owns infra, per-agent build, Agent Engine deploy, and per-env API Hub registration.</text>
 </svg>

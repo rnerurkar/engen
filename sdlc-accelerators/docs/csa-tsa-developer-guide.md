@@ -33,7 +33,7 @@
 3. [One-Time Setup](#3-one-time-setup)
 4. [Workflow Overview](#4-workflow-overview)
 5. [`/speckit.constitution` — Versioned Dual Constitution](#5-speckitconstitution--versioned-dual-constitution)
-6. [`/speckit.specify` — Diagram Extraction and Spec Pre-fill](#6-speckitspecify--diagram-extraction-and-spec-pre-fill)
+6. [`/accelerator.epic-to-spec` — Fuse the Epic with the CSA](#6-acceleratorepic-to-spec--fuse-the-epic-with-the-csa)
 7. [Spec Template (full)](#7-spec-template-full)
 8. [Worked Example: `spec.md`](#8-worked-example-specmd)
 9. [`/speckit.plan.draft` + `/speckit.plan.review`](#9-speckitplandraft--speckitplanreview)
@@ -52,7 +52,7 @@
 
 Brownfield validation runs at two layers. This is MORE critical than greenfield because errors affect a running production system with real users and real data.
 
-**Layer 1 — Local (during `/speckit.specify` capture):** After the `csa-extractor` parses your CSA diagram and pre-fills the integration blocks, the SpecKit preset validates EACH integration as you provide details. You'll see real-time feedback per integration:
+**Layer 1 — Local (during `/accelerator.epic-to-spec` fusion, or the `/speckit.specify` fallback):** As the CSA-sourced integration blocks are composed (or the `csa-extractor` pre-fills them in the fallback), the preset validates EACH integration. You'll see real-time feedback per integration:
 
 ```
 Agent: "The CSA extractor found 15 integrations. Let's validate each one."
@@ -130,7 +130,8 @@ specify init --here --preset sdlc-accelerators-brownfield --integration copilot
 
 # 3. In VSCode, Agent mode, Claude Opus 4.6:
 /speckit.constitution       # confirm enterprise principles (one-time per project)
-/speckit.specify            # diagram extraction → spec.md pre-fill → elicitation
+/accelerator.epic-to-spec   # FRONT DOOR — fuse Rally Epic + CSA architecture.md → spec.md
+# /speckit.specify          # no-Epic fallback: diagram extraction → spec.md → elicitation
 /speckit.plan.draft         # first-pass r-factor + cutover per integration
 /speckit.plan.review        # async EA/architect review of the plan
 /accelerator.blueprint         # async: start → poll (progress in chat) → retrieve blueprint + contract
@@ -232,9 +233,11 @@ Verify: in Copilot Chat, Agent mode, type `/` and confirm `speckit.constitution`
 
 | Step | Command | What happens | Time |
 |---|---|---|---|
-| 0 (optional) | `/accelerator.ingest-epic` | **Epic front door** — Rally Epic → integration-inventory `spec.md` via the Solution Accelerator Agent's `create_epic_signal_ledger` tool (extractive, span-grounded). Reviewed, then refined by `/speckit.specify`. | 2 min |
-| 1 | `/speckit.constitution` | Confirm enterprise principles (one-time per project) | 5 min |
-| 2 | `/speckit.specify` | csa-extractor parses diagram → pre-fills spec.md → elicits details | 30 min |
+| 0 | CSA Agent (upstream, separate system) | Reverse-engineer the legacy app → CSA diagram **+ `architecture.md`** in your workspace | — |
+| 1 | BA / Solution Architect | Author a Rally Epic with a **Modernization Scope** table (per-component Refactor/Rehost + AWS target) | — |
+| 2 | `/accelerator.epic-to-spec <EpicID>` | **Front door** — fuse the Epic with the CSA `architecture.md` → canonical `spec.md` + `modernization-scope-ledger.json`. **Replaces `/speckit.specify`.** | 2 min |
+| 2-alt | `/speckit.specify` | **No-Epic fallback** — csa-extractor parses the diagram → pre-fills spec.md → elicits details | 30 min |
+| 3 | `/speckit.constitution` | Confirm enterprise principles (one-time per project) | 5 min |
 | 3 | `/speckit.plan.draft` | Developer first-pass: r-factor + cutover per integration | 30 min |
 | 4 | `/speckit.plan.review` | Async EA/architect review with structured comments | 1–3 days |
 | 5 | `/accelerator.blueprint` | Async: start → poll (progress in chat) → retrieve | 1–30 min |
@@ -277,68 +280,70 @@ Enterprise non-negotiables in the current version:
 
 ---
 
-## 6. `/speckit.specify` — Diagram Extraction and Spec Pre-fill
+## 6. `/accelerator.epic-to-spec` — Fuse the Epic with the CSA
 
-→ *Architecture §7 covers the CSA Agent handoff boundary and diagram parsing rules.*
+→ *Architecture §7 covers the CSA Agent handoff boundary and the architecture.md contract. Architecture §9 "Epic-to-Spec Fusion" covers the internals.*
 
-This is the brownfield-aware override of Spec Kit's default `/speckit.specify`. The CSA Agent (a separate upstream system) has already produced an accurate CSA diagram and placed it in your workspace. The coding agent's job is to extract integration points from that diagram and pre-fill `spec-template.md`.
+This is the brownfield **front door**. It fuses a Rally Epic's modernization intent with the upstream CSA and emits the **final** `spec.md` — you do **not** run `/speckit.specify` (it remains a no-Epic fallback, §6.7). From the produced `spec.md`, `/speckit.plan.draft` follows directly.
 
 ### 6.1 Before you run it
 
-Confirm your CSA diagram is in the workspace. Supported formats: `.drawio.xml`. If you don't have a diagram yet, return to the CSA Agent workflow first — `/speckit.specify` requires a diagram as input.
+Confirm two things are in your workspace, both produced by the upstream CSA Agent (a separate system):
+
+1. A CSA **diagram** (`.drawio.xml` or Mermaid), and
+2. A CSA **`architecture.md`** — the machine-readable current state, keyed by `CSA-COMP-XXX` components and `INT-XXX` integrations (the eight readiness signals per integration). This is the file the front door reads.
+
+Then make sure a BA/Solution Architect has authored a Rally **Epic** whose **Modernization Scope** table declares, per CSA component, a disposition (`Refactor` | `Rehost`) and an AWS target:
+
+```
+## Modernization Scope
+| Component    | Disposition | AWS Target                       | Rationale            |
+|--------------|-------------|----------------------------------|----------------------|
+| CSA-COMP-001 | Refactor    | ECS Fargate + Aurora PostgreSQL  | break the monolith   |
+| CSA-COMP-002 | Rehost      | EC2 (lift-and-shift)             | vendor-locked adapter|
+```
 
 ### 6.2 Run it
 
 ```
-/speckit.specify
+/accelerator.epic-to-spec E7700
 ```
 
 ### 6.3 What the agent does
 
-1. **Scan.** Finds `*.drawio.xml` files in the workspace. If multiple, asks which to use.
-2. **Parse.** Extracts components (nodes), integrations (edges), cloud boundaries (group containers), and protocol hints (edge labels).
-3. **Cluster.** Groups edges by source/target and assigns INT-001, INT-002, ... IDs.
-4. **Pre-fill.** Populates the integration blocks of `spec-template.md` with what the diagram revealed.
-5. **Elicit.** For fields the diagram cannot reveal, batches questions per integration and asks you. **It will not guess** — it leaves `TODO:` markers if you decline to answer.
-6. **Quality check.** Runs the brownfield quality self-check (§17) and reports failures.
-7. **Write.** Saves `spec.md` to your repo root.
+1. **Fetch.** Retrieves the Epic by FormattedID via the Rally MCP server (client-side, Entra ID SSO — credentials stay in the IDE). Captures `ObjectVersion`.
+2. **Read CSA.** Loads the workspace `architecture.md` into a component + integration registry (and computes its content hash).
+3. **Resolve & cross-walk (Phase A).** Parses the Epic's Modernization Scope table and matches every named component against the CSA. Components the CSA lacks are surfaced as blocking CLARIFY items; CSA components the Epic omits are recorded as out-of-scope.
+4. **Compose (Phase B).** Renders the canonical `spec.md`: a per-component modernization unit (current state → disposition → AWS target → migration considerations) for each in-scope component, plus the CSA-sourced 8-signal Integration Inventory.
+5. **Gate & trace (Phase C).** Scores the spec with the same `validate_spec` readiness gate the blueprint uses, and writes `modernization-scope-ledger.json` with provenance for **both** the Epic (FormattedID + ObjectVersion) and the CSA (architecture.md hash).
+6. **Write.** Saves `spec.md` + `modernization-scope-ledger.json` to your repo root.
 
 ### 6.4 Setting realistic expectations
 
-Real enterprise diagrams rarely have well-labeled edges like `BFF -->|HTTPS+mTLS| Apigee`. Most edges are unlabeled or labeled vaguely ("calls", "sends data"). The extractor will produce `TODO:` markers for protocol and auth details it cannot infer. This is by design — leaving a gap is better than guessing wrong. Expect ~40–60% of spec fields to be auto-populated from a typical diagram; the rest come from your answers during elicitation.
+The fusion path runs **no LLM** — same Epic + same CSA → identical `spec.md`. Quality depends on the inputs: a thin `architecture.md` (missing signals) surfaces `[NEEDS CLARIFICATION]` markers, and an Epic that scopes a component the CSA doesn't contain blocks until you fix one side. Resolve unresolved components and any unrecognized dispositions (only `Refactor`/`Rehost` are accepted) before planning.
 
 ### 6.5 Example interaction
 
 ```
-Agent: Found 1 diagram: claims-portal-csa.drawio.xml. Parsing...
-Agent: Identified 4 integration edges crossing system boundaries:
-       - INT-001: User browser → MPA (UI rendering)
-       - INT-002: MPA → APIC → Domain API (sync REST)
-       - INT-003: MPA → IBM MQ (async)
-       - INT-004: IBM MQ → SQS bridge → downstream (async)
-
-       Should INT-003 and INT-004 be treated as one integration or two?
-
-You: One integration — INT-003 is the MPA producing to MQ, INT-004 is the bridge.
-     Treat it as one: MPA → MQ → SQS → downstream app.
-
-Agent: OK, merged as INT-003. Now I need details the diagram doesn't carry.
-
-       For INT-001 (UI rendering):
-       - What is the criticality tier? [Tier 1 / 2 / 3]
-       - What is the data classification?
-       - What is the current p95 page load latency?
-       - What is the acceptable downtime during cutover?
-
-You: Tier 2 · Confidential PII · p95 < 2s · 15 min after-hours
-
-Agent: [continues per integration]
-Agent: spec.md written. Quality self-check: 10/10. Ready for /speckit.plan.draft.
+You: /accelerator.epic-to-spec E7700
+Agent: Fetched Epic E7700 (ObjectVersion 12). Read architecture.md (hash a1b2c3d4e5f6).
+Agent: Modernization Scope: 2 components in scope.
+       - CSA-COMP-001 Order Service — Refactor → ECS Fargate + Aurora PostgreSQL
+       - CSA-COMP-002 Payment Gateway Adapter — Rehost → EC2 (lift-and-shift)
+       Out of scope (remain as-is): CSA-COMP-003 Batch Reconciler
+       Cross-walk: all scoped components resolved against the CSA. No unresolved IDs.
+Agent: Composed spec.md — 2 modernization units + 3 integrations (INT-001/2/3).
+       Readiness gate: score 100, not blocked.
+Agent: Wrote spec.md + modernization-scope-ledger.json. Ready for /speckit.plan.draft.
 ```
 
-### 6.6 No diagram available
+### 6.6 When the scope can't be resolved
 
-If `/speckit.specify` finds no diagram files, it reports the error and directs you to the CSA Agent workflow. SDLC Accelerators Brownfield does not perform source-code scanning or structured interviews — that is the CSA Agent's responsibility.
+If the Epic names a component the CSA `architecture.md` doesn't contain, the spec marks it under `[NEEDS CLARIFICATION]` and the run is blocked: correct the `architecture.md` (return to the CSA Agent) or fix the Epic's scope table. If no Modernization Scope table is present at all, the front door falls back to the legacy extractive path and tells you to supply the CSA or use `/speckit.specify`.
+
+### 6.7 No-Epic fallback — `/speckit.specify`
+
+If you have a CSA diagram but no Epic, run `/speckit.specify`. The preset's `csa-extractor` parses the diagram directly: it scans `*.drawio.xml`, extracts components (nodes), integrations (edges), cloud boundaries (group containers), and protocol hints (edge labels), assigns INT-001/002/… IDs, pre-fills the integration blocks, and elicits the fields the diagram cannot reveal (auth, SLAs, criticality, target intent) — leaving `TODO:` markers rather than guessing. The deliverable is the same `spec.md` shape, so `/speckit.plan.draft` follows identically. If `/speckit.specify` finds no diagram, it directs you back to the CSA Agent workflow.
 
 ---
 
@@ -1007,7 +1012,7 @@ A: At minimum before every PR. For long-lived projects, run weekly as a hygiene 
 
 → *Referenced from Architecture Document §9.2 (Solution Accelerator internal components — company system prompt).*
 
-The **Solution Accelerator Agent** — the single ADK agent the MCP server delegates to — carries **two FunctionTools**, each bound to a curated system prompt maintained by platform engineering (updated quarterly with the EA office): `recommend_architecture` uses the CSA→TSA transformation prompt below; `create_epic_signal_ledger` uses the extractive epic-shaping prompt (Architecture § "Epic-to-Spec Ingestion"). The transformation prompt guides the agent's reasoning about CSA→TSA.
+The **Solution Accelerator Agent** — the single ADK agent the MCP server delegates to — carries **two FunctionTools**, each bound to a curated system prompt maintained by platform engineering (updated quarterly with the EA office): `recommend_architecture` uses the CSA→TSA transformation prompt below; `create_epic_signal_ledger` uses the extractive epic-shaping prompt (Architecture § "Epic-to-Spec Fusion"). The transformation prompt guides the agent's reasoning about CSA→TSA.
 
 ```markdown
 You are the Solution Accelerator for brownfield CSA→TSA transformations. You receive a structured spec (with current-state integrations extracted from a CSA diagram) and a technical plan (with r_factor, cutover strategy, and migration sequencing).

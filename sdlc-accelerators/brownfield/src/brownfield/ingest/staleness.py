@@ -14,6 +14,7 @@ from typing import Any
 # so a bare mention of the word "Epic" in the spec body cannot be mis-parsed as provenance.
 _HEADER_FID = re.compile(r"Rally\s+Epic[`:\s]+(?P<fid>[A-Za-z]+\d+)", re.IGNORECASE)
 _HEADER_OV = re.compile(r"ObjectVersion[`:\s]+(?P<ov>\d+)", re.IGNORECASE)
+_HEADER_CSA = re.compile(r"architecture\.md\s+@\s+`(?P<csa>[0-9a-f]+)`", re.IGNORECASE)
 
 
 def read_provenance_from_ledger(
@@ -23,19 +24,26 @@ def read_provenance_from_ledger(
     prov = (data or {}).get("provenance") or {}
     fid = prov.get("formatted_id") or prov.get("formattedId")
     ov = prov.get("object_version", prov.get("objectVersion"))
+    csa = prov.get("csa_hash") or ""
     if fid is None and ov is None:
         return None
-    return {"formatted_id": fid, "object_version": None if ov is None else int(ov)}
+    return {
+        "formatted_id": fid,
+        "object_version": None if ov is None else int(ov),
+        "csa_hash": csa,
+    }
 
 
 def read_provenance_from_spec(spec_md: str) -> dict[str, Any] | None:
     fid = _HEADER_FID.search(spec_md or "")
     ov = _HEADER_OV.search(spec_md or "")
+    csa = _HEADER_CSA.search(spec_md or "")
     if not fid and not ov:
         return None
     return {
         "formatted_id": fid.group("fid") if fid else None,
         "object_version": int(ov.group("ov")) if ov else None,
+        "csa_hash": csa.group("csa") if csa else "",
     }
 
 

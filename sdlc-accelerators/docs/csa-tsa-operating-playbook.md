@@ -356,7 +356,7 @@ Nightly comparison of the manifest's `current` version against what's referenced
 
 The Solution Accelerator has two deployment components:
 
-**MCP API layer** — Cloud Run service `solution-accelerator-api` in `enterprise-platform-prod`. Handles six MCP tools — the three blueprint tools (`blueprint_start`, `blueprint_status`, `blueprint_result`) and the optional Epic front door (`ingest_epic_start`, `ingest_epic_status`, `ingest_epic_result`), which delegates to the Solution Accelerator Agent's `create_epic_signal_ledger` tool. Min: 2 instances. Max: 10. Concurrency: 80 requests/instance (lightweight queries to AlloyDB via connection pool — 20 PostgreSQL connections per instance via AlloyDB Auth Proxy sidecar). Request timeout: 30 seconds (each call completes in <2s). 2 vCPU, 4 GB memory.
+**MCP API layer** — Cloud Run service `solution-accelerator-api` in `enterprise-platform-prod`. Handles six MCP tools — the three blueprint tools (`blueprint_start`, `blueprint_status`, `blueprint_result`) and the Epic-to-Spec front door (`epic_to_spec_start`, `epic_to_spec_status`, `epic_to_spec_result`; legacy `ingest_epic_*` aliases retained), which fuses the Rally Epic with the CSA architecture.md → canonical spec.md. Min: 2 instances. Max: 10. Concurrency: 80 requests/instance (lightweight queries to AlloyDB via connection pool — 20 PostgreSQL connections per instance via AlloyDB Auth Proxy sidecar). Request timeout: 30 seconds (each call completes in <2s). 2 vCPU, 4 GB memory.
 
 **Background pipeline** — Cloud Run Jobs `solution-accelerator-pipeline` in `enterprise-platform-prod`. Runs the 4-stage pipeline (map → recommend → check → assemble) with no request-timeout constraint. Triggered by Cloud Tasks queue `blueprint-tasks`. 4 vCPU, 8 GB memory per job. Max concurrent jobs: 20.
 
@@ -593,7 +593,7 @@ All prompt/agent files use: `model: ['Claude Opus 4.6', 'Claude Opus 4.7', 'Clau
 
 ### 10.3 Monitoring
 
-Daily synthetic job runs a sample drawio fixture through `/speckit.specify`. Output compared against canonical expected result. Drift > 10% triggers P3 investigation.
+Daily synthetic job runs a sample Epic + CSA architecture.md fixture through `/accelerator.epic-to-spec` (and the drawio fallback through `/speckit.specify`). Output compared against canonical expected result. Drift > 10% triggers P3 investigation.
 
 ### 10.4 Communication
 

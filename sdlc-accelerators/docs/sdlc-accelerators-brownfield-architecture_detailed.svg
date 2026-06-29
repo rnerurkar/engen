@@ -33,8 +33,8 @@
   <line x1="340" y1="223" x2="340" y2="248" stroke="#777" stroke-width="1.2" marker-end="url(#arrow)" />
   <text x="395" y="238" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">diagram in workspace</text>
   <rect x="215" y="248" width="250" height="48" rx="8" fill="#FFF9E6" stroke="#F0B429" stroke-width="1.5" filter="url(#shadow)" />
-  <text x="340" y="264" font-size="11" font-weight="bold" fill="#333" text-anchor="middle">/speckit.specify</text>
-  <text x="340" y="278" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">csa-extractor Agent</text>
+  <text x="340" y="264" font-size="11" font-weight="bold" fill="#333" text-anchor="middle">/accelerator.epic-to-spec</text>
+  <text x="340" y="278" font-size="9" font-weight="normal" fill="#555" text-anchor="middle">Epic × CSA fusion</text>
   <text x="340" y="290" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">Parse diagram · Extract integrations</text>
   <line x1="340" y1="296" x2="340" y2="318" stroke="#777" stroke-width="1.2" marker-end="url(#arrow)" />
   <rect x="235" y="318" width="210" height="42" rx="4" fill="#FFF" stroke="#95A5A6" stroke-width="1.5" filter="url(#shadow)" />

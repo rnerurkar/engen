@@ -1,24 +1,34 @@
 """Brownfield Epic-to-Spec data models.
 
-Unlike greenfield (a flat 10-section spec), the brownfield spec is INTEGRATION-INVENTORY shaped:
-each integration carries the eight migration-readiness signals the brownfield `validate_spec` gate
-checks. The Brownfield Epic Signal Ledger is therefore **integration-keyed**: one entry per
-integration, each with up to eight span-traced signal fields, plus application Summary, Modernization
-Scope, and application-wide NFRs.
+The brownfield archetype begins AFTER an upstream CSA Agent (separate system, outside this preset)
+reverse-engineers the legacy application into a **CSA diagram + `architecture.md`**, both keyed by
+stable component IDs (`CSA-COMP-XXX`, `INT-XXX`). A Business Analyst / Solution Architect then authors
+a Rally Epic from the standard template whose **Modernization Scope** table declares, per CSA component,
+a disposition (`Refactor` | `Rehost`) and an AWS target. `/accelerator.epic-to-spec` fuses the two:
+Epic intent x CSA ground truth -> a canonical `spec.md`.
 
-Extractive + span-grounded (same guarantee as greenfield): every signal carries a verbatim `epic_span`
-and a value grounded in that span; a deterministic validator drops the rest. Confidence per integration
-= filled signal fields / 8 (deterministic fill ratio), which aligns with the 8-signal readiness gate.
+Two model families live here:
+  * Epic intent — `ScopeItem` (component_id, disposition, aws_target, rationale) parsed from the Epic's
+    Modernization Scope table; plus narrative fields (summary, NFRs, acceptance criteria).
+  * Epic Signal Ledger (integration-keyed, 8 migration-readiness signals) — retained for the optional
+    span-grounded LLM enrichment pass and for back-compat with the readiness gate.
+
+Extractive + span-grounded (where the LLM enrichment runs): every signal carries a verbatim `epic_span`
+and a value grounded in that span; a deterministic validator drops the rest. The Modernization Scope
+table is parsed deterministically (it is a decision, not a claim) and validated by cross-walk against
+the CSA registry.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 LEDGER_SCHEMA = "brownfield-epic-signal-ledger/v1"
+SCOPE_SCHEMA = "brownfield-modernization-scope-ledger/v1"
 
-# The eight migration-readiness signal fields per integration (keys → spec.md labels).
+# The eight migration-readiness signal fields per integration (keys -> spec.md labels).
 SIGNAL_KEYS = [
     "technology",
     "type",
@@ -41,6 +51,81 @@ SIGNAL_LABEL = {
 }
 EXPECTED_SLOTS = len(SIGNAL_KEYS)  # 8
 
+# Modernization dispositions in scope for this preset (a subset of the migration "6 R's").
+REFACTOR = "Refactor"
+REHOST = "Rehost"
+DISPOSITIONS = (REFACTOR, REHOST)
+
+
+def normalize_disposition(raw: str) -> str | None:
+    """Map a free-text disposition onto the canonical {Refactor, Rehost}; None if unrecognized."""
+    t = (raw or "").strip().lower()
+    if t in ("refactor", "re-factor", "re-architect", "rearchitect", "rf"):
+        return REFACTOR
+    if t in ("rehost", "re-host", "lift-and-shift", "lift and shift", "rh"):
+        return REHOST
+    return None
+
+
+@dataclass
+class ScopeItem:
+    """One row of the Epic's Modernization Scope table: a CSA component and its intended disposition."""
+
+    component_id: str
+    disposition: str | None = None  # canonical Refactor|Rehost, or None if invalid
+    aws_target: str = ""
+    rationale: str = ""
+    raw_disposition: str = ""
+
+    @property
+    def valid_disposition(self) -> bool:
+        return self.disposition in DISPOSITIONS
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "component_id": self.component_id,
+            "disposition": self.disposition,
+            "aws_target": self.aws_target,
+            "rationale": self.rationale,
+        }
+
+
+# Markdown table row: | CSA-COMP-001 | Refactor | ECS Fargate + Aurora | break monolith |
+_SCOPE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
+_COMP_ID = re.compile(r"CSA-COMP-\d+", re.IGNORECASE)
+
+
+def parse_scope_table(text: str) -> list[ScopeItem]:
+    """Parse the Modernization Scope markdown table from the Epic body. Tolerant of header/divider
+    rows and column order; a row is in scope only if its first cell contains a CSA-COMP id."""
+    items: list[ScopeItem] = []
+    seen: set[str] = set()
+    for line in (text or "").splitlines():
+        m = _SCOPE_ROW.match(line)
+        if not m:
+            continue
+        cells = [c.strip() for c in m.group("cells").split("|")]
+        if not cells or not _COMP_ID.search(cells[0] or ""):
+            continue  # header, divider, or non-component row
+        cid_match = _COMP_ID.search(cells[0])
+        if cid_match is None:
+            continue
+        cid = cid_match.group(0).upper()
+        if cid in seen:
+            continue
+        seen.add(cid)
+        raw_disp = cells[1] if len(cells) > 1 else ""
+        items.append(
+            ScopeItem(
+                component_id=cid,
+                disposition=normalize_disposition(raw_disp),
+                raw_disposition=raw_disp,
+                aws_target=cells[2] if len(cells) > 2 else "",
+                rationale=cells[3] if len(cells) > 3 else "",
+            )
+        )
+    return items
+
 
 @dataclass
 class EpicProvenance:
@@ -48,6 +133,7 @@ class EpicProvenance:
     object_version: int | None = None
     last_update_date: str = ""
     source: str = "rally"
+    csa_hash: str = ""  # short sha256 of the CSA architecture.md (drift detection for the CSA source)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +141,7 @@ class EpicProvenance:
             "formatted_id": self.formatted_id,
             "object_version": self.object_version,
             "last_update_date": self.last_update_date,
+            "csa_hash": self.csa_hash,
         }
 
 
@@ -66,19 +153,25 @@ class Epic:
     integrations_text: str = ""  # free-text describing integration points (optional)
     acceptance_criteria: list[Any] = field(default_factory=list)
     nfrs: list[Any] = field(default_factory=list)
+    scope_items: list[Any] = field(default_factory=list)  # list[ScopeItem]
     object_version: int | None = None
     last_update_date: str = ""
 
     @classmethod
     def from_payload(cls, p: dict[str, Any]) -> Epic:
         p = p or {}
+        description = p.get("description", "")
+        # The Modernization Scope table may be passed explicitly or embedded in the description.
+        scope_src = p.get("modernization_scope_text") or description
+        scope_items = parse_scope_table(scope_src)
         return cls(
             formatted_id=p.get("formatted_id") or p.get("formattedId") or "",
             name=p.get("name", ""),
-            description=p.get("description", ""),
+            description=description,
             integrations_text=p.get("integrations_text", ""),
             acceptance_criteria=list(p.get("acceptance_criteria", []) or []),
             nfrs=list(p.get("nfrs", []) or []),
+            scope_items=scope_items,
             object_version=p.get("object_version", p.get("objectVersion")),
             last_update_date=p.get("last_update_date", p.get("lastUpdateDate", "")),
         )
@@ -88,11 +181,12 @@ class Epic:
         parts += list(self.acceptance_criteria) + list(self.nfrs)
         return "\n".join(p for p in parts if p)
 
-    def provenance(self) -> EpicProvenance:
+    def provenance(self, csa_hash: str = "") -> EpicProvenance:
         return EpicProvenance(
             formatted_id=self.formatted_id,
             object_version=self.object_version,
             last_update_date=self.last_update_date,
+            csa_hash=csa_hash,
         )
 
 

@@ -89,7 +89,8 @@ SDLC Accelerators-Greenfield (Spec Kit preset)
 └── adds: domain skills + overlay skills
 
 SDLC Accelerators Brownfield (Spec Kit preset — this document)
-├── overrides: /speckit.specify with diagram extraction (csa-extractor agent) + CSA-inventory template
+├── adds: /accelerator.epic-to-spec (FRONT DOOR — fuses Rally Epic + CSA architecture.md → spec.md)
+├── overrides: /speckit.specify with diagram extraction (csa-extractor agent) — NO-EPIC FALLBACK
 ├── overrides: /speckit.plan with /speckit.plan.draft + /speckit.plan.review
 ├── adds: /accelerator.blueprint (4-tool brownfield Solution Accelerator)
 ├── adds: /accelerator.assess (Governance Guardian assessment — see Governance Guardian Architecture Extension)
@@ -103,7 +104,8 @@ SDLC Accelerators Brownfield (Spec Kit preset — this document)
 | Command | Source | Brownfield behavior |
 |---|---|---|
 | `/speckit.constitution` | Spec Kit built-in | Preset ships versioned dual constitution (Part II §10 Security & Identity) |
-| `/speckit.specify` | Spec Kit built-in, preset override | csa-extractor agent parses CSA diagram + CSA-inventory template |
+| `/accelerator.epic-to-spec` | SDLC Accelerators Brownfield custom | **Front door.** Fuses a Rally Epic (Modernization Scope table) with the CSA `architecture.md` → canonical `spec.md`; **replaces `/speckit.specify`** on the Epic-driven path (§9 "Epic-to-Spec Fusion") |
+| `/speckit.specify` | Spec Kit built-in, preset override | **No-Epic fallback.** csa-extractor agent parses CSA diagram + CSA-inventory template when no Epic is used |
 | `/speckit.plan.draft` | SDLC Accelerators Brownfield custom | Developer's first-pass r-factor + cutover decisions |
 | `/speckit.plan.review` | SDLC Accelerators Brownfield custom | Async EA/architect review with structured comments |
 | `/accelerator.blueprint` | SDLC Accelerators custom | 4-tool brownfield Solution Accelerator (§9) |
@@ -164,7 +166,7 @@ The transformation problem — moving an existing on-prem application onto AWS �
 
 The diagram above shows the complete flow from CSA Agent through Solution Accelerator (OAuth 2.1 + Entra ID), Governance Guardian (assess-fix-reassess loop), governance gate (recordTechDebt → stop/resume), to brownfield-aware code generation via GitHub MCP Server, Harness CI/CD, and runtime compliance.
 
-**Read this diagram top-down.** The CSA Agent (⓪, upstream, separate system) produces a validated CSA diagram and places it in the workspace. The coding agent's `csa-extractor` parses the diagram and pre-fills `spec.md` (①). The developer completes a two-stage plan (②), then invokes the Solution Accelerator (③). Inside the MCP server, four tools run in a fixed order: ④ deterministic context-filtered substitution, ⑤ semantic pattern retrieval and LLM composition (the only LLM stage), ⑥ deterministic ADR compliance enforcement, and ⑦ deterministic blueprint assembly (markdown + `app-blueprint.json` + Draw.io diagrams: `.drawio.xml` (editable) + `.png` (rendered) ). The output (⑧) is an `app-blueprint.md` (PRIMARY) plus `app-blueprint.json` (DERIVED, machine-readable) plus a design contract with attestations and inline diagrams. The developer reviews (⑧) using Draw.io VSCode extension for diagram editing, runs `/accelerator.assess` for governance assessment (⑧a — reads Part I (§1-§7) only, NOT .json, NOT Part II, iterative until no showstoppers), then generates brownfield-aware code with a governance gate (⑨ — recordTechDebt → stop/resume, auto-regenerates `.json` from `.md` if changed, reads `.json` for code generation), and can refresh the contract (🔄) at any time if peripherals have changed. The IaC generation reads company Terraform module repos via the GitHub MCP Server. Runtime compliance closes the loop between deployment and attestation. The peripheral systems band is maintained by Platform Engineering and consumed read-only at runtime.
+**Read this diagram top-down.** The CSA Agent (⓪, upstream, separate system) produces a validated CSA diagram **and** `architecture.md` and places them in the workspace. A BA/Solution Architect authors a Rally Epic declaring the modernization scope (disposition + AWS target per component); `/accelerator.epic-to-spec` fuses the Epic with the CSA and emits the final `spec.md` (①). The developer completes a two-stage plan (②), then invokes the Solution Accelerator (③). Inside the MCP server, four tools run in a fixed order: ④ deterministic context-filtered substitution, ⑤ semantic pattern retrieval and LLM composition (the only LLM stage), ⑥ deterministic ADR compliance enforcement, and ⑦ deterministic blueprint assembly (markdown + `app-blueprint.json` + Draw.io diagrams: `.drawio.xml` (editable) + `.png` (rendered) ). The output (⑧) is an `app-blueprint.md` (PRIMARY) plus `app-blueprint.json` (DERIVED, machine-readable) plus a design contract with attestations and inline diagrams. The developer reviews (⑧) using Draw.io VSCode extension for diagram editing, runs `/accelerator.assess` for governance assessment (⑧a — reads Part I (§1-§7) only, NOT .json, NOT Part II, iterative until no showstoppers), then generates brownfield-aware code with a governance gate (⑨ — recordTechDebt → stop/resume, auto-regenerates `.json` from `.md` if changed, reads `.json` for code generation), and can refresh the contract (🔄) at any time if peripherals have changed. The IaC generation reads company Terraform module repos via the GitHub MCP Server. Runtime compliance closes the loop between deployment and attestation. The peripheral systems band is maintained by Platform Engineering and consumed read-only at runtime.
 
 ---
 
@@ -173,15 +175,17 @@ The diagram above shows the complete flow from CSA Agent through Solution Accele
 ![Brownfield full lifecycle — build, govern, deploy, operate](brownfield-10-step-flow.png)
 
 
-### ⓪ CSA Agent (upstream) — Produce a validated CSA diagram
+### ⓪ CSA Agent (upstream) — Produce a validated CSA diagram **and** architecture.md
 
 → *§7 covers the handoff boundary. The CSA Agent is a separate system with its own documentation.*
 
-The CSA Agent is an upstream prerequisite, not part of SDLC Accelerators Brownfield. It scans source code, dependency manifests, infrastructure configs, and conducts structured interviews to produce a validated CSA diagram (drawio XML or Mermaid). The CSA Agent places the diagram file in the developer's workspace. SDLC Accelerators Brownfield begins when that diagram is present.
+The CSA Agent is an upstream prerequisite, not part of SDLC Accelerators Brownfield. It reverse-engineers the legacy application — scanning source code, dependency manifests, infrastructure configs, and conducting structured interviews — into two coupled, ID-keyed artifacts: a validated **CSA diagram** (drawio XML or Mermaid) and an accompanying **`architecture.md`**. Both are keyed by stable IDs (`CSA-COMP-XXX` components, `INT-XXX` integrations); the `architecture.md` is the machine-readable twin of the diagram and is the current-state ground truth the front door consumes. The CSA Agent places both files in the developer's workspace. SDLC Accelerators Brownfield begins when they are present.
 
-### ① /speckit.specify — Extract integrations from the diagram and formalize the spec
+### ① /accelerator.epic-to-spec — Fuse the Epic with the CSA and emit `spec.md`
 
-The developer invokes `/speckit.specify`. The preset's `csa-extractor` agent parses the CSA diagram in the workspace, extracts integration points (nodes as components, edges as integrations, group containers as cloud/on-prem boundaries, edge labels as protocol hints), and pre-fills the integration blocks of `spec-template.md`. Fields the diagram cannot reveal — auth specifics, SLAs, payload schemas, criticality, compliance, target intent, hard rejections — are elicited from the developer. The deliverable is `spec.md`.
+→ *Developer Guide §6 covers the developer-facing workflow. This stage replaces `/speckit.specify` for the Epic-driven path.*
+
+First, a **Business Analyst / Solution Architect** authors a Rally Epic from the standard template, whose **Modernization Scope** table declares — per CSA component — a **disposition** (`Refactor` | `Rehost`) and an **AWS target**. The developer then runs `/accelerator.epic-to-spec <EpicID>`. The command fetches the Epic (Rally MCP, client-side), reads the CSA `architecture.md` from the workspace, and runs a deterministic three-phase fusion: **(A) resolve & validate** — parse the scope table, load the CSA registry, and cross-walk every Epic-named component against the CSA (unresolved IDs block; un-named CSA components are stamped out-of-scope); **(B) compose** — render the canonical `spec.md` with per-component modernization units (disposition + AWS target + disposition-specific migration considerations) plus the CSA-sourced 8-signal Integration Inventory; **(C) gate & trace** — score the spec with `validate_spec`, emit the `modernization-scope-ledger.json`, and stamp provenance for **both** the Epic (FormattedID + ObjectVersion) and the CSA `architecture.md` (content hash). The deliverable is the **final** `spec.md` — `/speckit.specify` is **not** run. (It remains available as a no-Epic manual fallback.)
 
 ### ② /speckit.plan.draft + /speckit.plan.review — Two-stage r-factor decisions
 
@@ -377,7 +381,7 @@ Each environment gets its own API Hub registration, so the agent is discoverable
 
 ## 7. CSA Agent — Upstream Dependency and Handoff Boundary
 
-→ *Developer Guide §6 covers the developer-facing `/speckit.specify` workflow. The CSA Agent is a separate system with its own architecture documentation.*
+→ *Developer Guide §6 covers the developer-facing `/accelerator.epic-to-spec` workflow. The CSA Agent is a separate system with its own architecture documentation.*
 
 ### 7.1 Separation of concerns
 
@@ -385,27 +389,27 @@ The CSA Agent and SDLC Accelerators Brownfield are separate systems with a clean
 
 | Responsibility | Owner | Deliverable |
 |---|---|---|
-| Produce an accurate CSA diagram from source code, infra configs, manifests, and human interviews | **CSA Agent** (separate system) | `.drawio.xml` file in the workspace |
-| Extract integration points from the diagram and pre-fill `spec.md` | **SDLC Accelerators Brownfield** (`csa-extractor` agent via `/speckit.specify`) | `spec.md` |
+| Reverse-engineer source code, infra configs, manifests, and human interviews into an accurate current state | **CSA Agent** (separate system) | A CSA diagram (`.drawio.xml`) **and** a machine-readable `architecture.md`, both keyed by `CSA-COMP-XXX` / `INT-XXX` IDs, in the workspace |
+| Author the modernization intent (which components → TSA, via Refactor/Rehost, to which AWS target) | **BA / Solution Architect** | A Rally Epic with a **Modernization Scope** table |
+| Fuse the Epic with the CSA `architecture.md` into the canonical `spec.md` | **SDLC Accelerators Brownfield** (`/accelerator.epic-to-spec`) | `spec.md` + `modernization-scope-ledger.json` |
 
-SDLC Accelerators Brownfield does NOT perform source-code scanning, infra-config analysis, or structured interviews. Those are CSA Agent responsibilities. If the CSA Agent has not yet run, or has produced a diagram the developer considers incomplete, the developer must return to the CSA Agent workflow before running `/speckit.specify`.
+SDLC Accelerators Brownfield does NOT perform source-code scanning, infra-config analysis, or structured interviews. Those are CSA Agent responsibilities. If the CSA Agent has not yet run, or has produced a diagram/architecture.md the developer considers incomplete, the developer must return to the CSA Agent workflow before running `/accelerator.epic-to-spec`. The `architecture.md` is the front door's machine-readable input; the diagram is its human-facing twin (and the fallback `/speckit.specify` `csa-extractor` still parses the diagram directly).
 
-### 7.2 What the diagram must contain
+### 7.2 What the CSA artifacts must contain
 
-For the `csa-extractor` agent to produce a useful spec, the CSA diagram should contain:
+For `/accelerator.epic-to-spec` to fuse cleanly, the `architecture.md` must carry, under a `## Component Inventory` and a `## Integration Inventory`:
 
-- **Component nodes** — each system or service the application interacts with (including itself)
-- **Integration edges** — labeled with protocol/transport hints where known (e.g. `HTTPS`, `JMS`, `SFTP`)
-- **Boundary groups** — containers marking cloud or on-prem boundaries (e.g. a subgraph labeled "On-Prem" or "AWS")
-- **Vendor stencils** (optional, drawio only) — e.g. `shape=mscae/aws-sqs` enables tech-token inference
+- **Component blocks** — `### Component: CSA-COMP-XXX — Name` with current-state attributes (Technology, Hosting, Data store, Dependencies). These IDs are the join key the Epic's Modernization Scope table references.
+- **Integration blocks** — `### Integration: INT-XXX — Name` with the eight readiness signals (technology+version, type, direction, criticality, coexistence, API surface, state, volume+SLA) and a `Components:` line linking the integration to its `CSA-COMP-XXX` endpoints.
+- The coupled CSA diagram should carry the same component nodes, integration edges (with protocol/transport hints), and boundary groups so the two artifacts stay in lockstep.
 
-### 7.3 What the diagram typically does NOT contain
+### 7.3 What the CSA artifacts typically do NOT contain
 
-The following fields are elicited from the developer by `/speckit.specify` because diagrams rarely carry them:
+The following are supplied by the **Epic** (modernization intent) rather than the CSA (current state):
 
-- Auth flow specifics (OAuth grant type, mTLS cert source, SAML configuration)
-- SLA / throughput numbers (p95 latency, peak TPS, message volume)
-- Payload schemas (path to OpenAPI / JSON schema files)
+- Disposition per component (Refactor / Rehost) and the AWS target
+- Business drivers, acceptance criteria, and cutover constraints
+- Fields the CSA rarely carries, elicited by the `/speckit.specify` fallback when no Epic is used:
 - Criticality tier, data classification, compliance regimes
 - Target intent (preserve invariants, acceptable downtime, hard rejections)
 - Cross-cloud latency budgets and transit method (PrivateLink / VPN / Internet)
@@ -468,14 +472,14 @@ A legacy multi-page application runs on vSphere (Java + JSP on Tomcat), with two
 
 The Solution Accelerator is an ADK-based agent exposed as an MCP Server, deployed on Cloud Run in the company's GCP project. It is OAuth 2.1 protected and does not persist the inbound spec or plan beyond the task boundary. Audit logs (caller, timestamp, integrations summary, output blueprint hash) are written to Splunk.
 
-The MCP interface exposes **six async tools** using the MCP Tasks primitive (spec revision 2025-11-25): the three blueprint tools below, plus the optional Epic-to-Spec front door `ingest_epic_start` / `ingest_epic_status` / `ingest_epic_result` (§ "Epic-to-Spec Ingestion"). This is necessary because VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls, while the internal 4-stage pipeline (map → recommend → check → assemble) can take 1–30 minutes depending on integration count and pattern-catalog query volume.
+The MCP interface exposes **six async tools** using the MCP Tasks primitive (spec revision 2025-11-25): the three blueprint tools below, plus the Epic-to-Spec front door `epic_to_spec_start` / `epic_to_spec_status` / `epic_to_spec_result` (§ "Epic-to-Spec Fusion"; the former `ingest_epic_*` names remain as back-compat aliases). This is necessary because VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls, while the internal 4-stage pipeline (map → recommend → check → assemble) can take 1–30 minutes depending on integration count and pattern-catalog query volume.
 
 | MCP tool | What it does | Latency |
 |---|---|---|
 | `blueprint_start` | Validates input, creates a background task, returns `taskId` | < 2 seconds |
 | `blueprint_status` | Returns current pipeline stage and progress message | < 1 second |
 | `blueprint_result` | Returns JSON: `markdown` (app-blueprint.md), `blueprint_json` (app-blueprint.json — derived, machine-readable), `diagrams` (base64 PNGs + `.drawio.xml` source), `design_contract`, hashes | < 1 second |
-| `ingest_epic_start(epic)` | **Epic front door.** Receives a Rally Epic (content only); delegates Phase A to the Solution Accelerator Agent's `create_epic_signal_ledger` tool, then Phase B maps deterministically → integration-inventory `spec.md` + ledger | < 2 seconds |
+| `epic_to_spec_start(epic, csa_architecture_md)` | **Epic-to-Spec front door.** Receives a Rally Epic + CSA architecture.md (content only); runs the deterministic three-phase fusion (resolve & cross-walk → compose component-scoped spec → gate & trace) → canonical `spec.md` + `modernization-scope-ledger.json` | < 2 seconds |
 | `ingest_epic_status` / `ingest_epic_result` | Poll phase (`shaping`/`mapping`); return `spec.md` + `epic-signal-ledger.json` + per-integration confidence + the readiness-gate verdict | < 1 second |
 
 Internally, the background task runs the 4-stage pipeline described in §9.4–§9.7. The background work executes on **Cloud Run Jobs** (no request-timeout constraint), triggered by `blueprint_start` via Cloud Tasks. Task state (taskId, status, progress, result) is stored in AlloyDB with a 24-hour retention enforced by a scheduled Cloud Scheduler cleanup job (hourly: `DELETE FROM blueprint_tasks WHERE created_at < NOW() - INTERVAL '24 hours'`).
@@ -500,18 +504,17 @@ As in greenfield, **the agent reasons but never acts** — substitution, ADR enf
 
 > **IP note (Solution Accelerator Agent + two FunctionTools).** The *structure* "an MCP server delegates to one ADK agent holding FunctionTools, one of which builds an epic-derived artifact" is a **shared ADK pattern** (it overlaps the external platform's design-agent-with-tools structure) and is **not** claimed for brownfield. The distinctive, claimed mechanism is the artifact: the **integration-keyed, span-grounded Brownfield Epic Signal Ledger** (every signal verbatim-traced to an Epic span, values grounded in their span — no fabricated/altered quantities), deterministic **fill-ratio** confidence (filled / 8 readiness signals), the Rally **ObjectVersion** staleness token, and the **readiness-gate reconciliation**. *(Not legal advice — confirm claim-level non-overlap with a practitioner.)*
 
-#### Epic-to-Spec Ingestion (Brownfield) — optional front door
+#### Epic-to-Spec Fusion (Brownfield) — the front door
 
-![Brownfield full lifecycle — Epic front door + build/govern/deploy/operate](brownfield-10-step-flow.png)
+![Brownfield full lifecycle — Epic-to-Spec front door + build/govern/deploy/operate](brownfield-10-step-flow.png)
 
-Before `/speckit.specify`, a developer can seed the integration-inventory `spec.md` from a **Rally Epic** via `/accelerator.ingest-epic`. The coding agent fetches the Epic **client-side** through the Rally MCP server (`.vscode/mcp.json`, Entra ID SSO — credentials stay in the IDE) and calls `ingest_epic_start` with the Epic **content only**. Two phases run server-side:
+`/accelerator.epic-to-spec` is the brownfield front door. It produces the **final** `spec.md` directly — `/speckit.specify` is not run on this path (it remains a no-Epic fallback). A BA/Solution Architect first authors a Rally Epic whose **Modernization Scope** table names CSA components and, per component, a disposition (`Refactor` | `Rehost`) and an AWS target. The coding agent fetches the Epic **client-side** (Rally MCP, `.vscode/mcp.json`, Entra ID SSO — credentials stay in the IDE), reads the CSA **`architecture.md`** from the workspace, and calls `epic_to_spec_start` with the Epic **content** and the architecture.md **content** (no credentials). Three phases run server-side:
 
-- **Phase A — agentic shaping (the Solution Accelerator Agent).** The MCP server delegates to the agent's `create_epic_signal_ledger` FunctionTool — one bounded, **extractive** pass that normalizes the Epic into an **integration-keyed Brownfield Epic Signal Ledger**: one entry per integration with up to eight span-traced readiness signals (technology+version, type, direction, criticality, coexistence, API surface, state, volume+SLA), plus Application Summary, Modernization Scope, and NFRs. Every signal carries a verbatim `epic_span` and a span-grounded value; a deterministic validator drops the rest, so the agent cannot fabricate or alter requirements (invented volumes/SLAs are dropped).
-- **Phase B — deterministic mapping (no LLM).** The ledger renders to a brownfield `spec.md` that parses via `spec_parser` and is scored by the same 8-signal `validate_spec` gate the blueprint uses. Output carries a Rally provenance header (FormattedID + ObjectVersion), per-integration fill-ratio confidence, `[NEEDS CLARIFICATION]` markers, and a `blueprint_gate` verdict so the developer sees real migration-readiness (not fill-ratio alone).
+- **Phase A — resolve & validate (deterministic).** Parse the Epic's Modernization Scope table into `(component, disposition, AWS target)` rows; load the CSA registry from `architecture.md` (components + the `INT-XXX` integration inventory, each with the eight readiness signals); **cross-walk** every Epic-named component against the CSA. The component ID is the join key: a component the CSA lacks is surfaced as a hard CLARIFY/BLOCK (you cannot modernize what the current state does not contain), and CSA components the Epic omits are stamped explicitly out-of-scope.
+- **Phase B — compose (deterministic, no LLM).** Render the canonical `spec.md`: per in-scope component, a modernization unit (current-state from the CSA → disposition → AWS target → disposition-specific migration considerations), followed by the **CSA-sourced 8-signal Integration Inventory** for the in-scope components — the same `### Integration: INT-XXX` shape `spec_parser` parses and `validate_spec` scores, so `/speckit.plan` consumes it unchanged.
+- **Phase C — gate & trace (deterministic).** Score the spec with the 8-signal `validate_spec` gate; emit the durable `modernization-scope-ledger.json` (component → disposition → target → source spans) and a provenance header stamping **both** the Epic (FormattedID + ObjectVersion) and the CSA `architecture.md` (content hash), so `/accelerator.refresh` detects drift in either source.
 
-**Format contract (M-1).** Ingestion emits the **canonical 8-signal migration-readiness template** (`### Integration: INT-XXX` with the eight signal fields) — the shape `spec_parser` parses and `validate_spec` scores. This is intentionally *not* the richer Current-State inventory the samples show: `/speckit.specify`'s `csa-extractor` **up-converts** the readiness template into the full Current-State block (Protocol/Transport/Auth/Stack…) and reconciles it against the authoritative CSA diagram. The two shapes are a pipeline contract, not a divergence.
-
-The **CSA diagram remains authoritative** for current state (the CSA Agent handoff, §7): ingestion pre-fills the inventory; `/speckit.specify`'s `csa-extractor` then reconciles it against the diagram. Staleness uses the Rally **ObjectVersion** token (read from the durable `epic-signal-ledger.json` sidecar by `/accelerator.refresh`), not a content hash.
+**Why fusion, not pre-fill.** The earlier design had `/accelerator.ingest-epic` emit a partial integration inventory that `/speckit.specify` later up-converted against the diagram. The redesign makes the Epic's refactor/rehost decisions the spine of the spec and binds them to current-state ground truth at ingest, so disposition is decided once (in the Epic), grounded immediately, and carried into `/speckit.plan.draft`'s r-factor step rather than re-derived. The CSA `architecture.md` is authoritative for current state; the Epic is authoritative for modernization intent.
 
 #### Tool payload note (L-3)
 

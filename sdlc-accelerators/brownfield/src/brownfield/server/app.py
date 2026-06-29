@@ -208,17 +208,20 @@ def ingest_epic_start(epic: dict[str, Any], *, principal: Any) -> dict[str, Any]
         try:
             _store.update(task.task_id, status="running", stage="shaping")
             log.info("ingest.start", taskId=task.task_id, exec_id=exec_id)
-            from brownfield.ingest.orchestrator import run_ingest
+            from brownfield.ingest.orchestrator import run_epic_to_spec
 
-            result = run_ingest(
-                epic, on_phase=lambda phase: _store.update(task.task_id, stage=phase)
+            result = run_epic_to_spec(
+                epic,
+                csa_architecture_md=epic.get("csa_architecture_md", ""),
+                on_phase=lambda phase: _store.update(task.task_id, stage=phase),
             )
             if result.get("empty"):
                 _store.update(
                     task.task_id,
                     status="failed",
-                    error="empty_ledger: no integrations/summary extractable from the Epic. "
-                    "Flesh out the Rally Epic, or fall back to /speckit.specify.",
+                    error="empty_scope: no in-scope components could be resolved. Add a "
+                    "Modernization Scope table to the Epic and supply the CSA architecture.md, "
+                    "or fall back to /speckit.specify.",
                 )
                 log.warning("ingest.empty", taskId=task.task_id)
                 return {
@@ -277,8 +280,12 @@ def ingest_epic_result(taskId: str, *, principal: Any) -> dict[str, Any]:
         }
     r = t.result
     return {
+        "mode": r.get("mode"),
         "spec_md": r.get("spec_md"),
+        "modernization_scope_ledger": r.get("modernization_scope_ledger"),
         "epic_signal_ledger": r.get("epic_signal_ledger"),
+        "resolved_scope": r.get("resolved_scope"),
+        "per_component_confidence": r.get("per_component_confidence"),
         "per_integration_confidence": r.get("per_integration_confidence"),
         "blueprint_gate": r.get("blueprint_gate"),
         "provenance": r.get("provenance"),
@@ -289,6 +296,11 @@ TOOLS = {
     "blueprint_start": blueprint_start,
     "blueprint_status": blueprint_status,
     "blueprint_result": blueprint_result,
+    # Primary names for the Epic-to-Spec front door.
+    "epic_to_spec_start": ingest_epic_start,
+    "epic_to_spec_status": ingest_epic_status,
+    "epic_to_spec_result": ingest_epic_result,
+    # Back-compat aliases (the command was formerly /accelerator.ingest-epic).
     "ingest_epic_start": ingest_epic_start,
     "ingest_epic_status": ingest_epic_status,
     "ingest_epic_result": ingest_epic_result,
