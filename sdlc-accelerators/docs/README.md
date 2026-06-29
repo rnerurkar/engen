@@ -17,7 +17,7 @@ Brownfield: sdlc-accelerators-brownfield-architecture(+_detailed), reference-cas
 
 ## Reference (reports, IP, patent)
 In `reference/`: Definition-of-Done, ARB rebranding audit, rebranding impact analysis,
-provisional patent (md+docx), AgentForge-vs-SDLC IP analysis + separation, FNOL Eraser DSL examples.
+provisional patent (md+docx), the external platform-vs-SDLC IP analysis + separation, FNOL Eraser DSL examples.
 
 ## Build status
 See `BUILD-REPORT-Phase1-4.md`. Reasoning-stage prompt is authored (services/solution-accelerator/prompts/);

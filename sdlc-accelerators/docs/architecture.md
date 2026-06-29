@@ -112,7 +112,9 @@ Every GCP service used by SDLC Accelerators is Generally Available with SLA back
 
 Before diving into the five layers, here is the complete flow as a narrative. No jargon, no architecture diagrams — just what happens step by step from the developer's perspective.
 
-A developer is asked to build an AI agent that processes auto insurance claims (FNOL). She opens VSCode with her preferred coding agent — Claude Code, in her case — and installs the SDLC Accelerators preset: `specify preset add sdlc-accelerators-enterprise`. This installs a structured spec template, a plan template, custom commands (`/accelerator.blueprint`, `/accelerator.assess`, `/accelerator.generate`), memory files with company reference material, company overlay skills, and an `adk-agents` domain skill.
+A developer is asked to build an AI agent that processes auto insurance claims (FNOL). She opens VSCode with her preferred coding agent — Claude Code, in her case — and installs the SDLC Accelerators preset: `specify preset add sdlc-accelerators-enterprise`. This installs a structured spec template, a plan template, custom commands (`/accelerator.ingest-epic`, `/accelerator.blueprint`, `/accelerator.assess`, `/accelerator.generate`), memory files with company reference material, company overlay skills, and an `adk-agents` domain skill.
+
+> **Optional front door (Greenfield):** instead of filling `/specify` from scratch, the developer can type `/accelerator.ingest-epic` to pull an existing **Rally Epic** and have it converted into a signal-bearing `spec.md` automatically — then review rather than author. The full mechanism is described under **Epic-to-Spec Ingestion (Greenfield)**, below; the rest of this narrative assumes the manual `/specify` path.
 
 She types `/specify`. The preset presents a structured template with ten sections — Business Context, Workflow Step by Step, Regulatory Requirements, Data Systems, External Partners, What We Own, Business Rules, Transformation Rules, Error Handling, and Acceptance Criteria. She fills it in using plain English, describing the step-by-step workflow ("first the customer calls, then the system classifies severity, then in parallel it enriches from three sources..."), the data systems involved, the external partner APIs, and her proprietary business logic as structured IF/THEN conditions. This takes about 20 minutes. The result is `spec.md` — a structured requirements document saved in her workspace.
 
@@ -255,6 +257,31 @@ She never deployed from her laptop. She never provisioned a GCP resource manuall
 
 **Now imagine** a different developer on another team who needs to build a FastAPI microservice for order management. He installs the `sdlc-accelerators-microservice` preset instead. His `/specify` template has different sections — Service Purpose, API Contracts, Dependencies, Data Model. His Solution Accelerator searches a different pattern catalog — microservice patterns instead of agent patterns. His coding agent loads a `fastapi` skill instead of an `adk-agents` skill. But the **company overlay skills are the same** — same Terraform modules, same Dynatrace config, same Jenkins/Harness pipelines, same security standards. The microservice follows the same company patterns as the agent. The platform team maintains one set of overlay skills, and every application type benefits.
 
+### Epic-to-Spec Ingestion (Greenfield) — Rally → signal-bearing spec
+
+> **Bidirectional references:** developer workflow in **Developer Guide § 2.3a** (`/accelerator.ingest-epic`); operations and `mcp.json` wiring in **Operations Runbook § 9a** (Rally MCP Server Integration). Greenfield only — Brownfield is covered separately.
+
+In an enterprise environment the unit of intake is usually not a blank `/specify` template — it is an **Epic already authored in Rally** by a business analyst or architect. `/accelerator.ingest-epic` is an **optional front door** that turns a Rally Epic into a signal-bearing `spec.md`, so the downstream pipeline (`/specify` review → `/plan` → `/accelerator.blueprint`) runs unchanged.
+
+**IDE-resident, client-orchestrated (two MCP servers).** The **Rally MCP server** is registered declaratively in VS Code via `.vscode/mcp.json` (see Appendix § G2). The **coding agent is the broker**: it elicits the Epic identifier, calls the Rally MCP server to retrieve the Epic, then hands the retrieved payload to a new `ingest_epic` tool on the Solution Accelerator MCP Server. Rally credentials are obtained through the developer's **Entra ID SSO inside the IDE and never reach the Solution Accelerator server** — the accelerator receives only the epic content, never tracker credentials. This is deliberately different from a server-side adapter: retrieval lives client-side, conversion lives server-side.
+
+**Flow.**
+
+1. Developer types `/accelerator.ingest-epic`. The preset command prompt (Appendix § P0) runs a short **capability-negotiated interview**: it reads the Rally MCP server's available queries, then asks only for what it cannot derive — at minimum the Rally Epic **FormattedID** (e.g. `E1234`), plus project/workspace if ambiguous.
+2. The coding agent calls the **Rally MCP server** (`mcp.json`) → retrieves the Epic description, acceptance criteria, NFRs, linked features/stories, dependencies, and Rally's **ObjectVersion** + **LastUpdateDate**.
+3. The coding agent calls **`ingest_epic`** on the Solution Accelerator MCP Server with the epic payload (not credentials). The tool runs the standard async start/poll/result envelope and executes two internal phases:
+   - **Phase A — agentic shaping (the Solution Accelerator Agent).** The MCP server delegates to the same single ADK agent used by `recommend_architecture`, invoking its `create_epic_signal_ledger` FunctionTool (reasons-only, never acts) for one bounded, **extractive** pass: it normalizes the Epic's linguistic signals into a schema-bound, section-keyed **Epic Signal Ledger**. Each ledger entry traces to an Epic span; any signal the Epic does not support is left empty. A deterministic validator drops any signal whose span is not verbatim in the Epic AND whose `value` is not grounded in that span (no fabricated or altered numbers, shared lexical content), so the agent **cannot fabricate or alter requirements**. The agent does **not** map to spec sections and does **not** assign confidence.
+   - **Phase B — deterministic mapping.** A deterministic stage renders the 10-section signal-bearing `spec.md` from the ledger, computes **per-section confidence from the signal-slot fill ratio** (empty slots lower confidence and flag the reviewer — no LLM self-assessment), and stamps **Rally provenance** (FormattedID + ObjectVersion) into the spec header.
+4. `ingest_epic_result` returns `spec.md` + `epic-signal-ledger.json` + per-section confidence + the Rally provenance stamp to the IDE. The developer/SA reviews — low-confidence sections and `[NEEDS CLARIFICATION]` markers are the review surface — then proceeds to `/specify` review (light, since the structure is already populated), `/plan`, and `/accelerator.blueprint` as today.
+
+**Where the signals land.** Phase B routes Epic content into exactly the sections the **two-layer Spec Signal Validation** (above) already checks: ordering words &rarr; §2 Workflow; named data systems &rarr; §4; "own-system" partner flags &rarr; §5; IF/THEN rules &rarr; §7; PII/PHI class &rarr; §8; measurable criteria &rarr; §10. Because the signals are sourced from a reviewed, structured Epic rather than free prose, an Epic-sourced spec is engineered to clear `validate_spec` (Step 0) by construction; the same Pattern Catalog / Apigee API Hub / ADR Store checks apply unchanged.
+
+**Epic staleness — source-version-token (distinct from `.accelerator-hashes`).** `ingest_epic` records the Rally **ObjectVersion** in the spec provenance stamp and the Epic Signal Ledger. On `/accelerator.refresh`, the recorded ObjectVersion is compared against Rally's **current** ObjectVersion (one read via the Rally MCP server); if Rally is newer, the developer is warned that the Epic drifted from the spec and offered a re-ingest. This is a **source-system version-token** check on the Epic — separate from, and additional to, the content-hash `.accelerator-hashes` mechanism that keeps `.md ↔ .drawio ↔ .json` in sync (Staleness Detection, below).
+
+**Governance tie-in — Epic-coverage findings (no attestation).** When an Epic drove the spec, the Governance Guardian gains an **Epic-coverage finding class**: during `/accelerator.assess` it flags Epic acceptance criteria or NFRs that are not represented in the blueprint (Medium by default; High if a stated acceptance criterion is unmet), surfaced in the existing assess &rarr; fix &rarr; re-assess loop. Coverage is a **finding in the assess gate**, not a cryptographic attestation.
+
+**Scope of the change.** New preset command `/accelerator.ingest-epic` (§ P0); new `mcp.json` Rally registration (§ G2); new `ingest_epic` Solution Accelerator tool (MCP tool table, below); the Solution Accelerator Agent gains a second FunctionTool (`create_epic_signal_ledger`); `/accelerator.refresh` gains the Epic ObjectVersion check; the Governance Guardian gains the Epic-coverage finding class. The RAG pipeline, `validate_composition`, `assemble_blueprint`, the Eraser render path, and Layers 3–5 are unchanged.
+
 ### Brownfield: Adding an agent to an existing system
 
 Not every agent starts from scratch. When adding an AI agent to an existing system with live APIs, production databases, and code you can't modify, the developer writes the spec differently. In the **External Integrations** section, she writes: "Loan origination REST API — WE operate this, EXISTING endpoints at /api/v2/applications. The agent MUST use these existing endpoints." In the **Internal Capabilities** section: "Credit score lookup — EXISTING internal function at /api/v2/credit-check."
@@ -337,6 +364,9 @@ The Solution Accelerator is an LlmAgent running on Cloud Run, **exposed as an MC
 | `blueprint_start(spec, plan)` | **ASYNC START** | < 2 seconds | Validates input, creates a background task in the Task Store, enqueues the pipeline via Cloud Tasks, returns `taskId` + `pollInterval` immediately |
 | `blueprint_status(taskId)` | **POLL** | < 1 second | Returns current pipeline stage (searching / reasoning / validating / assembling) and a progress message for display to the developer |
 | `blueprint_result(taskId)` | **RETRIEVE** | < 1 second | Reads all blueprint artifacts back from the **Blueprint Artifact Store** (GCS objects via the AlloyDB pointer keyed by taskId, owner_id-isolated) and returns them to the IDE combined: `app-blueprint.md` + `app-blueprint.json` inline, plus each diagram's `.drawio.xml` + `.png` (base64). | **SYNCHRONOUS** | < 15 seconds | Called after developer edits `.md` and/or `.drawio.xml`. **Bidirectional sync:** (1) DETECT which artifact changed via timestamp comparison against `.accelerator-hashes`. (2) SYNC the unchanged artifact to match the changed one — if only .md changed, regenerate .drawio.xml + .png from topology extracted from .md via `app-blueprint.json` as structured intermediate; if only .drawio changed, parse .drawio.xml and update .md §2 narrative + mermaid via LLM; if both changed, reconcile via diff against last-known .json with conflict detection. (3) VALIDATE .md↔.drawio consistency post-sync. (4) REGENERATE `.json` from synced .md + spec.md + plan.md + `.png` from synced .drawio.xml via the **Eraser MCP server** (render DSL → .drawio.xml + .png, synchronous). Returns: sync_report (what changed, what was synced, any conflicts), structural_report, updated .md and/or .drawio.xml + .json + .png. Also auto-triggered as Step 0 of `/accelerator.assess` and `/accelerator.generate` if stale files detected. |
+| `ingest_epic_start(epic)` | **ASYNC START** | < 2 seconds | **Greenfield Epic ingestion** (see § "Epic-to-Spec Ingestion (Greenfield)"). Receives a Rally Epic payload — content only, no credentials (the coding agent fetched it via the Rally MCP server declared in `.vscode/mcp.json`). Creates a background task and enqueues the two-phase pipeline: **Phase A** agentic shaping via the Solution Accelerator Agent's `create_epic_signal_ledger` FunctionTool (extractive normalization → Epic Signal Ledger) → **Phase B** deterministic mapping (ledger → 10-section signal-bearing `spec.md` + fill-ratio confidence + Rally provenance). Returns `{taskId, pollInterval}`. |
+| `ingest_epic_status(taskId)` | **POLL** | < 1 second | Returns the current phase (`shaping` / `mapping`) + a progress message. owner_id-isolated. |
+| `ingest_epic_result(taskId)` | **RETRIEVE** | < 1 second | Returns `spec.md` (signal-bearing, 10 sections, Rally provenance header: FormattedID + ObjectVersion) + `epic-signal-ledger.json` (section-keyed signal ledger) + per-section confidence (signal-slot fill ratio). The prompt file writes `spec.md` + the ledger to the workspace. |
 | `assess_start(solution_package)` | **ASYNC START** | < 1 second (returns taskId) | Governance Guardian. Converts `app-blueprint.md` → **PDF** (each §N section a PDF section; PNGs referenced in a section embedded under that section, §1–§9 template preserved), sends the PDF to the Eraser MCP server for assessment. Returns `{taskId, pollInterval}`. |
 | `assess_status(taskId)` | **POLL** | < 1 second | Returns `queued`/`running`/`completed`/`failed`. owner_id-isolated. |
 | `assess_result(taskId)` | **RETRIEVE** | < 1 second | Converts the Eraser findings **PDF** → **Markdown** (findings grouped into Critical/High/Medium/Low + scorecard) and returns `findings_md` to the IDE, plus structured findings with showstopper/tech-debt classification. |
@@ -350,16 +380,18 @@ The first three tools implement the async MCP Tasks pattern. The last two are ca
 
 #### Inside the server: one MCP Server, one Agent (steps 4–7 internals)
 
-A common question is whether there is a fleet of agents behind the MCP Server. There is not. The Solution Accelerator is **one MCP Server containing exactly one `LlmAgent`** (`greenfield_architecture_recommender`). When `blueprint_start` runs the pipeline in its background job, the four phases that the full-lifecycle diagram labels steps 4–7 are distributed as follows — and only one narrow sub-stage actually invokes the model:
+A common question is whether there is a fleet of agents behind the MCP Server. There is not. The Solution Accelerator MCP Server **delegates to exactly one ADK agent — the `solution_accelerator_agent` (the "Solution Accelerator Agent"), built with the ADK framework**. The MCP Server itself does no reasoning (transport, async MCP Tasks, OAuth, and orchestration only); it hands each task to the agent. The agent owns **exactly two FunctionTools**: `recommend_architecture` (architecture reasoning, used by `blueprint_start` Step 5) and `create_epic_signal_ledger` (extractive Epic shaping, used by `ingest_epic_start` Phase A — the optional Greenfield front door). When `blueprint_start` runs the pipeline in its background job, the four phases that the full-lifecycle diagram labels steps 4–7 are distributed as follows — and only one narrow sub-stage actually invokes the model (the agent's `recommend_architecture` tool):
 
 ![Greenfield steps 4–7 internals — one MCP Server, one Agent](greenfield-steps-4-7-internals.png)
 
 - **Step 4 · `validate_spec`** runs server-side (Layer-2 quality gate) — deterministic signal extraction and checks against the Pattern Catalog, API Hub, and ADR Store.
-- **Step 5 · `recommend_architecture`** is the only stage that touches the LLM, and even it is three sub-stages: `retrieve()` (deterministic RAG + API Hub discovery), `invoke_llm_agent()` (**the single `LlmAgent`** — the human-authored system prompt bound to Gemini, the one place model reasoning happens), and `parse_selections()` (deterministic parse into a typed `ArchitectureSelections`).
+- **Step 5 · `recommend_architecture`** is the only stage that touches the LLM, and even it is three sub-stages: `retrieve()` (deterministic RAG + API Hub discovery), `invoke_llm_agent()` (**the single `LlmAgent`** — the human-authored system prompt bound to Gemini, the one place model reasoning happens), and `parse_selections()` (deterministic parse into a typed `ArchitectureSelections`). Dispatch is **direct**: the server names the capability and the agent runs that FunctionTool — there is no LLM tool-router, so no extra/non-deterministic model call is spent choosing between the two tools.
 - **Step 6 · `validate_composition`** is a deterministic MCP tool — pattern-tree adjacency checks (e.g. a `LoopAgent` may not nest directly inside a `ParallelAgent`).
 - **Step 7 · `assemble_blueprint`** is deterministic — it builds the `.md` + `.json` + DSLs and *calls* the Eraser MCP server to render diagrams (tool use, not LLM authorship).
 
-The design deliberately keeps the agent's authority minimal: **it reasons but never acts.** It does not validate the spec, enforce composition rules, assemble the artifact, or render diagrams — those are deterministic server stages, for reproducibility and governance. (This is also where the IP boundary sits: no meta-skills, no Skill Tool Library, no signed Design Contracts — those belong to AgentForge.)
+The design deliberately keeps the agent's authority minimal: **it reasons but never acts.** It does not validate the spec, enforce composition rules, assemble the artifact, or render diagrams — those are deterministic server stages, for reproducibility and governance. (This is also where the IP boundary sits: no meta-skills, no Skill Tool Library, no signed Design Contracts — those belong to the external platform.)
+
+> **IP note (Solution Accelerator Agent + two FunctionTools).** The *structure* "an MCP Server delegates to one ADK agent that holds FunctionTools, one of which builds an epic-derived intermediate artifact" is a **shared ADK architectural pattern** — it overlaps the external platform's design-agent-with-tools structure, so SDLC Accelerators does **not** rely on the agent/tool structure as a distinguishing claim. What is distinctive (and claimed) is the **artifact and its mechanism**: the section-keyed, span-traced **Epic Signal Ledger** (not the external platform's Epic-IR / requirement-objects, and never a bidirectional Signal Validation Matrix), the extractive, **span-grounded** guarantee (every signal verbatim-traced to an `epic_span`, with its `value` grounded in that span — no fabricated or altered quantities), deterministic **fill-ratio** confidence (not agent-reported), the Rally **ObjectVersion** source-version-token for staleness (not a content hash), and the **assess-gate Epic-coverage finding** (not a cosign-signed Design Contract). If the agent/tool structure is judged to overlap at the claim level, claim only the ledger artifact + mechanism. *(Not legal advice — confirm with a patent practitioner.)*
 
 **Task lifecycle:**
 
@@ -811,7 +843,7 @@ The coding agent reads the markdown blueprint and generates the complete project
 
 **Auto-regeneration:** When `/accelerator.generate` runs, the coding agent first checks whether `app-blueprint.md` was modified since the last `assemble_blueprint` call (by comparing the `.md` file's hash against `blueprint_hash` stored in `app-blueprint.json`). If the hashes differ, the coding agent calls `assemble_blueprint` first to regenerate `app-blueprint.json` from the edited `.md` + re-render diagrams via the **Eraser MCP server** (DSL submitted, rendered `.drawio.xml`/`.png` returned synchronously). This ensures the JSON always reflects the latest `.md` edits. The developer never needs to manually call `assemble_blueprint` before `/accelerator.generate`.
 
-**Important: Constitution.md contains coding agent rules — NOT meta-skills or decision frameworks.** The 4 meta-skills (pattern-composition, data-platform-selection, agent-boundary, skill-tool-discovery) exist only in AgentForge and are loaded into the Design Agent via ADK SkillToolset. SDLC Accelerators's constitution.md is a different file with a different purpose: it constrains the coding agent during code generation.
+**Important: Constitution.md contains coding agent rules — NOT meta-skills or decision frameworks.** The 4 meta-skills (pattern-composition, data-platform-selection, agent-boundary, skill-tool-discovery) exist only in the external platform and are loaded into the Design Agent via ADK SkillToolset. SDLC Accelerators's constitution.md is a different file with a different purpose: it constrains the coding agent during code generation.
 
 **What code generation produces (80-95% depending on business rules in spec):**
 
@@ -1220,7 +1252,7 @@ diagrams/*.drawio.xml (visual, editable in Draw.io)
 
 1. **app-blueprint.json is the reconciliation hub.** Both .md and .drawio sync through .json because it has the structured topology (adk_agent_tree, tool_bindings, data_flows) that prose and visuals both represent. The .json is never edited directly — it is always derived.
 
-2. **LLM is required for prose↔structure bridging.** Unlike AgentForge (which uses machine-parseable STL tables in the .md, enabling fully deterministic sync), SDLC Accelerators's .md uses narrative prose. The Solution Accelerator LLM is needed to extract topology from prose (Case A) and to generate prose from topology (Case B). This introduces a small accuracy margin — the Governance Guardian assessment downstream catches any errors.
+2. **LLM is required for prose↔structure bridging.** Unlike the external platform (which uses machine-parseable STL tables in the .md, enabling fully deterministic sync), SDLC Accelerators's .md uses narrative prose. The Solution Accelerator LLM is needed to extract topology from prose (Case A) and to generate prose from topology (Case B). This introduces a small accuracy margin — the Governance Guardian assessment downstream catches any errors.
 
 3. **Conflicts are surfaced, not silently resolved.** When both .md and .drawio changed and disagree, the coding agent presents the conflict to the developer rather than guessing. Silent auto-resolution would violate the "human is always in control" principle.
 
@@ -1269,6 +1301,8 @@ If the developer skips `/accelerator.refresh` and goes directly to `/accelerator
 - Assessment is a REVIEW step — the reviewer should see the latest state. Auto-refreshing is helpful.
 - Code generation is a PRODUCTION step — generating code from stale data is dangerous. The developer must explicitly validate first.
 
+**Epic staleness — a second, source-of-record signal (Greenfield, Epic-sourced specs).** The `.accelerator-hashes` mechanism above keeps the *local* artifacts in sync (`.md ↔ .drawio ↔ .json`) via content hashes. When the spec originated from `/accelerator.ingest-epic`, there is a second staleness axis: the **Rally Epic itself** may have changed upstream. `ingest_epic` stamps the Rally **ObjectVersion** into the `spec.md` provenance header and `epic-signal-ledger.json`. On `/accelerator.refresh`, the recorded ObjectVersion is compared against Rally's **current** ObjectVersion (one read through the Rally MCP server). If Rally is newer, refresh warns *"⚠️ Rally Epic E1234 changed since ingestion (ObjectVersion N → M) — the spec may be out of date; re-run /accelerator.ingest-epic to re-sync"* and does not silently overwrite the developer's spec edits. This is a **source-system version-token** check (the tracker is the system of record), distinct from and additive to the content-hash check. See § "Epic-to-Spec Ingestion (Greenfield)".
+
 ### Governance Guardian Extraction (from app-blueprint.md §1-§9)
 
 Governance Guardian reads all 9 sections of app-blueprint.md (§1-§9):
@@ -1286,6 +1320,8 @@ Governance Guardian reads all 9 sections of app-blueprint.md (§1-§9):
 | Non-functional requirements + how met | §9 NFRs |
 
 Technical config (agent topology, tool bindings, infra modules, business rules, screening, eval, pipeline configs) lives in app-blueprint.json only — the Governance Guardian never sees it because it assesses governance decisions, not implementation details.
+
+**Epic-coverage finding class (Greenfield, Epic-sourced specs).** When the spec was produced by `/accelerator.ingest-epic`, the workspace also contains `epic-signal-ledger.json` carrying the Rally provenance (FormattedID + ObjectVersion) and the per-section signal trace. On `/accelerator.assess`, the Governance Guardian additionally checks **Epic coverage** — whether each Epic acceptance criterion and NFR recorded in the ledger is represented in the blueprint. Gaps are emitted as findings: **Medium** by default, **High** when a stated acceptance criterion is unmet. These flow through the existing assess → fix → re-assess loop alongside the other finding categories. Coverage is a **finding in the assess gate**, not a cryptographic attestation. See § "Epic-to-Spec Ingestion (Greenfield)".
 
 ### Diagram Generation (Inside the Pipeline)
 
@@ -1324,7 +1360,7 @@ To request new patterns, skills, or tools: submit a PR to the SDLC Accelerators 
 - **Not a deployment tool.** It generates code and pipeline definitions. Your CI/CD deploys.
 - **Not a hosting platform.** It doesn't run your agents. Cloud Run + Apigee hosts them.
 - **Not a replacement for developers.** It generates a first draft (80-95%). Developers review, refine, and own the code.
-- **Not AgentForge.** AgentForge (AnchorOps.ai) uses meta-skills + signed Design Contracts + attestation chains — completely different mechanisms. SDLC Accelerators uses Solution Accelerator RAG + skill-constrained generation. Zero IP overlap.
+- **Not the external platform.** an adjacent external platform uses meta-skills + signed Design Contracts + attestation chains — completely different mechanisms. SDLC Accelerators uses Solution Accelerator RAG + skill-constrained generation. Zero IP overlap.
 - **Not a one-size-fits-all template.** Each archetype has its own preset, catalog, and domain skill. The platform adapts.
 
 ---
@@ -1435,6 +1471,7 @@ templates:
   tasks: templates/tasks-template.md
 
 commands:
+  - commands/accelerator.ingest-epic.md
   - commands/accelerator.blueprint.md
   - commands/accelerator.assess.md
   - commands/accelerator.generate.md
@@ -1472,6 +1509,34 @@ settings:
   output_format: markdown
   save_location: workspace_root
 ```
+
+---
+
+### G2 — .vscode/mcp.json (Rally MCP server registration)
+
+> Greenfield Epic ingestion. The employer environment uses **Rally** (Broadcom Agile Central) as the tracker and **VS Code** as the IDE, so the Rally MCP server is registered **client-side** in `.vscode/mcp.json`. The coding agent calls it during `/accelerator.ingest-epic` (Appendix § P0). Auth is the developer's **Entra ID SSO inside the IDE** — credentials never reach the Solution Accelerator server. Hosting, health, and token rotation are covered in **Operations Runbook § 9a**.
+
+```json
+{
+  "servers": {
+    "rally": {
+      "type": "http",
+      "url": "https://rally-mcp.internal.<company>.com/mcp",
+      "headers": { "Authorization": "Bearer ${input:entra_sso_token}" }
+    }
+  },
+  "inputs": [
+    {
+      "id": "entra_sso_token",
+      "type": "promptString",
+      "description": "Entra ID SSO token (auto-filled by the company VS Code auth extension)",
+      "password": true
+    }
+  ]
+}
+```
+
+The Rally MCP server exposes **read** tools over the Rally Web Services API (for example `get_epic`, `query_epics`, `get_acceptance_criteria`), each returning the Epic body, acceptance criteria, NFRs, linked features/stories, dependencies, and Rally's `ObjectVersion` + `LastUpdateDate`. Only the Solution Accelerator MCP Server's `ingest_epic*` tools are added to the preset; the Rally server is consumed **directly by the coding agent** and is intentionally **not** part of the Solution Accelerator's server-side trust boundary. This client-orchestrated, two-MCP-server split (coding agent brokers Rally → `ingest_epic`) is what keeps tracker credentials in the IDE.
 
 ---
 
@@ -1611,6 +1676,51 @@ archetype: agentic
 | Eval dataset curation | P1 | 4-8 hrs | Add edge cases, adversarial inputs, domain-specific test scenarios |
 | Proprietary algorithms | P1 | 4-8 hrs | Complex domain logic that can't be captured as IF/THEN rules |
 | Integration testing | P1 | 2-4 hrs | End-to-end testing with real data sources |
+```
+
+---
+
+### P0 — commands/accelerator.ingest-epic.md
+
+> Greenfield front door. Turns a Rally Epic into a signal-bearing `spec.md`. See § "Epic-to-Spec Ingestion (Greenfield)", Appendix § G2 (`mcp.json`), Developer Guide § 2.3a, and Operations Runbook § 9a.
+
+```markdown
+---
+command: accelerator.ingest-epic
+description: Ingest a Rally Epic and convert it into a signal-bearing spec.md
+---
+
+# /accelerator.ingest-epic
+
+## What this command does
+Retrieves a Rally Epic via the Rally MCP server (registered in `.vscode/mcp.json`), then calls `ingest_epic` on the Solution Accelerator MCP Server to convert it into a 10-section signal-bearing `spec.md` with per-section confidence and a Rally provenance stamp. Optional front door before `/specify`.
+
+## Steps (you execute these automatically)
+
+1. Confirm the Rally MCP server is available (declared in `.vscode/mcp.json`). If it is not registered, tell the developer to add it (Operations Runbook § 9a) and stop.
+2. Capability-negotiated interview: read the Rally MCP server's available queries, then ask the developer ONLY for what cannot be derived — at minimum the Rally Epic FormattedID (e.g. `E1234`); project/workspace only if ambiguous.
+3. Call the Rally MCP server to fetch the Epic: description, acceptance criteria, NFRs, linked features/stories, dependencies, plus `ObjectVersion` and `LastUpdateDate`. Rally auth is handled by the IDE via Entra ID SSO — never request or forward credentials.
+4. Call `ingest_epic_start` on the Solution Accelerator MCP Server:
+   - Auth: OAuth 2.1 + Entra ID (automatic via stored token)
+   - Payload: `{ epic: <fetched epic payload> }` (epic content only — NOT credentials)
+   - Response: `{ taskId, status: "accepted", pollInterval }`
+5. Poll `ingest_epic_status(taskId)` every `pollInterval` ms; report the phase (`shaping` → `mapping`) to the developer.
+6. Call `ingest_epic_result(taskId)` and write to the workspace:
+   - `spec.md` — signal-bearing, 10 sections, with a Rally provenance header (FormattedID + ObjectVersion)
+   - `epic-signal-ledger.json` — the section-keyed signal ledger (reference artifact — do not edit)
+7. Report per-section confidence; tell the developer to review low-confidence sections and any `[NEEDS CLARIFICATION]` markers, then proceed to `/specify` review → `/plan` → `/accelerator.blueprint`.
+
+## Error handling
+- Rally MCP server not registered → instruct the developer to add `.vscode/mcp.json` (Runbook § 9a) and stop.
+- Epic not found / FormattedID invalid → ask the developer to re-enter the FormattedID.
+- `ingest_epic_status` returns `failed` → report the message; a common cause is an Epic with an empty description/acceptance criteria (nothing to shape).
+- 401 from the Solution Accelerator → OAuth token expired; run `/auth refresh` and retry.
+
+## What NOT to do
+- Do NOT request, store, or forward Rally credentials — the Rally MCP server handles auth inside the IDE.
+- Do NOT edit `epic-signal-ledger.json` by hand — it is a provenance/reference artifact.
+- Do NOT skip the review — `ingest_epic` populates structure, but the developer owns correctness.
+- Do NOT invent Epic content — if a signal is absent in the Epic, leave it for `/specify` review.
 ```
 
 ---

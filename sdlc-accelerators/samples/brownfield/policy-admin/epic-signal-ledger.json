@@ -1,0 +1,164 @@
+{
+  "schema": "brownfield-epic-signal-ledger/v1",
+  "provenance": {
+    "source": "rally",
+    "formatted_id": "E6106",
+    "object_version": 13,
+    "last_update_date": "2026-06-21"
+  },
+  "summary": {
+    "value": "a policy administration system on WebLogic 11",
+    "epic_span": "a policy administration system on WebLogic 11"
+  },
+  "modernization_scope": {
+    "value": "all three integrations are in scope",
+    "epic_span": "all three integrations are in scope"
+  },
+  "integrations": [
+    {
+      "int_id": "INT-001",
+      "name": "Policy admin UI",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "ADF on WebLogic 11",
+          "epic_span": "ADF on WebLogic 11"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "bidirectional",
+          "epic_span": "bidirectional"
+        },
+        "criticality": {
+          "value": "high",
+          "epic_span": "high"
+        },
+        "coexistence": {
+          "value": "hard-cutover",
+          "epic_span": "hard-cutover"
+        },
+        "api_surface": {
+          "value": "internal pages",
+          "epic_span": "internal pages"
+        },
+        "state": {
+          "value": "session sticky",
+          "epic_span": "session sticky"
+        },
+        "volume_sla": {
+          "value": "400K sessions/day p95 < 800ms",
+          "epic_span": "400K sessions/day p95 < 800ms"
+        }
+      },
+      "target_intent": {
+        "value": "React SPA on CloudFront",
+        "epic_span": "React SPA on CloudFront"
+      }
+    },
+    {
+      "int_id": "INT-002",
+      "name": "Policy rules and service tier",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "EJB 3 on WebLogic 11",
+          "epic_span": "EJB 3 on WebLogic 11"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "bidirectional",
+          "epic_span": "bidirectional"
+        },
+        "criticality": {
+          "value": "critical",
+          "epic_span": "critical"
+        },
+        "coexistence": {
+          "value": "dual-read",
+          "epic_span": "dual-read"
+        },
+        "api_surface": {
+          "value": "internal REST undocumented",
+          "epic_span": "internal REST undocumented"
+        },
+        "state": {
+          "value": "stateful",
+          "epic_span": "stateful"
+        },
+        "volume_sla": {
+          "value": "1.5M requests/day p95 < 500ms",
+          "epic_span": "1.5M requests/day p95 < 500ms"
+        }
+      },
+      "target_intent": {
+        "value": "Spring Boot services on ECS",
+        "epic_span": "Spring Boot services on ECS"
+      }
+    },
+    {
+      "int_id": "INT-003",
+      "name": "Rating service",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "SOAP client v1 cross-cloud",
+          "epic_span": "SOAP client v1 cross-cloud"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "read-only",
+          "epic_span": "read-only"
+        },
+        "criticality": {
+          "value": "high",
+          "epic_span": "high"
+        },
+        "coexistence": {
+          "value": "dual-read",
+          "epic_span": "dual-read"
+        },
+        "api_surface": {
+          "value": "WSDL documented",
+          "epic_span": "WSDL documented"
+        },
+        "state": {
+          "value": "stateless",
+          "epic_span": "stateless"
+        },
+        "volume_sla": {
+          "value": "700K ratings/day p95 < 600ms",
+          "epic_span": "700K ratings/day p95 < 600ms"
+        }
+      },
+      "target_intent": {
+        "value": "Apigee GCP client cross-cloud",
+        "epic_span": "Apigee GCP client cross-cloud"
+      }
+    }
+  ],
+  "nfrs": [
+    {
+      "value": "the service must be available 99.9% of the time",
+      "kind": "nfr",
+      "epic_span": "the service must be available 99.9% of the time"
+    }
+  ]
+}

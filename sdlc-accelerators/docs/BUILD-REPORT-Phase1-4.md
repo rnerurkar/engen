@@ -41,7 +41,7 @@ The schema build itself surfaced 5 structural corrections where the original sch
 
 **Honest boundary:** the reasoning is not fabricated. recommend_architecture does RAG retrieval and shapes output, but the judgment (curated system prompt + golden dataset) raises NotImplementedError until wired.
 
-**IP CORRECTION:** an earlier draft wrongly placed AgentForge's four meta-skills (MS1-MS4) inside this pipeline. Corrected — SDLC Accelerators uses **RAG + skill-constrained generation**, a single recommend_architecture reasoning stage. Meta-skills, STL, and signed Design Contracts are AgentForge (AnchorOps) IP with **zero overlap** here. This separation is deliberate and legally load-bearing.
+**IP CORRECTION:** an earlier draft wrongly placed the external platform's four meta-skills (MS1-MS4) inside this pipeline. Corrected — SDLC Accelerators uses **RAG + skill-constrained generation**, a single recommend_architecture reasoning stage. Meta-skills, STL, and signed Design Contracts are the external platform (AnchorOps) IP with **zero overlap** here. This separation is deliberate and legally load-bearing.
 
 ---
 
@@ -97,7 +97,7 @@ The schema build itself surfaced 5 structural corrections where the original sch
 
 ## What remains human-authored (by design)
 
-1. **recommend_architecture reasoning** — wire the company-curated system prompt + golden dataset into the Solution Accelerator LlmAgent (single RAG stage; NOT meta-skills — those are AgentForge IP)
+1. **recommend_architecture reasoning** — wire the company-curated system prompt + golden dataset into the Solution Accelerator LlmAgent (single RAG stage; NOT meta-skills — those are out-of-scope external IP IP)
 2. **Governance Guardian assessment rubric** — the EA scoring/classification logic
 3. **FunctionTool predicates** — verify extracted logic against spec.md §7
 4. **Additional archetype skills** — microservice, pipeline, api

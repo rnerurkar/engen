@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "brownfield-epic-signal-ledger.schema.json",
+  "title": "Brownfield Epic Signal Ledger",
+  "description": "Integration-keyed, span-traced ledger produced by the Solution Accelerator Agent's create_epic_signal_ledger tool (Phase A) for the brownfield archetype. Every signal traces to a verbatim Epic span and a span-grounded value.",
+  "type": "object",
+  "required": ["schema", "provenance", "integrations"],
+  "properties": {
+    "schema": { "const": "brownfield-epic-signal-ledger/v1" },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" },
+        "formatted_id": { "type": "string" },
+        "object_version": { "type": ["integer", "null"] },
+        "last_update_date": { "type": "string" }
+      }
+    },
+    "summary": { "$ref": "#/$defs/signal" },
+    "modernization_scope": { "$ref": "#/$defs/signal" },
+    "integrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["int_id", "filled", "expected_slots", "confidence", "fields"],
+        "properties": {
+          "int_id": { "type": "string", "pattern": "^INT-\\d+$" },
+          "name": { "type": "string" },
+          "filled": { "type": "integer", "minimum": 0 },
+          "expected_slots": { "type": "integer", "const": 8 },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "needs_review": { "type": "boolean" },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/signal" }
+          },
+          "target_intent": { "$ref": "#/$defs/signal" }
+        }
+      }
+    },
+    "nfrs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["value", "epic_span"],
+        "properties": {
+          "value": { "type": "string" },
+          "kind": { "type": "string" },
+          "epic_span": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "signal": {
+      "type": "object",
+      "required": ["value", "epic_span"],
+      "properties": {
+        "value": { "type": "string" },
+        "epic_span": { "type": "string", "description": "VERBATIM substring of the Epic text" }
+      }
+    }
+  }
+}

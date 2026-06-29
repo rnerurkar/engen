@@ -27,6 +27,7 @@
 | 7. Composition Validator | Layer 2 — Pattern composition | Section 6 — Iterating on the Design |
 | 8. EvalOps Operations | Layer 4 — EvalOps 3-layer lifecycle | Section 4b — EvalOps Workflow |
 | 9. MCP Server Operations | Layer 2 — Solution Accelerator MCP Server | Section 2.5 — `/accelerator.blueprint` (async invocation) |
+| 9a. Rally MCP Server Integration & `ingest_epic` Ops | Layer 2 — Epic-to-Spec Ingestion (Greenfield) + Appendix § G2 (`mcp.json`) | Section 2.3a — `/accelerator.ingest-epic` |
 | 10. Governance Guardian Operations | Governance Guardian Architecture Extension | Section 2.7a — `/accelerator.assess` |
 | 11. Apigee Proxy + Workload Identity + API Hub A2A Ops | Layer 3 — Generated from app-blueprint.md + Layer 5 — Runtime | Section 2 — `/accelerator.generate` output |
 
@@ -34,7 +35,7 @@
 
 ## 1. Wire-Level Vertex AI Search API Calls
 
-> **Architecture context:** The Solution Accelerator MCP Server (see Architecture Document, Layer 2) exposes six MCP tools to the coding agent: `blueprint_start` (async start), `blueprint_status` (poll), `blueprint_result` (retrieve), `refresh` (bidirectional sync), `validate_composition` (deterministic), and `assemble_blueprint` (deterministic). The first three implement the MCP Tasks async pattern — `blueprint_start` creates a background task that runs the Solution Accelerator LlmAgent, the coding agent polls `blueprint_status` for progress, and retrieves the result via `blueprint_result`. Internally, the background pipeline uses three RAG tools to query Vertex AI Search. These RAG tools are NOT exposed to the coding agent.
+> **Architecture context:** The Solution Accelerator MCP Server (see Architecture Document, Layer 2) exposes nine MCP tools to the coding agent: `blueprint_start` (async start), `blueprint_status` (poll), `blueprint_result` (retrieve), `refresh` (bidirectional sync), `validate_composition` (deterministic), `assemble_blueprint` (deterministic), and the Greenfield Epic front door `ingest_epic_start` / `ingest_epic_status` / `ingest_epic_result`. The first three implement the MCP Tasks async pattern — `blueprint_start` creates a background task that the server runs by delegating to the **Solution Accelerator Agent** (one ADK agent), the coding agent polls `blueprint_status` for progress, and retrieves the result via `blueprint_result`. Internally, the background pipeline uses three RAG tools to query Vertex AI Search. These RAG tools are NOT exposed to the coding agent.
 
 ### Transport security
 
@@ -502,9 +503,9 @@ Starts as first-draft entries from acceptance criteria (see Developer Guide, Sec
 
 ## 9. Solution Accelerator MCP Server Operations
 
-> **Architecture context:** Architecture Document, Layer 2 (MCP Server with 5 tools, async via MCP Tasks). **Developer Guide context:** Developer Guide, Section 2.5 (how the blueprint is created asynchronously). **Blueprint template:** `app-blueprint-md-template-and-fnol-example.md` (12-section template structure and FNOL reference example).
+> **Architecture context:** Architecture Document, Layer 2 (MCP Server with 9 tools incl. the `ingest_epic_*` front door, async via MCP Tasks). **Developer Guide context:** Developer Guide, Section 2.5 (how the blueprint is created asynchronously). **Blueprint template:** `app-blueprint-md-template-and-fnol-example.md` (12-section template structure and FNOL reference example).
 
-The Solution Accelerator has two deployment components: the **MCP API layer** (Cloud Run Service) handling the three fast tools plus two deterministic tools, and the **background pipeline** (Cloud Run Jobs) running the LlmAgent work. A **AlloyDB Task Store** connects them.
+The Solution Accelerator has two deployment components: the **MCP API layer** (Cloud Run Service) handling the async blueprint/ingest tools plus the deterministic tools, and the **background pipeline** (Cloud Run Jobs) running the **Solution Accelerator Agent** (one ADK agent — its `recommend_architecture` and `create_epic_signal_ledger` FunctionTools) work. A **AlloyDB Task Store** connects them.
 
 ### Health checks
 
@@ -532,7 +533,7 @@ The pipeline completion check uses a lightweight golden spec (1 integration) tha
 
 The Solution Accelerator uses semantic versioning (`major.minor.patch`):
 - **Major:** Breaking change to blueprint schema, MCP tool interface, or task lifecycle
-- **Minor:** System prompt update, new pattern added, catalog change
+- **Minor:** System prompt update (either FunctionTool's prompt), new pattern added, catalog change
 - **Patch:** Bug fix, performance improvement
 
 Maintain **2 versions in production** at all times (current + previous) for rollback.
@@ -578,6 +579,8 @@ When a developer reports an issue, the version metadata tells you exactly which 
 9. Verify no tasks remain on old pipeline revision after 1 hour. If old executions persist, investigate.
 
 ### System prompt updates
+
+The Solution Accelerator Agent carries **two** curated system prompts — one per FunctionTool: the **architecture-reasoning** prompt (`recommend_architecture`) and the **epic-shaping** prompt (`create_epic_signal_ledger`, used by `ingest_epic`). A prompt update may target either; run the regression suite for the affected capability (blueprint quality, or epic-ingest extraction/fill-ratio accuracy). Both deploy via the same pipeline-job procedure below.
 
 1. Draft new prompt
 2. Full regression suite against new prompt (run via pipeline staging)
@@ -635,6 +638,64 @@ python3 scripts/mark_orphaned_tasks.py --status=failed --reason="queue_purged"
 | TTL enforcement | Scheduled Cloud Scheduler job runs hourly: `DELETE FROM blueprint_tasks WHERE created_at < NOW() - INTERVAL '24 hours'` |
 | Orphaned tasks (stuck in `working` > 2 hours) | Nightly cleanup job marks as `failed` with reason "timeout" |
 | Storage growth | Monitor row count; at > 10K concurrent records, investigate high-retry developers |
+
+---
+
+## 9a. Rally MCP Server Integration & `ingest_epic` Operations
+
+> Greenfield Epic ingestion. Operational ownership of the **Rally MCP server** (client-side, registered in `.vscode/mcp.json`) and the Solution Accelerator's `ingest_epic*` tools. Architecture: **Architecture § "Epic-to-Spec Ingestion (Greenfield)"** + **Appendix § G2**. Developer flow: **Developer Guide § 2.3a**.
+
+### Topology — two MCP servers, client-orchestrated
+
+The coding agent is the broker. It calls the **Rally MCP server** (employer-hosted, registered in the developer's IDE) to fetch the Epic, then calls **`ingest_epic`** on the Solution Accelerator MCP Server with the Epic payload only. Two consequences for operations:
+
+- **Credential boundary.** Rally auth is the developer's **Entra ID SSO**, resolved inside VS Code. Rally credentials/tokens never transit the Solution Accelerator server. Do not configure Rally service-account credentials on the Solution Accelerator — by design it never holds them.
+- **Failure isolation.** A Rally outage breaks `/accelerator.ingest-epic` retrieval (client-side) but does not affect `/accelerator.blueprint`, `/accelerator.assess`, or `/accelerator.generate`. Developers can always fall back to manual `/specify`.
+
+### Rally MCP server hosting
+
+| Item | Value / procedure |
+|---|---|
+| Host | `https://rally-mcp.internal.<company>.com/mcp` (Cloud Run or on-prem behind the corporate gateway) |
+| Transport | HTTP MCP; TLS 1.3; corporate network / VPN only |
+| Auth | Entra ID SSO bearer token, injected by the VS Code company auth extension via the `mcp.json` `inputs` prompt |
+| Tools exposed (read-only) | `get_epic`, `query_epics`, `get_acceptance_criteria` (Rally Web Services API) — return Epic body, ACs, NFRs, linked features/stories, dependencies, `ObjectVersion`, `LastUpdateDate` |
+| Scope | Read-only against Rally; no write-back to Rally from SDLC Accelerators |
+
+**Token rotation.** Entra ID tokens are short-lived and refreshed by the VS Code auth extension; there is no long-lived secret to rotate in `mcp.json`. If developers hit repeated 401s from Rally, the fix is to re-authenticate SSO in VS Code, not to edit `mcp.json`.
+
+### `ingest_epic` server-side (Solution Accelerator)
+
+`ingest_epic_start/status/result` follow the same async MCP Tasks envelope, Task Store (AlloyDB pointer + GCS), RLS, and retention as `blueprint_*` (see § 9 and Architecture Layer 2 MCP tool table). Two internal phases:
+
+- **Phase A — agentic shaping** reuses the one `LlmAgent` (the `recommend_architecture` model) for a single bounded, schema-constrained extractive pass → **Epic Signal Ledger**. A deterministic validator rejects/repairs non-conforming model output; the agent cannot fabricate or alter requirements (values are span-grounded — no invented numbers) or assign confidence. Capacity planning: this adds one LLM call per ingest on the same model/quota as `recommend_architecture` — size Gemini quota accordingly.
+- **Phase B — deterministic mapping** renders `spec.md` + per-section fill-ratio confidence + Rally provenance stamp. No LLM.
+
+### Health checks
+
+```bash
+# Rally MCP server reachable (from a developer workstation on VPN)
+curl -sf https://rally-mcp.internal.<company>.com/mcp/health && echo OK
+
+# Solution Accelerator ingest tools registered
+# (in a coding agent) /mcp tools  → expect ingest_epic_start / _status / _result
+```
+
+### Troubleshooting
+
+| Symptom | Likely cause | Action |
+|---|---|---|
+| `/accelerator.ingest-epic`: "Rally MCP server not found" | `.vscode/mcp.json` missing or malformed | Add/repair per Architecture Appendix § G2 / Developer Guide § 1.2 |
+| Rally fetch returns 401 | Expired Entra ID SSO session in VS Code | Re-authenticate SSO; do not edit `mcp.json` |
+| `ingest_epic_status` → `failed` (empty ledger) | Epic has no description/acceptance criteria to shape | Ask the BA to flesh out the Epic, or fall back to `/specify` |
+| Many `⚠` low-confidence sections | Epic is sparse / prose-only (e.g. business rules not IF/THEN) | Expected — developer fills gaps in `/specify` review |
+| `/accelerator.refresh`: "Rally Epic changed (ObjectVersion N → M)" | Upstream Epic edited after ingestion | Re-run `/accelerator.ingest-epic` to re-sync; refresh never overwrites developer spec edits silently |
+| Epic-coverage findings in `/accelerator.assess` | Blueprint omits an Epic AC/NFR recorded in the ledger | Address in blueprint, or accept as tech debt (Medium); High if an AC is unmet |
+
+### Metrics to watch
+
+- `ingest_epic` p50/p95 latency (Phase A LLM call dominates), failure rate, and empty-ledger rate (a proxy for Epic quality upstream).
+- Mean per-section confidence per ingest (low trend → tighten the Rally Epic template with the BA org).
 
 ---
 

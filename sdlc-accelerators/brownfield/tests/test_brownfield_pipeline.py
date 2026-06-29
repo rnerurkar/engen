@@ -1,4 +1,5 @@
 """Brownfield pipeline + assembly + generation end-to-end on the reference case."""
+
 import json
 import tempfile
 from pathlib import Path
@@ -15,17 +16,30 @@ REF = ROOT / "examples/vsphere-mpa-aws-spa"
 
 
 def _rows():
-    return [SubstitutionRow(**r) for r in json.loads((REF / "inputs/substitution-table.json").read_text())["rows"]]
+    return [
+        SubstitutionRow(**r)
+        for r in json.loads((REF / "inputs/substitution-table.json").read_text())[
+            "rows"
+        ]
+    ]
 
 
 def _recommend(sub):
-    return {"pattern_ref": sub["transition_pattern_ref"], "confidence": 0.9, "requires_review": False}
+    return {
+        "pattern_ref": sub["transition_pattern_ref"],
+        "confidence": 0.9,
+        "requires_review": False,
+    }
 
 
 def _run():
-    return run_brownfield_pipeline((REF / "inputs/spec.md").read_text(),
-                                   (REF / "inputs/plan.md").read_text(),
-                                   _rows(), adr_rules=[], recommend_fn=_recommend)
+    return run_brownfield_pipeline(
+        (REF / "inputs/spec.md").read_text(),
+        (REF / "inputs/plan.md").read_text(),
+        _rows(),
+        adr_rules=[],
+        recommend_fn=_recommend,
+    )
 
 
 def test_pipeline_completes_reference_case():
@@ -51,11 +65,17 @@ def test_cross_cloud_phase0_injected():
 def test_four_diagrams_generated():
     diagrams = _run()["diagrams"]
     names = {d["name"] for d in diagrams}
-    assert names == {"component-end-state", "sequence-end-state", "sequence-transition", "infrastructure"}
+    assert names == {
+        "component-end-state",
+        "sequence-end-state",
+        "sequence-transition",
+        "infrastructure",
+    }
 
 
 def test_contract_validates_against_schema():
     import jsonschema
+
     schema = json.loads((ROOT / "schemas/design-contract.schema.json").read_text())
     schema["properties"]["tech_substitutions"]["items"] = {"type": "object"}
     jsonschema.validate(_run()["design_contract"], schema)
@@ -74,9 +94,15 @@ def test_readiness_block_raises():
 - **Data volume + SLA:**
 """
     import pytest
+
     with pytest.raises(MigrationReadinessBlocked):
-        run_brownfield_pipeline(bad_spec, "### Integration: INT-001 — x\n- **R-factor:** refactor\n",
-                                _rows(), adr_rules=[], recommend_fn=_recommend)
+        run_brownfield_pipeline(
+            bad_spec,
+            "### Integration: INT-001 — x\n- **R-factor:** refactor\n",
+            _rows(),
+            adr_rules=[],
+            recommend_fn=_recommend,
+        )
 
 
 def test_generation_per_strategy_with_rollback():
@@ -84,8 +110,9 @@ def test_generation_per_strategy_with_rollback():
     plan = parse_plan((REF / "inputs/plan.md").read_text())
     contract = _run()["design_contract"]
     with tempfile.TemporaryDirectory() as d:
-        result = generate_migration_code(contract, plan, spec,
-                                         str(ROOT / "templates/code/brownfield-migration"), d)
+        result = generate_migration_code(
+            contract, plan, spec, str(ROOT / "templates/code/brownfield-migration"), d
+        )
         assert result["count"] == 4
         # INT-004 dual-publish -> dual_write template
         int4 = (Path(d) / "migrations/int_004_migration.py").read_text()
@@ -100,6 +127,8 @@ def test_generation_per_strategy_with_rollback():
 def test_prs_flags_missing_rollback():
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "migrations").mkdir()
-        (Path(d) / "migrations/bad_migration.py").write_text("# no rollback here\ndef route(): pass\n")
+        (Path(d) / "migrations/bad_migration.py").write_text(
+            "# no rollback here\ndef route(): pass\n"
+        )
         violations = check_rollback_paths(d)
         assert len(violations) == 1

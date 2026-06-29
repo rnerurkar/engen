@@ -1,3 +1,5 @@
+> **Lineage:** seeded from Rally Epic `E5105` @ ObjectVersion `8` via `/accelerator.ingest-epic` (see `epic-signal-ledger.json`), then reviewed and completed into this spec.
+
 ---
 template: sdlc-accelerators-spec
 version: "1.0"

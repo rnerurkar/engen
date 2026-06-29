@@ -107,7 +107,7 @@ This repo ships with spec-kit templates, command definitions, skill stubs, JSON 
 | plan template | `templates/plan/plan-template.md` | Generating plan parsing or `/speckit.plan` |
 | app-blueprint template + worked FNOL | `templates/blueprint/app-blueprint-template-and-fnol-example.md` | Generating `assemble_blueprint`, the 9-section model, or the `.md`→`.json` derivation |
 | `/accelerator.*` command defs | `commands/accelerator.{blueprint,assess,generate,refresh}.md` | Generating CLI command handlers |
-| Reasoning stage | `services/solution-accelerator/src/reasoning/recommend_architecture.py` | Single RAG-grounded LlmAgent (curated prompt is human-authored). NO meta-skills — that's AgentForge IP. |
+| Reasoning stage | `services/solution-accelerator/src/reasoning/recommend_architecture.py` | Single RAG-grounded LlmAgent (curated prompt is human-authored). NO meta-skills — that's the external platform IP. |
 | **Authored domain skill (agentic-AI)** | `skills/domain-skills/agentic-ai-adk.SKILL.md` + `templates/code/agentic-ai-adk/` | Generating ADK agent code — the FIRST authored skill, validated against FNOL |
 | JSON schemas | `schemas/*.json` | Generating ANY MCP tool or the app-blueprint structure (read the schema FIRST) |
 | **FNOL worked example** | `examples/fnol/` | The end-to-end golden reference for the WHOLE platform |
@@ -152,4 +152,4 @@ A validated reference output exists at `examples/fnol/generated-sample/` — pro
 - No renaming of protected identifiers.
 - No `localStorage`/browser-storage assumptions (these are backend services).
 - The reasoning *content* (the recommend_architecture curated system prompt) and the Governance Guardian assessment rubric are human-authored — scaffold the structure, but do not invent the judgment logic.
-- **IP boundary:** never introduce meta-skills, STL, or signed Design Contracts here. Those are AgentForge (AnchorOps) constructs. SDLC Accelerators = RAG + skill-constrained generation, zero overlap.
+- **IP boundary:** never introduce meta-skills, STL, or signed Design Contracts here. Those are the external platform (AnchorOps) constructs. SDLC Accelerators = RAG + skill-constrained generation, zero overlap.

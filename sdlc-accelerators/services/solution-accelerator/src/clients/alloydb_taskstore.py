@@ -8,6 +8,7 @@ the actual AlloyDB calls are written below but COMMENTED OUT.
 INTERFACE + query construction are real; an injectable `_execute` seam makes it testable.
 Per root CLAUDE.md, all external calls go through clients/base.with_retry.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -49,19 +50,23 @@ CREATE TABLE IF NOT EXISTS findings_pointers (
 
 
 class AlloydbTaskstoreClient:
-    def __init__(self, instance_uri: str | None = None, database: str = "sdlc_accelerators",
-                 _execute: Callable[[str, tuple], Any] | None = None):
+    def __init__(
+        self,
+        instance_uri: str | None = None,
+        database: str = "sdlc_accelerators",
+        _execute: Callable[[str, tuple[Any, ...]], Any] | None = None,
+    ) -> None:
         self.instance_uri = instance_uri
         self.database = database
-        self._execute = _execute   # test seam: (sql, params) -> rows
+        self._execute = _execute  # test seam: (sql, params) -> rows
 
-    def execute(self, sql: str, params: tuple = ()) -> Any:
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
         """Run a query. Uses the injected _execute in tests; otherwise the live call (commented out)."""
         if self._execute is not None:
-            return with_retry(lambda: self._execute(sql, params))
+            return with_retry(lambda: self._execute(sql, params))  # type: ignore[misc]  # guarded non-None; mypy can't narrow self.attr into a closure
         return self._live_execute(sql, params)
 
-    def _live_execute(self, sql: str, params: tuple) -> Any:
+    def _live_execute(self, sql: str, params: tuple[Any, ...]) -> Any:
         """The actual AlloyDB call. COMMENTED OUT until wired.
 
         TO WIRE (checklist):

@@ -9,6 +9,10 @@ JSON Schemas that pin down every interface. These are the source of truth for co
 | `blueprint_start.json` | Solution Accelerator blueprint_start tool I/O |
 | `blueprint_status.json` | blueprint_status tool I/O |
 | `blueprint_result.json` | blueprint_result tool I/O |
+| `ingest_epic_start.json` | Solution Accelerator ingest_epic_start tool I/O (OPTIONAL Greenfield front door: Rally Epic → spec.md) |
+| `ingest_epic_status.json` | ingest_epic_status tool I/O (phase: shaping → mapping) |
+| `ingest_epic_result.json` | ingest_epic_result tool I/O (spec.md + Epic Signal Ledger + per-section confidence) |
+| `epic-signal-ledger.schema.json` | The Epic Signal Ledger (Phase A output; section-keyed, span-traced) consumed by Phase B |
 | `assemble_blueprint.json` | assemble_blueprint deterministic transform I/O |
 | `validate_composition.json` | validate_composition I/O |
 | `refresh.json` | Bidirectional refresh I/O (Case A/B/C) |

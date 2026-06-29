@@ -4,10 +4,12 @@ The Solution Accelerator constructs the Eraser DSL and sends it to the Eraser MC
 which renders it synchronously and returns the .drawio.xml + .png in one call. The MCP
 transport is the live seam (inject _render in tests); interface + retry + contract are real.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from .base import with_retry
 
@@ -21,8 +23,11 @@ class RenderResult:
 class EraserMcpClient:
     """Client for the Eraser MCP server. Synchronous render; transport is the live seam."""
 
-    def __init__(self, endpoint: str | None = None,
-                 _render: Callable[[str], dict] | None = None):
+    def __init__(
+        self,
+        endpoint: str | None = None,
+        _render: Callable[[str], dict[str, Any]] | None = None,
+    ) -> None:
         self.endpoint = endpoint
         self._render = _render
 
@@ -30,13 +35,14 @@ class EraserMcpClient:
         """DSL -> {drawio_xml, png_base64}, synchronously, via the Eraser MCP server.
         Inject _render in tests; otherwise runs the live MCP call (commented out below)."""
         if self._render is not None:
-            resp = with_retry(lambda: self._render(dsl))
+            resp = with_retry(lambda: self._render(dsl))  # type: ignore[misc]  # guarded non-None; mypy can't narrow self.attr into a closure
         else:
             resp = self._live_render(dsl)
-        return RenderResult(drawio_xml=resp.get("drawio_xml", ""),
-                            png_base64=resp.get("png_base64", ""))
+        return RenderResult(
+            drawio_xml=resp.get("drawio_xml", ""), png_base64=resp.get("png_base64", "")
+        )
 
-    def _live_render(self, dsl: str) -> dict:
+    def _live_render(self, dsl: str) -> dict[str, Any]:
         """The actual Eraser MCP server render call. COMMENTED OUT until wired.
 
         TO WIRE (checklist):

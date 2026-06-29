@@ -1,0 +1,233 @@
+{
+  "schema": "epic-signal-ledger/v1",
+  "provenance": {
+    "source": "rally",
+    "formatted_id": "E4417",
+    "object_version": 14,
+    "last_update_date": "2026-06-22"
+  },
+  "sections": [
+    {
+      "num": 1,
+      "key": "use_case_actors",
+      "title": "Use Case & Actors",
+      "expected_slots": 2,
+      "filled": 2,
+      "confidence": 1.0,
+      "needs_review": false,
+      "optional": false,
+      "signals": [
+        {
+          "value": "Automated FNOL intake agent for auto claims",
+          "kind": "use_case",
+          "epic_span": "Automated First-Notice-of-Loss (FNOL) intake agent for auto claims"
+        },
+        {
+          "value": "Customer filing an auto claim; human adjuster",
+          "kind": "actor",
+          "epic_span": "When a customer files an auto claim"
+        }
+      ]
+    },
+    {
+      "num": 2,
+      "key": "workflow_ordering",
+      "title": "Workflow Ordering",
+      "expected_slots": 3,
+      "filled": 4,
+      "confidence": 1.0,
+      "needs_review": false,
+      "optional": false,
+      "signals": [
+        {
+          "value": "First classify claim severity, then enrich in parallel from three sources",
+          "kind": "ordering",
+          "epic_span": "first classifies claim severity, then in parallel enriches the claim from three sources"
+        },
+        {
+          "value": "Coordinate the enrichment steps and assemble a unified claim record",
+          "kind": "ordering",
+          "epic_span": "coordinates these enrichment steps and assembles a unified claim record"
+        },
+        {
+          "value": "Route high-severity claims to a human adjuster before finalizing",
+          "kind": "ordering",
+          "epic_span": "Route high-severity claims to a human adjuster for review before finalizing"
+        },
+        {
+          "value": "Loop enrichment-and-scoring until completeness score >= 0.9",
+          "kind": "ordering",
+          "epic_span": "Loop the enrichment-and-scoring step until the claim-completeness score is at least 0.9"
+        }
+      ]
+    },
+    {
+      "num": 3,
+      "key": "scope_throughput_latency",
+      "title": "Scope, Throughput & Latency",
+      "expected_slots": 3,
+      "filled": 1,
+      "confidence": 0.33,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "P95 end-to-end intake < 5 minutes",
+          "kind": "latency",
+          "epic_span": "End-to-end intake must complete within 5 minutes at the 95th percentile"
+        }
+      ]
+    },
+    {
+      "num": 4,
+      "key": "data_sources",
+      "title": "Data Sources",
+      "expected_slots": 2,
+      "filled": 4,
+      "confidence": 1.0,
+      "needs_review": false,
+      "optional": false,
+      "signals": [
+        {
+          "value": "Policy system (transactional, read/write)",
+          "kind": "data_source",
+          "epic_span": "Policy system (transactional, read/write)"
+        },
+        {
+          "value": "VIN vehicle lookup service",
+          "kind": "data_source",
+          "epic_span": "VIN vehicle lookup service"
+        },
+        {
+          "value": "Weather service (enrichment)",
+          "kind": "data_source",
+          "epic_span": "the weather service"
+        },
+        {
+          "value": "Claims datastore (write assembled claim)",
+          "kind": "data_source",
+          "epic_span": "writes the assembled claim to the claims datastore"
+        }
+      ]
+    },
+    {
+      "num": 5,
+      "key": "external_partners",
+      "title": "External Partners",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": false,
+      "optional": true,
+      "signals": []
+    },
+    {
+      "num": 6,
+      "key": "actors_permissions",
+      "title": "Actors & Permissions",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 7,
+      "key": "business_rules",
+      "title": "Business Rules (IF/THEN)",
+      "expected_slots": 2,
+      "filled": 3,
+      "confidence": 1.0,
+      "needs_review": false,
+      "optional": false,
+      "signals": [
+        {
+          "value": "IF a body shop operates their own estimate system THEN obtain the estimate via that partner",
+          "kind": "business_rule",
+          "epic_span": "If a body shop operates their own estimate system, the agent obtains the estimate from that partner"
+        },
+        {
+          "value": "IF claim-completeness score < 0.9 THEN re-run enrichment (loop)",
+          "kind": "business_rule",
+          "epic_span": "Loop the enrichment-and-scoring step until the claim-completeness score is at least 0.9"
+        },
+        {
+          "value": "IF severity is high THEN route to a human adjuster",
+          "kind": "business_rule",
+          "epic_span": "Route high-severity claims to a human adjuster"
+        }
+      ]
+    },
+    {
+      "num": 8,
+      "key": "error_handling",
+      "title": "Error Handling & Edge Cases",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 9,
+      "key": "nfrs",
+      "title": "Non-Functional Requirements",
+      "expected_slots": 2,
+      "filled": 3,
+      "confidence": 1.0,
+      "needs_review": false,
+      "optional": false,
+      "signals": [
+        {
+          "value": "Availability 99.9%",
+          "kind": "nfr",
+          "epic_span": "The service must be available 99.9% of the time"
+        },
+        {
+          "value": "RPO 5 min / RTO 30 min",
+          "kind": "nfr",
+          "epic_span": "Recovery point objective of 5 minutes and recovery time objective of 30 minutes"
+        },
+        {
+          "value": "PII encrypted at rest and in transit",
+          "kind": "nfr",
+          "epic_span": "All customer PII must be encrypted at rest and in transit"
+        }
+      ]
+    },
+    {
+      "num": 10,
+      "key": "acceptance_criteria",
+      "title": "Acceptance Criteria",
+      "expected_slots": 3,
+      "filled": 4,
+      "confidence": 1.0,
+      "needs_review": false,
+      "optional": false,
+      "signals": [
+        {
+          "value": "P95 end-to-end < 5 minutes",
+          "kind": "acceptance_criterion",
+          "epic_span": "End-to-end intake must complete within 5 minutes at the 95th percentile"
+        },
+        {
+          "value": "Severity classification accuracy > 95%",
+          "kind": "acceptance_criterion",
+          "epic_span": "Severity classification accuracy must be above 95%"
+        },
+        {
+          "value": "100% of high-severity claims routed to a human adjuster",
+          "kind": "acceptance_criterion",
+          "epic_span": "100% of high-severity claims are routed to a human adjuster"
+        },
+        {
+          "value": "No PII in logs",
+          "kind": "acceptance_criterion",
+          "epic_span": "No PII is written to logs"
+        }
+      ]
+    }
+  ]
+}

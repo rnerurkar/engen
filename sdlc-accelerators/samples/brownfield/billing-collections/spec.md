@@ -1,3 +1,5 @@
+> **Lineage:** seeded from Rally Epic `E6101` @ ObjectVersion `12` via `/accelerator.ingest-epic` (see `epic-signal-ledger.json`), then reviewed and completed into this spec.
+
 # Application Modernization Spec
 
 ## Application Summary

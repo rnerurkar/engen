@@ -213,6 +213,55 @@
     },
     "confidence_scores": {
       "type": "object"
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/skill"
+      }
+    },
+    "to_create": {
+      "type": "object",
+      "description": "Items with no catalog/API-Hub match that the coding agent (/accelerator.generate) must CREATE. Skills \u2192 write skills/<name>/SKILL.md; function_tools \u2192 implement a new ADK FunctionTool.",
+      "properties": {
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "assigned_to": {
+                "type": "string"
+              },
+              "definition": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "function_tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "assigned_to": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "definition": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -315,6 +364,32 @@
         },
         "confidence": {
           "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "to_create"
+          ],
+          "description": "matched = existing A2A agent or MCP tool found in API Hub; to_create = no match at any tier, coding agent builds a new FunctionTool from `definition`."
+        },
+        "definition": {
+          "type": "object",
+          "description": "For a to_create function_tool: the new tool's contract.",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": {
+              "type": "object"
+            },
+            "rationale": {
+              "type": "string"
+            }
+          }
         }
       }
     },
@@ -408,6 +483,49 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "skill": {
+      "type": "object",
+      "required": [
+        "name",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "assigned_to": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "to_create"
+          ]
+        },
+        "sha": {
+          "type": "string",
+          "description": "provenance for a matched catalog skill"
+        },
+        "version": {
+          "type": "string",
+          "description": "provenance for a matched catalog skill"
+        },
+        "definition": {
+          "type": "object",
+          "description": "For a to_create skill: the new SKILL.md to write.",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "skill_md": {
+              "type": "string",
+              "description": "full SKILL.md content (frontmatter + body)"
+            }
           }
         }
       }

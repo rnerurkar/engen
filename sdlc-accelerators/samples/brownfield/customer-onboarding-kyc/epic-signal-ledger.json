@@ -1,0 +1,164 @@
+{
+  "schema": "brownfield-epic-signal-ledger/v1",
+  "provenance": {
+    "source": "rally",
+    "formatted_id": "E6103",
+    "object_version": 10,
+    "last_update_date": "2026-06-21"
+  },
+  "summary": {
+    "value": "a customer onboarding and KYC application on JBoss 7",
+    "epic_span": "a customer onboarding and KYC application on JBoss 7"
+  },
+  "modernization_scope": {
+    "value": "all three integrations are in scope",
+    "epic_span": "all three integrations are in scope"
+  },
+  "integrations": [
+    {
+      "int_id": "INT-001",
+      "name": "Onboarding UI",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "Angular 12 on JBoss 7",
+          "epic_span": "Angular 12 on JBoss 7"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "bidirectional",
+          "epic_span": "bidirectional"
+        },
+        "criticality": {
+          "value": "high",
+          "epic_span": "high"
+        },
+        "coexistence": {
+          "value": "hard-cutover",
+          "epic_span": "hard-cutover"
+        },
+        "api_surface": {
+          "value": "internal pages",
+          "epic_span": "internal pages"
+        },
+        "state": {
+          "value": "session sticky",
+          "epic_span": "session sticky"
+        },
+        "volume_sla": {
+          "value": "500K sessions/day p95 < 600ms",
+          "epic_span": "500K sessions/day p95 < 600ms"
+        }
+      },
+      "target_intent": {
+        "value": "SPA on CloudFront",
+        "epic_span": "SPA on CloudFront"
+      }
+    },
+    {
+      "int_id": "INT-002",
+      "name": "KYC orchestration",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "Camunda 7 on JBoss 7",
+          "epic_span": "Camunda 7 on JBoss 7"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "bidirectional",
+          "epic_span": "bidirectional"
+        },
+        "criticality": {
+          "value": "critical",
+          "epic_span": "critical"
+        },
+        "coexistence": {
+          "value": "dual-read",
+          "epic_span": "dual-read"
+        },
+        "api_surface": {
+          "value": "internal REST documented",
+          "epic_span": "internal REST documented"
+        },
+        "state": {
+          "value": "stateful workflow",
+          "epic_span": "stateful workflow"
+        },
+        "volume_sla": {
+          "value": "300K cases/day p95 < 900ms",
+          "epic_span": "300K cases/day p95 < 900ms"
+        }
+      },
+      "target_intent": {
+        "value": "Step Functions on AWS",
+        "epic_span": "Step Functions on AWS"
+      }
+    },
+    {
+      "int_id": "INT-003",
+      "name": "Identity verification vendor",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "REST client to vendor v2",
+          "epic_span": "REST client to vendor v2"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "read-only",
+          "epic_span": "read-only"
+        },
+        "criticality": {
+          "value": "high",
+          "epic_span": "high"
+        },
+        "coexistence": {
+          "value": "dual-read",
+          "epic_span": "dual-read"
+        },
+        "api_surface": {
+          "value": "OpenAPI 3.0 documented",
+          "epic_span": "OpenAPI 3.0 documented"
+        },
+        "state": {
+          "value": "stateless",
+          "epic_span": "stateless"
+        },
+        "volume_sla": {
+          "value": "250K verifications/day p95 < 1200ms",
+          "epic_span": "250K verifications/day p95 < 1200ms"
+        }
+      },
+      "target_intent": {
+        "value": "API Gateway + Lambda client",
+        "epic_span": "API Gateway + Lambda client"
+      }
+    }
+  ],
+  "nfrs": [
+    {
+      "value": "all applicant PII must be encrypted at rest and in transit",
+      "kind": "nfr",
+      "epic_span": "all applicant PII must be encrypted at rest and in transit"
+    }
+  ]
+}

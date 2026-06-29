@@ -38,7 +38,7 @@ def test_reasoning_boundary_is_enforced():
     Without an injected model_fn, run() must raise NotImplementedError at the single
     live seam (the Gemini call) — it must NOT fabricate a model output.
     (SDLC Accelerators uses RAG + skill-constrained generation, not meta-skills —
-    those are AgentForge IP with zero overlap here.)"""
+    those are out-of-scope external IP IP with zero overlap here.)"""
     import pytest
     from reasoning.recommend_architecture import RecommendArchitecture
     ra = RecommendArchitecture()

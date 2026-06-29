@@ -7,9 +7,11 @@ makes the overall result BLOCK (blueprint_start returns immediately with guidanc
 Brownfield validation prevents data loss in a running production system — it is stricter than
 greenfield's "do we have enough to compose an architecture?".
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from .spec_parser import BrownfieldSpec, Integration
 
@@ -19,7 +21,14 @@ VALID_TYPES = {"sync api", "async messaging", "batch", "db link", "file transfer
 VALID_DIRECTION = {"read-only", "write-only", "bidirectional"}
 VALID_CRIT = {"critical", "high", "medium", "low"}
 VALID_COEXIST = {"dual-read", "dual-write", "hard-cutover", "n/a"}
-VAGUE_TECH = {"legacy", "messaging system", "database", "the system", "old system", "various"}
+VAGUE_TECH = {
+    "legacy",
+    "messaging system",
+    "database",
+    "the system",
+    "old system",
+    "various",
+}
 
 
 @dataclass
@@ -32,20 +41,22 @@ class SignalResult:
 @dataclass
 class IntegrationReadiness:
     integration_id: str
-    signals: list = field(default_factory=list)
+    signals: list[Any] = field(default_factory=list)
 
     @property
     def worst(self) -> str:
         order = {PASS: 0, WARN: 1, BLOCK: 2}
-        return max((s.status for s in self.signals), key=lambda s: order[s], default=PASS)
+        return max(
+            (s.status for s in self.signals), key=lambda s: order[s], default=PASS
+        )
 
 
 @dataclass
 class ReadinessReport:
-    per_integration: list = field(default_factory=list)
+    per_integration: list[Any] = field(default_factory=list)
     score: int = 0
     overall: str = PASS
-    phase_assignment_preview: dict = field(default_factory=dict)
+    phase_assignment_preview: dict[str, Any] = field(default_factory=dict)
 
 
 def _has(v: str) -> bool:
@@ -58,29 +69,43 @@ def _check_integration(it: Integration) -> IntegrationReadiness:
     tech = it.get("technology + version").lower()
     # 1. CSA Completeness
     if not _has(tech):
-        r.signals.append(SignalResult("CSA Completeness", BLOCK, "no technology+version"))
+        r.signals.append(
+            SignalResult("CSA Completeness", BLOCK, "no technology+version")
+        )
     elif any(v in tech for v in VAGUE_TECH) and not any(ch.isdigit() for ch in tech):
         r.signals.append(SignalResult("CSA Completeness", WARN, "vague technology"))
     else:
         r.signals.append(SignalResult("CSA Completeness", PASS))
     # 2. Integration Type
     t = it.get("integration type").lower()
-    r.signals.append(SignalResult("Integration Type", PASS if t in VALID_TYPES else BLOCK, t))
+    r.signals.append(
+        SignalResult("Integration Type", PASS if t in VALID_TYPES else BLOCK, t)
+    )
     # 3. Data Flow Direction
     d = it.get("data flow direction").lower()
-    r.signals.append(SignalResult("Data Flow Direction", PASS if d in VALID_DIRECTION else BLOCK, d))
+    r.signals.append(
+        SignalResult("Data Flow Direction", PASS if d in VALID_DIRECTION else BLOCK, d)
+    )
     # 4. Criticality
     c = it.get("criticality").lower()
-    r.signals.append(SignalResult("Criticality Rating", PASS if c in VALID_CRIT else BLOCK, c))
+    r.signals.append(
+        SignalResult("Criticality Rating", PASS if c in VALID_CRIT else BLOCK, c)
+    )
     # 5. Coexistence
     co = it.get("coexistence constraint").lower()
-    r.signals.append(SignalResult("Coexistence Constraints", PASS if co in VALID_COEXIST else BLOCK, co))
+    r.signals.append(
+        SignalResult(
+            "Coexistence Constraints", PASS if co in VALID_COEXIST else BLOCK, co
+        )
+    )
     # 6. API Surface
     api = it.get("api surface / contract").lower()
     if not _has(api):
         r.signals.append(SignalResult("API Surface", WARN, "unspecified"))
     elif "none" in api and "external" in t:
-        r.signals.append(SignalResult("API Surface", BLOCK, "external API without contract"))
+        r.signals.append(
+            SignalResult("API Surface", BLOCK, "external API without contract")
+        )
     else:
         r.signals.append(SignalResult("API Surface", PASS))
     # 7. State Management
@@ -88,7 +113,9 @@ def _check_integration(it: Integration) -> IntegrationReadiness:
     r.signals.append(SignalResult("State Management", PASS if _has(st) else BLOCK, st))
     # 8. Data Volume + SLA
     vol = it.get("data volume + sla").lower()
-    r.signals.append(SignalResult("Data Volume + SLA", PASS if _has(vol) else BLOCK, vol))
+    r.signals.append(
+        SignalResult("Data Volume + SLA", PASS if _has(vol) else BLOCK, vol)
+    )
     return r
 
 
@@ -108,7 +135,7 @@ def validate_spec(spec: BrownfieldSpec) -> ReadinessReport:
         # CSA diagram missing or <3 integrations -> CSA Completeness BLOCK at the spec level.
         report.overall = BLOCK
     total_signals, pass_signals = 0, 0
-    phases = {1: [], 2: [], 3: []}
+    phases: dict[int, list[Any]] = {1: [], 2: [], 3: []}
     for it in spec.integrations:
         ir = _check_integration(it)
         report.per_integration.append(ir)
@@ -121,6 +148,8 @@ def validate_spec(spec: BrownfieldSpec) -> ReadinessReport:
         phases[_phase_of(it)].append(it.integration_id)
     report.score = round(100 * pass_signals / total_signals) if total_signals else 0
     report.phase_assignment_preview = {f"phase_{k}": v for k, v in phases.items()}
-    if report.overall != BLOCK and any(ir.worst == WARN for ir in report.per_integration):
+    if report.overall != BLOCK and any(
+        ir.worst == WARN for ir in report.per_integration
+    ):
         report.overall = WARN
     return report

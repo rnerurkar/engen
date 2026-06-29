@@ -3,10 +3,12 @@
 Deterministic. Each '### Integration: INT-XXX' block yields a PlanDecision. R-factor vocabulary
 is FIXED (rehost/replatform/refactor/rearchitect/retire) — anything else raises.
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 VALID_R_FACTORS = {"rehost", "replatform", "refactor", "rearchitect", "retire"}
 
@@ -27,10 +29,10 @@ class PlanDecision:
     phase: int = 2
     rollback_path: str = ""
     coupling: str = ""
-    context: dict = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
 
 
-def _parse_context(raw: str) -> dict:
+def _parse_context(raw: str) -> dict[str, Any]:
     """'criticality=high, data_size_class=small' -> {criticality: high, ...}."""
     ctx = {}
     for part in raw.split(","):
@@ -49,22 +51,28 @@ def parse_plan(md: str) -> list[PlanDecision]:
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(md)
         block = md[start:end]
-        fields = {fm.group(1).strip().lower(): fm.group(2).strip() for fm in FIELD_RE.finditer(block)}
+        fields = {
+            fm.group(1).strip().lower(): fm.group(2).strip()
+            for fm in FIELD_RE.finditer(block)
+        }
         r_factor = fields.get("r-factor", "").lower()
         if r_factor not in VALID_R_FACTORS:
             raise InvalidRFactorError(
                 f"{int_id}: r-factor '{r_factor}' not in {sorted(VALID_R_FACTORS)}"
             )
         phase_raw = fields.get("phase", "2")
-        phase = int(re.search(r"\d+", phase_raw).group()) if re.search(r"\d+", phase_raw) else 2
-        decisions.append(PlanDecision(
-            integration_id=int_id,
-            r_factor=r_factor,
-            cutover_strategy=fields.get("cutover strategy", ""),
-            coexistence_window=fields.get("coexistence window", ""),
-            phase=phase,
-            rollback_path=fields.get("rollback path", ""),
-            coupling=fields.get("coupling", ""),
-            context=_parse_context(fields.get("context dimensions", "")),
-        ))
+        _pm = re.search(r"\d+", phase_raw)
+        phase = int(_pm.group()) if _pm else 2
+        decisions.append(
+            PlanDecision(
+                integration_id=int_id,
+                r_factor=r_factor,
+                cutover_strategy=fields.get("cutover strategy", ""),
+                coexistence_window=fields.get("coexistence window", ""),
+                phase=phase,
+                rollback_path=fields.get("rollback path", ""),
+                coupling=fields.get("coupling", ""),
+                context=_parse_context(fields.get("context dimensions", "")),
+            )
+        )
     return decisions

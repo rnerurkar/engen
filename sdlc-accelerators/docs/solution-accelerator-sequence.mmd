@@ -4,7 +4,9 @@
 sequenceDiagram
     participant Dev as Developer (IDE)
     participant CA as Coding Agent
+    participant RA as Rally MCP Server<br/>(.vscode/mcp.json)
     participant BA as Solution Accelerator<br/>MCP Server
+    participant SAA as Solution Accelerator Agent<br/>(ADK · recommend_architecture<br/>+ create_epic_signal_ledger)
     participant BG as Background Job<br/>(Cloud Run Job)
     participant VS as Vertex AI Search
     participant AH as Apigee API Hub
@@ -12,6 +14,29 @@ sequenceDiagram
     participant TS as Task Store (AlloyDB)
     participant AS as Artifact Store<br/>(GCS + AlloyDB pointer)
     participant GG as Governance Guardian<br/>MCP Server
+
+    Note over Dev,GG: Phase 0 — /accelerator.ingest-epic (OPTIONAL · Greenfield · Rally Epic → spec.md)
+
+    Dev->>CA: /accelerator.ingest-epic
+    CA->>Dev: Ask for Rally Epic FormattedID (capability-negotiated interview)
+    Dev->>CA: Epic FormattedID (e.g. E1234)
+    CA->>RA: get_epic(FormattedID) [client-side · Entra ID SSO]
+    RA-->>CA: Epic body + ACs + NFRs + dependencies + ObjectVersion
+    CA->>BA: ingest_epic_start(epic) [epic content only — no credentials]
+    BA->>TS: Create task (status: queued)
+    BA-->>CA: { taskId, pollInterval }
+    loop Poll until complete
+        CA->>BA: ingest_epic_status(taskId)
+        BA-->>CA: { status: running, phase: "shaping" / "mapping" }
+    end
+    BA->>SAA: Phase A — delegate create_epic_signal_ledger(epic)
+    SAA-->>BA: Epic Signal Ledger (extractive · span-traced; the agent cannot invent)
+    BA->>BA: Phase B — deterministic mapping (ledger → signal-bearing spec.md<br/>+ fill-ratio confidence + Rally ObjectVersion stamp)
+    BA->>AS: Write spec.md + epic-signal-ledger.json
+    BA->>TS: Update task (status: completed)
+    CA->>BA: ingest_epic_result(taskId)
+    BA-->>CA: { spec_md, epic_signal_ledger, per_section_confidence }
+    CA->>Dev: Write spec.md + epic-signal-ledger.json → review, then /plan → /accelerator.blueprint
 
     Note over Dev,GG: Phase 1 — /accelerator.blueprint (Async MCP Tasks)
 
@@ -27,13 +52,14 @@ sequenceDiagram
         BA-->>CA: { status: running, stage: "reasoning..." }
     end
 
-    %% Default: BG runs the stages directly. OPT-IN: runs as greenfield_blueprint_orchestrator
-    %% (SequentialAgent); greenfield_architecture_recommender (LlmAgent) calls the pattern-search tool.
+    %% BG runs the deterministic stages and DELEGATES reasoning to the Solution Accelerator Agent (ADK):
+    %% its recommend_architecture FunctionTool calls the pattern-search tool; create_epic_signal_ledger is its other tool.
     BG->>VS: search_architecture_patterns(spec signals) [FunctionTool]
     VS-->>BG: matched patterns + confidence
     BG->>AH: discover_integrations(spec §4-§5)
     AH-->>BG: MCP servers + A2A agents + REST APIs
-    BG->>BG: recommend_architecture (LlmAgent selects + scores)
+    BG->>SAA: recommend_architecture(spec, plan) [delegate]
+    SAA-->>BG: ArchitectureSelections (the agent selects + scores)
     BG->>BG: validate_composition (adjacency)
     BG->>BG: adr_compliance_check (deterministic)
     BG->>BG: assemble_blueprint (.md + .json + Eraser DSL)

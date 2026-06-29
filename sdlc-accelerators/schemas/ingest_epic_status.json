@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ingest_epic_status",
+  "description": "Poll Epic ingestion progress.",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": ["taskId"],
+      "properties": { "taskId": { "type": "string" } }
+    },
+    "output": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["queued", "running", "completed", "failed"] },
+        "phase": { "type": "string", "enum": ["shaping", "mapping", "done", ""], "description": "Phase A = shaping, Phase B = mapping" },
+        "error": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

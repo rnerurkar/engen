@@ -1,0 +1,72 @@
+{
+  "metadata": {
+    "name": "fnol-claims-intake-agent",
+    "version": "1.0.0",
+    "archetype": "agentic",
+    "description": "Automated FNOL intake: classify severity, enrich from three sources in parallel, route high-severity to a human adjuster (Sequential[Parallel] + HITL)",
+    "team": "claims-engineering",
+    "lob": "Claims",
+    "source_spec": "Rally Epic E2207 @ ObjectVersion 14 (Epic-ingested)"
+  },
+  "pattern_composition": {
+    "root_pattern": "Sequential",
+    "composition": ["Sequential", "Parallel", "Router+HITL"]
+  },
+  "agents": [
+    { "name": "fnol_intake_coordinator", "type": "SequentialAgent", "role": "Root — classify -> enrich -> route", "parent": null, "model": null, "tools": [] },
+    { "name": "severity_classifier", "type": "LlmAgent", "role": "Classify claim severity", "parent": "fnol_intake_coordinator", "model": "gemini-2.0-flash", "tools": ["policy-db-mcp"] },
+    { "name": "claim_enrichment", "type": "ParallelAgent", "role": "Enrich from three sources concurrently", "parent": "fnol_intake_coordinator", "model": null, "tools": [] },
+    { "name": "policy_lookup", "type": "LlmAgent", "role": "Read/update the policy database", "parent": "claim_enrichment", "model": "gemini-2.0-flash", "tools": ["policy-db-mcp"] },
+    { "name": "claims_history", "type": "LlmAgent", "role": "Pull prior claims history", "parent": "claim_enrichment", "model": "gemini-2.0-flash", "tools": ["claims-history-mcp"] },
+    { "name": "fraud_signals", "type": "LlmAgent", "role": "Pull fraud signals", "parent": "claim_enrichment", "model": "gemini-2.0-flash", "tools": ["fraud-signals-mcp"] },
+    { "name": "adjuster_router", "type": "LlmAgent", "role": "Route high-severity claims to a human adjuster", "parent": "fnol_intake_coordinator", "model": "gemini-2.0-flash", "tools": ["hitl_escalation_fn"] }
+  ],
+  "tools": {
+    "mcp_servers": [
+      { "name": "policy-db-mcp", "endpoint": "mcp://policy-db.internal:8080", "auth_method": "mtls", "assigned_to": "policy_lookup", "timeout": "20s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "claims-history-mcp", "endpoint": "mcp://claims-history.internal:8080", "auth_method": "mtls", "assigned_to": "claims_history", "timeout": "15s", "retry": 2, "discovered_via": "Apigee API Hub" },
+      { "name": "fraud-signals-mcp", "endpoint": "mcp://fraud-signals.internal:8080", "auth_method": "mtls", "assigned_to": "fraud_signals", "timeout": "15s", "retry": 2, "discovered_via": "Apigee API Hub" }
+    ],
+    "a2a_agents": [],
+    "function_tools": [
+      { "name": "hitl_escalation_fn", "assigned_to": "adjuster_router", "business_rules_ref": "spec §2 routing + §10 severity threshold" }
+    ]
+  },
+  "infrastructure": {
+    "modules": [
+      { "name": "tf-cloud-run-agent", "source": "github.com/company/terraform-modules/cloud-run-agent", "version": "v4.1.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-alloydb", "source": "github.com/company/terraform-modules/alloydb", "version": "v3.0.0", "assigned_to": "policy-db-mcp", "dr_aware": true },
+      { "name": "tf-firestore", "source": "github.com/company/terraform-modules/firestore", "version": "v1.5.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-apigee-proxy", "source": "github.com/company/terraform-modules/apigee-proxy", "version": "v2.5.0", "assigned_to": "all", "dr_aware": true },
+      { "name": "tf-workload-identity", "source": "github.com/company/terraform-modules/workload-identity", "version": "v2.2.0", "assigned_to": "all", "dr_aware": false },
+      { "name": "tf-vpc-sc-cmek", "source": "github.com/company/terraform-modules/vpc-sc-cmek", "version": "v1.4.0", "assigned_to": "all", "dr_aware": true }
+    ],
+    "dr_strategy": "hot-standby",
+    "primary_region": "us-east4",
+    "dr_region": "us-central1"
+  },
+  "business_rules": {
+    "hitl_escalation_fn": [
+      { "condition": "severity == high", "action": "route_to_human_adjuster = true (HITL)" },
+      { "condition": "enrichment branch timeout", "action": "partial_enrichment = true; flag for adjuster" }
+    ]
+  },
+  "screening_config": {
+    "agents_with_input_screening": ["severity_classifier", "policy_lookup", "claims_history", "fraud_signals"],
+    "agents_with_output_screening": ["adjuster_router"],
+    "pii_fields": ["claimant_name", "policy_number", "claim_id", "loss_details"]
+  },
+  "evalops": {
+    "golden_dataset": { "entries": [], "min_count": 5 },
+    "eval_frequency": "pre-commit",
+    "hitl_reviewers": 2,
+    "autosxs_baseline": "manual-intake-v0"
+  },
+  "nfrs": [
+    { "category": "latency", "requirement": "end-to-end intake", "target": "<5min p95" },
+    { "category": "quality", "requirement": "severity classification accuracy", "target": ">95%" },
+    { "category": "availability", "requirement": "service uptime", "target": "99.9%" },
+    { "category": "security", "requirement": "claimant + policy PII", "target": "CMEK at rest, masked in logs, TLS 1.3" }
+  ],
+  "blueprint_hash": "sha256:fnol-claims-intake-7a8b9c0d..."
+}

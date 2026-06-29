@@ -1,0 +1,164 @@
+{
+  "schema": "brownfield-epic-signal-ledger/v1",
+  "provenance": {
+    "source": "rally",
+    "formatted_id": "E6105",
+    "object_version": 9,
+    "last_update_date": "2026-06-21"
+  },
+  "summary": {
+    "value": "a payments and statements application on WebSphere 9",
+    "epic_span": "a payments and statements application on WebSphere 9"
+  },
+  "modernization_scope": {
+    "value": "all three integrations are in scope",
+    "epic_span": "all three integrations are in scope"
+  },
+  "integrations": [
+    {
+      "int_id": "INT-001",
+      "name": "Statement retrieval API",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "JAX-RS on WebSphere 9",
+          "epic_span": "JAX-RS on WebSphere 9"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "read-only",
+          "epic_span": "read-only"
+        },
+        "criticality": {
+          "value": "high",
+          "epic_span": "high"
+        },
+        "coexistence": {
+          "value": "dual-read",
+          "epic_span": "dual-read"
+        },
+        "api_surface": {
+          "value": "OpenAPI 3.0 documented",
+          "epic_span": "OpenAPI 3.0 documented"
+        },
+        "state": {
+          "value": "stateless",
+          "epic_span": "stateless"
+        },
+        "volume_sla": {
+          "value": "3M calls/day p95 < 300ms",
+          "epic_span": "3M calls/day p95 < 300ms"
+        }
+      },
+      "target_intent": {
+        "value": "Spring Boot API on ECS",
+        "epic_span": "Spring Boot API on ECS"
+      }
+    },
+    {
+      "int_id": "INT-002",
+      "name": "Statement PDF rendering",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "Batch renderer on WebSphere 9",
+          "epic_span": "Batch renderer on WebSphere 9"
+        },
+        "type": {
+          "value": "batch",
+          "epic_span": "batch"
+        },
+        "direction": {
+          "value": "write-only",
+          "epic_span": "write-only"
+        },
+        "criticality": {
+          "value": "medium",
+          "epic_span": "medium"
+        },
+        "coexistence": {
+          "value": "dual-write",
+          "epic_span": "dual-write"
+        },
+        "api_surface": {
+          "value": "internal jobs",
+          "epic_span": "internal jobs"
+        },
+        "state": {
+          "value": "stateless",
+          "epic_span": "stateless"
+        },
+        "volume_sla": {
+          "value": "nightly 2M statements batch SLA 6h",
+          "epic_span": "nightly 2M statements batch SLA 6h"
+        }
+      },
+      "target_intent": {
+        "value": "AWS Batch on Fargate",
+        "epic_span": "AWS Batch on Fargate"
+      }
+    },
+    {
+      "int_id": "INT-003",
+      "name": "Payment posting and fraud",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "Apigee client v1 cross-cloud",
+          "epic_span": "Apigee client v1 cross-cloud"
+        },
+        "type": {
+          "value": "async messaging",
+          "epic_span": "async messaging"
+        },
+        "direction": {
+          "value": "write-only",
+          "epic_span": "write-only"
+        },
+        "criticality": {
+          "value": "critical",
+          "epic_span": "critical"
+        },
+        "coexistence": {
+          "value": "dual-write",
+          "epic_span": "dual-write"
+        },
+        "api_surface": {
+          "value": "message contract documented",
+          "epic_span": "message contract documented"
+        },
+        "state": {
+          "value": "stateless",
+          "epic_span": "stateless"
+        },
+        "volume_sla": {
+          "value": "900K postings/day",
+          "epic_span": "900K postings/day"
+        }
+      },
+      "target_intent": {
+        "value": "AWS SQS + Apigee cross-cloud",
+        "epic_span": "AWS SQS + Apigee cross-cloud"
+      }
+    }
+  ],
+  "nfrs": [
+    {
+      "value": "recovery point objective of 5 minutes and recovery time objective of 30 minutes",
+      "kind": "nfr",
+      "epic_span": "recovery point objective of 5 minutes and recovery time objective of 30 minutes"
+    }
+  ]
+}

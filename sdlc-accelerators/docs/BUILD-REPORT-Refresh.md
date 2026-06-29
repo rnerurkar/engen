@@ -21,7 +21,7 @@ fully implemented; the two prose↔structure bridges are LLM seams (injected, no
 - `orchestrator.py` — refresh(): Steps 0→1→2→3, case routing, sync_report/structural_report contract
 
 ## Why "fully implement" is not literally possible (by design)
-Architecture line 1170: "**LLM is required for prose↔structure bridging.** Unlike AgentForge
+Architecture line 1170: "**LLM is required for prose↔structure bridging.** Unlike the external platform
 (machine-parseable STL → fully deterministic sync), SDLC Accelerators's .md uses narrative prose."
 So two operations are LLM-only by design and are wired as injected seams:
 - `md_to_topology(md, spec, plan)` — Case A/C: prose → structure (extract topology from edited §2 narrative)

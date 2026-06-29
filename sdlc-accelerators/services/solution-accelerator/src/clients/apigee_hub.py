@@ -4,10 +4,12 @@ INTERFACE + query construction + response shaping are real and tested. The live 
 to Apigee API Hub is written below but COMMENTED OUT (uncomment + supply credentials/SDK to wire).
 A `_search` seam lets tests inject a deterministic API Hub response.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from .base import with_retry
 
@@ -15,54 +17,66 @@ from .base import with_retry
 @dataclass
 class ApiHubEntry:
     """One registered integration from API Hub (raw shape, before A2A/MCP/REST classification)."""
+
     api_id: str
-    api_type: str                 # a2a_agent | mcp_server | rest_api
+    api_type: str  # a2a_agent | mcp_server | rest_api
     display_name: str
     endpoint: str = ""
     auth_method: str = ""
-    capabilities: list = field(default_factory=list)
+    capabilities: list[Any] = field(default_factory=list)
     agent_card_url: str = ""
     lifecycle: str = "active"
     version: str = ""
 
 
 class ApigeeHubClient:
-    def __init__(self, project_id: str | None = None, location: str = "us-central1",
-                 api_hub_instance: str | None = None,
-                 _search: Callable[[str], list] | None = None):
+    def __init__(
+        self,
+        project_id: str | None = None,
+        location: str = "us-central1",
+        api_hub_instance: str | None = None,
+        _search: Callable[[str], list[Any]] | None = None,
+    ) -> None:
         self.project_id = project_id
         self.location = location
         self.api_hub_instance = api_hub_instance
-        self._search = _search   # test injection seam
+        self._search = _search  # test injection seam
 
     @staticmethod
-    def build_filter(api_type: str | None = None, capabilities: list[str] | None = None,
-                     lifecycle: str = "active") -> str:
+    def build_filter(
+        api_type: str | None = None,
+        capabilities: list[str] | None = None,
+        lifecycle: str = "active",
+    ) -> str:
         """Build an API Hub list filter. e.g. type=a2a_agent, capabilities CONTAINS 'body-shop-estimate'.
         This is the deterministic query-construction the doc describes (line 120)."""
         clauses = []
         if api_type:
-            clauses.append(f"attributes.type=\"{api_type}\"")
+            clauses.append(f'attributes.type="{api_type}"')
         for cap in capabilities or []:
-            clauses.append(f"attributes.capabilities:\"{cap}\"")
+            clauses.append(f'attributes.capabilities:"{cap}"')
         if lifecycle:
-            clauses.append(f"attributes.lifecycle=\"{lifecycle}\"")
+            clauses.append(f'attributes.lifecycle="{lifecycle}"')
         return " AND ".join(clauses)
 
-    def search(self, api_type: str | None = None, capabilities: list[str] | None = None,
-               lifecycle: str = "active") -> list[ApiHubEntry]:
+    def search(
+        self,
+        api_type: str | None = None,
+        capabilities: list[str] | None = None,
+        lifecycle: str = "active",
+    ) -> list[ApiHubEntry]:
         """Query API Hub and return entries. Uses the injected _search in tests; otherwise
         runs the live call (currently commented out — see _live_search)."""
         flt = self.build_filter(api_type, capabilities, lifecycle)
         if self._search is not None:
-            raw = with_retry(lambda: self._search(flt))
+            raw = with_retry(lambda: self._search(flt))  # type: ignore[misc]  # guarded non-None; mypy can't narrow self.attr into a closure
         else:
             # Live path: the API Hub call is commented out. Raise NotImplementedError directly
             # (not through with_retry — it is not a transient failure worth retrying).
             raw = self._live_search(flt)
         return [self._to_entry(r) for r in raw]
 
-    def _to_entry(self, r: dict) -> ApiHubEntry:
+    def _to_entry(self, r: dict[str, Any]) -> ApiHubEntry:
         """Shape a raw API Hub record into ApiHubEntry (tolerant of the documented attributes)."""
         attrs = r.get("attributes", r)
         return ApiHubEntry(
@@ -77,7 +91,7 @@ class ApigeeHubClient:
             version=str(attrs.get("version", r.get("version", ""))),
         )
 
-    def _live_search(self, api_hub_filter: str) -> list:
+    def _live_search(self, api_hub_filter: str) -> list[Any]:
         """The actual Apigee API Hub network call. COMMENTED OUT until wired.
 
         TO WIRE (checklist):

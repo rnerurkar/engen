@@ -1,0 +1,164 @@
+{
+  "schema": "brownfield-epic-signal-ledger/v1",
+  "provenance": {
+    "source": "rally",
+    "formatted_id": "E6102",
+    "object_version": 14,
+    "last_update_date": "2026-06-21"
+  },
+  "summary": {
+    "value": "a claims portal multi-page application on Tomcat 9",
+    "epic_span": "a claims portal multi-page application on Tomcat 9"
+  },
+  "modernization_scope": {
+    "value": "all three integrations are in scope",
+    "epic_span": "all three integrations are in scope"
+  },
+  "integrations": [
+    {
+      "int_id": "INT-001",
+      "name": "UI rendering",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "JSP on Tomcat 9",
+          "epic_span": "JSP on Tomcat 9"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "bidirectional",
+          "epic_span": "bidirectional"
+        },
+        "criticality": {
+          "value": "high",
+          "epic_span": "high"
+        },
+        "coexistence": {
+          "value": "hard-cutover",
+          "epic_span": "hard-cutover"
+        },
+        "api_surface": {
+          "value": "internal pages",
+          "epic_span": "internal pages"
+        },
+        "state": {
+          "value": "session sticky",
+          "epic_span": "session sticky"
+        },
+        "volume_sla": {
+          "value": "2M page views/day p95 < 800ms",
+          "epic_span": "2M page views/day p95 < 800ms"
+        }
+      },
+      "target_intent": {
+        "value": "SPA on CloudFront",
+        "epic_span": "SPA on CloudFront"
+      }
+    },
+    {
+      "int_id": "INT-002",
+      "name": "Server-side application logic",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "Servlet 4.0 on Tomcat 9",
+          "epic_span": "Servlet 4.0 on Tomcat 9"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "bidirectional",
+          "epic_span": "bidirectional"
+        },
+        "criticality": {
+          "value": "critical",
+          "epic_span": "critical"
+        },
+        "coexistence": {
+          "value": "dual-read",
+          "epic_span": "dual-read"
+        },
+        "api_surface": {
+          "value": "internal REST undocumented",
+          "epic_span": "internal REST undocumented"
+        },
+        "state": {
+          "value": "session sticky",
+          "epic_span": "session sticky"
+        },
+        "volume_sla": {
+          "value": "5M requests/day p95 < 500ms",
+          "epic_span": "5M requests/day p95 < 500ms"
+        }
+      },
+      "target_intent": {
+        "value": "Spring Boot BFF on ECS Fargate",
+        "epic_span": "Spring Boot BFF on ECS Fargate"
+      }
+    },
+    {
+      "int_id": "INT-003",
+      "name": "Domain API consumption",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "IBM API Connect 10 client",
+          "epic_span": "IBM API Connect 10 client"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "read-only",
+          "epic_span": "read-only"
+        },
+        "criticality": {
+          "value": "high",
+          "epic_span": "high"
+        },
+        "coexistence": {
+          "value": "dual-read",
+          "epic_span": "dual-read"
+        },
+        "api_surface": {
+          "value": "OpenAPI 3.0 documented",
+          "epic_span": "OpenAPI 3.0 documented"
+        },
+        "state": {
+          "value": "stateless",
+          "epic_span": "stateless"
+        },
+        "volume_sla": {
+          "value": "1M calls/day p95 < 300ms",
+          "epic_span": "1M calls/day p95 < 300ms"
+        }
+      },
+      "target_intent": {
+        "value": "Apigee client",
+        "epic_span": "Apigee client"
+      }
+    }
+  ],
+  "nfrs": [
+    {
+      "value": "modernize to a cloud-native SPA",
+      "kind": "nfr",
+      "epic_span": "modernize to a cloud-native SPA"
+    }
+  ]
+}

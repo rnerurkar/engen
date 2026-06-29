@@ -4,12 +4,29 @@
     <filter id="sh" x="-3%" y="-3%" width="106%" height="106%">
       <feDropShadow dx="0.5" dy="0.5" stdDeviation="1.5" flood-color="#00000010" />
     </filter>
+    <marker id="ga" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto"><polygon points="0 0, 7 2.5, 0 5" fill="#bbb"/></marker>
   </defs>
   <rect x="0" y="0" width="1100" height="1020" fill="#FFFFFF" />
   <line x1="230" y1="60" x2="230" y2="810" stroke="#E0E0E0" stroke-width="3" />
   <text x="530" y="22" font-size="22" font-weight="bold" fill="#1a1a2e" text-anchor="middle">SDLC Accelerators</text>
   <text x="730" y="22" font-size="16" font-weight="normal" fill="#888" text-anchor="start">— How It Works</text>
   <text x="550" y="40" font-size="10" font-weight="normal" fill="#999" text-anchor="middle">From business requirements to production-ready agent code in under 1 hour</text>
+
+  <!-- Optional Epic front door (Greenfield) -->
+  <rect x="880" y="72" width="212" height="190" rx="8" fill="#FFF8E1" stroke="#F9A825" stroke-width="1.2" filter="url(#sh)" />
+  <text x="986" y="89" font-size="9" font-weight="bold" fill="#F57F17" text-anchor="middle">Optional Front Door</text>
+  <text x="986" y="101" font-size="8" font-weight="bold" fill="#F57F17" text-anchor="middle">(Greenfield) — before Step 1</text>
+  <text x="986" y="118" font-size="8.5" font-weight="bold" fill="#333" text-anchor="middle">/accelerator.ingest-epic</text>
+  <text x="986" y="130" font-size="8" fill="#555" text-anchor="middle">start from a Rally Epic</text>
+  <text x="986" y="141" font-size="8" fill="#555" text-anchor="middle">instead of a blank /specify</text>
+  <text x="986" y="158" font-size="8" fill="#555" text-anchor="middle">Rally MCP (mcp.json · SSO)</text>
+  <text x="986" y="169" font-size="8" fill="#555" text-anchor="middle">fetches Epic → coding agent</text>
+  <text x="986" y="180" font-size="8" fill="#555" text-anchor="middle">calls ingest_epic</text>
+  <text x="986" y="197" font-size="8" fill="#C62828" text-anchor="middle">Phase A agentic shaping</text>
+  <text x="986" y="208" font-size="7.5" fill="#C62828" text-anchor="middle">(Solution Accelerator Agent → Ledger)</text>
+  <text x="986" y="225" font-size="8" fill="#2E7D32" text-anchor="middle">Phase B deterministic mapping</text>
+  <text x="986" y="236" font-size="8" fill="#2E7D32" text-anchor="middle">→ signal-bearing spec.md</text>
+  <text x="986" y="252" font-size="8" font-style="italic" fill="#777" text-anchor="middle">review, not author</text>
   <circle cx="215" cy="84" r="22" fill="#EF6C00" />
   <text x="215" y="90" font-size="16" font-weight="bold" fill="#FFF" text-anchor="middle">1</text>
   <text x="290" y="77" font-size="14" font-weight="bold" fill="#EF6C00" text-anchor="start">Capture Requirements</text>

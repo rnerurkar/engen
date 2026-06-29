@@ -15,10 +15,12 @@ Config via env:
 The system_prompt is the human-authored curated reasoning prompt — bound verbatim as the
 instruction. This module does NOT author or mutate reasoning content.
 """
+
 from __future__ import annotations
 
 import json
 import os
+from typing import Any, cast
 
 from clients.base import with_retry
 
@@ -38,16 +40,22 @@ def available() -> tuple[bool, str]:
     use_vertex = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").lower() == "true"
     if use_vertex:
         if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
-            return False, "GOOGLE_CLOUD_PROJECT not set (required for Vertex AI backend)"
+            return (
+                False,
+                "GOOGLE_CLOUD_PROJECT not set (required for Vertex AI backend)",
+            )
         return True, ""
     if os.environ.get("GEMINI_API_KEY"):
         return True, ""
-    return False, ("no credentials: set GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT "
-                   "(Vertex AI + ADC), or GEMINI_API_KEY (direct Gemini API)")
+    return False, (
+        "no credentials: set GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT "
+        "(Vertex AI + ADC), or GEMINI_API_KEY (direct Gemini API)"
+    )
 
 
-def _build_client():
+def _build_client() -> Any:
     from google import genai
+
     use_vertex = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").lower() == "true"
     if use_vertex:
         return genai.Client(
@@ -58,7 +66,7 @@ def _build_client():
     return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 
-def invoke(system_prompt: str, user_message: str) -> dict:
+def invoke(system_prompt: str, user_message: str) -> dict[str, Any]:
     """Live Gemini call. Returns the parsed JSON dict the recommend parser expects.
 
     Raises RuntimeError with an actionable message if the path isn't configured."""
@@ -70,16 +78,16 @@ def invoke(system_prompt: str, user_message: str) -> dict:
 
     client = _build_client()
 
-    def _call() -> dict:
+    def _call() -> dict[str, Any]:
         resp = client.models.generate_content(
             model=_model(),
             contents=user_message,
             config=types.GenerateContentConfig(
-                system_instruction=system_prompt,   # authored prompt, verbatim
+                system_instruction=system_prompt,  # authored prompt, verbatim
                 response_mime_type="application/json",
-                temperature=0.2,                     # low temp: reasoning should be stable
+                temperature=0.2,  # low temp: reasoning should be stable
             ),
         )
-        return json.loads(resp.text)
+        return cast("dict[str, Any]", json.loads(resp.text))
 
     return with_retry(_call)

@@ -7,39 +7,44 @@ but COMMENTED OUT, plus the in-memory reference backing used until it is wired.
 Usage: pass `client.put` / `client.get` as the _gcs_put / _gcs_get seam to a store.
 Per root CLAUDE.md, all external calls go through clients/base.with_retry.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from .base import with_retry
 
 
 def _parse_gs_uri(uri: str) -> tuple[str, str]:
     """gs://bucket/path/to/obj -> (bucket, path/to/obj)."""
-    rest = uri[len("gs://"):] if uri.startswith("gs://") else uri
+    rest = uri[len("gs://") :] if uri.startswith("gs://") else uri
     bucket, _, obj = rest.partition("/")
     return bucket, obj
 
 
 class GcsClient:
-    def __init__(self, _put: Callable[[str, bytes], None] | None = None,
-                 _get: Callable[[str], bytes] | None = None):
+    def __init__(
+        self,
+        _put: Callable[[str, bytes], None] | None = None,
+        _get: Callable[[str], bytes] | None = None,
+    ) -> None:
         self._put_fn = _put
         self._get_fn = _get
-        self._mem: dict[str, bytes] = {}   # in-memory reference backing
+        self._mem: dict[str, bytes] = {}  # in-memory reference backing
 
-    def put(self, uri: str, data) -> None:
+    def put(self, uri: str, data: Any) -> None:
         """Write an object to GCS. Accepts bytes or str."""
         payload = data.encode() if isinstance(data, str) else data
         if self._put_fn is not None:
-            with_retry(lambda: self._put_fn(uri, payload))
+            with_retry(lambda: self._put_fn(uri, payload))  # type: ignore[misc]  # guarded non-None; mypy can't narrow self.attr into a closure
         else:
             self._live_put(uri, payload)
 
     def get(self, uri: str) -> bytes:
         """Read an object from GCS."""
         if self._get_fn is not None:
-            return with_retry(lambda: self._get_fn(uri))
+            return with_retry(lambda: self._get_fn(uri))  # type: ignore[misc]  # guarded non-None; mypy can't narrow self.attr into a closure
         return self._live_get(uri)
 
     def _live_put(self, uri: str, data: bytes) -> None:
@@ -61,7 +66,7 @@ class GcsClient:
         # blob = bucket.blob(blob_name)
         # blob.upload_from_string(data)
         # return
-        self._mem[uri] = data   # reference backing until the live call is uncommented
+        self._mem[uri] = data  # reference backing until the live call is uncommented
 
     def _live_get(self, uri: str) -> bytes:
         """The actual google-cloud-storage download. COMMENTED OUT until wired.

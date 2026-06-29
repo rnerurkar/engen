@@ -185,8 +185,8 @@ These are rasterized images with embedded text. Text cannot be edited — the di
 | 4 | `AgentCatalyst-Provisional-Patent-v1.docx` | ~15 | ~10 |
 | 5 | `AgentCatalyst-ARB-PartII-Migration-Report.md` | ~10 | ~5 |
 | 6 | `AgentCatalyst-ARB-Bidirectional-Refresh-Review.md` | ~5 | ~5 |
-| 7 | `AgentForge-vs-AgentCatalyst-IP-Analysis.md` | ~30 | ~10 |
-| 8 | `AgentForge-vs-AgentCatalyst-IP-Separation.md` | ~20 | ~10 |
+| 7 | `the external platform-vs-AgentCatalyst-IP-Analysis.md` | ~30 | ~10 |
+| 8 | `the external platform-vs-AgentCatalyst-IP-Separation.md` | ~20 | ~10 |
 
 **Filename renames:** All 8 files need "AgentCatalyst" → "SDLC-Accelerators" in filename.
 

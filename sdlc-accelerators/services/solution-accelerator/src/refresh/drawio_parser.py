@@ -7,6 +7,7 @@ the agent/tool nodes and the delegation/binding edges so Case B/C can diff again
 SCOPE: handles the structure our Eraser.io export produces + standard Draw.io shapes.
 Arbitrary hand-drawn diagrams with exotic shapes may need richer parsing — flagged, not faked.
 """
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
@@ -17,7 +18,7 @@ from dataclasses import dataclass, field
 class DiagramNode:
     node_id: str
     label: str
-    node_type: str = ""   # inferred: agent type or tool type if encoded in style/value
+    node_type: str = ""  # inferred: agent type or tool type if encoded in style/value
 
 
 @dataclass
@@ -39,6 +40,7 @@ class DiagramTopology:
 def _clean_label(value: str) -> str:
     """Draw.io labels can carry HTML; strip tags and whitespace."""
     import re
+
     text = re.sub(r"<[^>]+>", " ", value or "")
     return " ".join(text.split()).strip()
 
@@ -65,9 +67,11 @@ def parse_drawio(xml_content: str) -> DiagramTopology:
             edges_raw.append((cell.get("source", ""), cell.get("target", ""), value))
 
     for src, tgt, lbl in edges_raw:
-        topo.edges.append(DiagramEdge(
-            source_label=id_to_label.get(src, src),
-            target_label=id_to_label.get(tgt, tgt),
-            edge_label=lbl,
-        ))
+        topo.edges.append(
+            DiagramEdge(
+                source_label=id_to_label.get(src, src),
+                target_label=id_to_label.get(tgt, tgt),
+                edge_label=lbl,
+            )
+        )
     return topo

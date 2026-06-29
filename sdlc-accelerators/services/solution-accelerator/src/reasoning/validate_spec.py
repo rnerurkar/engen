@@ -5,6 +5,7 @@ Scans §2 for ordering words, §5 for own-system flags, §10 for measurable crit
 produces a spec_quality_score (0-100) with PASS/WARN/BLOCK per section + the documented
 guidance messages. This is Step 0 of blueprint_start.
 """
+
 from __future__ import annotations
 
 import re
@@ -13,9 +14,23 @@ from typing import Literal
 
 Status = Literal["PASS", "WARN", "BLOCK"]
 
-ORDERING_WORDS = ["first", "then", "in parallel", "loop until", "route to human", "route to a human"]
-OWN_SYSTEM_FLAGS = ["operate their own", "operates their own", "own system", "their own system"]
-MEASURABLE = re.compile(r"(<\s*\d|>\s*\d|\d+\s*%|\d+\s*(min|sec|ms|hours?|days?))", re.IGNORECASE)
+ORDERING_WORDS = [
+    "first",
+    "then",
+    "in parallel",
+    "loop until",
+    "route to human",
+    "route to a human",
+]
+OWN_SYSTEM_FLAGS = [
+    "operate their own",
+    "operates their own",
+    "own system",
+    "their own system",
+]
+MEASURABLE = re.compile(
+    r"(<\s*\d|>\s*\d|\d+\s*%|\d+\s*(min|sec|ms|hours?|days?))", re.IGNORECASE
+)
 
 
 @dataclass
@@ -29,6 +44,7 @@ class SectionFinding:
 @dataclass
 class SpecSignals:
     """Deterministically extracted signals — the input the LLM reasons over."""
+
     ordering_words: list[str] = field(default_factory=list)
     own_system_partners: list[str] = field(default_factory=list)
     measurable_criteria: list[str] = field(default_factory=list)
@@ -48,7 +64,11 @@ class SpecValidation:
 
 def _section(md: str, num: int) -> str:
     """Extract a §N section body from spec.md (markdown). Supports '## §N', '## N.', '## Section N'."""
-    patterns = [rf"^#{{1,3}}\s*§\s*{num}\b", rf"^#{{1,3}}\s*{num}\.", rf"^#{{1,3}}\s*Section\s+{num}\b"]
+    patterns = [
+        rf"^#{{1,3}}\s*§\s*{num}\b",
+        rf"^#{{1,3}}\s*{num}\.",
+        rf"^#{{1,3}}\s*Section\s+{num}\b",
+    ]
     lines = md.splitlines()
     start = None
     for i, ln in enumerate(lines):
@@ -102,37 +122,83 @@ def validate_spec(spec_md: str) -> SpecValidation:
     if n >= 3:
         findings.append(SectionFinding("§2 Workflow", "PASS", n))
     elif n >= 1:
-        findings.append(SectionFinding("§2 Workflow", "WARN", n,
-                        ("Only 1-2 ordering words found — add more ('first', 'then', "
-                         "'in parallel') for higher-confidence pattern selection.")))
+        findings.append(
+            SectionFinding(
+                "§2 Workflow",
+                "WARN",
+                n,
+                (
+                    "Only 1-2 ordering words found — add more ('first', 'then', "
+                    "'in parallel') for higher-confidence pattern selection."
+                ),
+            )
+        )
     else:
-        findings.append(SectionFinding("§2 Workflow", "BLOCK", 0,
-                        ("§2 has no ordering words — add 'first', 'then', 'in parallel', "
-                         "'loop until', 'route to human' to describe the workflow sequence.")))
+        findings.append(
+            SectionFinding(
+                "§2 Workflow",
+                "BLOCK",
+                0,
+                (
+                    "§2 has no ordering words — add 'first', 'then', 'in parallel', "
+                    "'loop until', 'route to human' to describe the workflow sequence."
+                ),
+            )
+        )
 
     # §5 external partners: own-system flag presence (empty may be legitimate → WARN not BLOCK)
     if sig.own_system_partners:
-        findings.append(SectionFinding("§5 External Partners", "PASS", len(sig.own_system_partners)))
+        findings.append(
+            SectionFinding("§5 External Partners", "PASS", len(sig.own_system_partners))
+        )
     else:
-        findings.append(SectionFinding("§5 External Partners", "WARN", 0,
-                        ("No 'operate their own system' flag found — if a partner runs "
-                         "their own agent, mark it so A2A is chosen over MCP.")))
+        findings.append(
+            SectionFinding(
+                "§5 External Partners",
+                "WARN",
+                0,
+                (
+                    "No 'operate their own system' flag found — if a partner runs "
+                    "their own agent, mark it so A2A is chosen over MCP."
+                ),
+            )
+        )
 
     # §10 acceptance criteria: ≥3 measurable PASS, 1-2 WARN, 0 BLOCK
     m = len(sig.measurable_criteria)
     if m >= 3:
         findings.append(SectionFinding("§10 Acceptance Criteria", "PASS", m))
     elif m >= 1:
-        findings.append(SectionFinding("§10 Acceptance Criteria", "WARN", m,
-                        ("Few measurable criteria — add targets like '< 5 min', "
-                         "'> 95% accuracy' to seed the golden dataset.")))
+        findings.append(
+            SectionFinding(
+                "§10 Acceptance Criteria",
+                "WARN",
+                m,
+                (
+                    "Few measurable criteria — add targets like '< 5 min', "
+                    "'> 95% accuracy' to seed the golden dataset."
+                ),
+            )
+        )
     else:
-        findings.append(SectionFinding("§10 Acceptance Criteria", "BLOCK", 0,
-                        ("§10 has no measurable criteria — add metrics like "
-                         "'< 5 min' or '> 95% accuracy'.")))
+        findings.append(
+            SectionFinding(
+                "§10 Acceptance Criteria",
+                "BLOCK",
+                0,
+                (
+                    "§10 has no measurable criteria — add metrics like "
+                    "'< 5 min' or '> 95% accuracy'."
+                ),
+            )
+        )
 
     # score: PASS=full, WARN=partial, BLOCK=0 per weighted section
-    weights = {"§2 Workflow": 50, "§5 External Partners": 20, "§10 Acceptance Criteria": 30}
+    weights = {
+        "§2 Workflow": 50,
+        "§5 External Partners": 20,
+        "§10 Acceptance Criteria": 30,
+    }
     score = 0
     for f in findings:
         w = weights.get(f.section, 0)

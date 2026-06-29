@@ -35,7 +35,7 @@ The spine of the platform. Takes `spec.md` + `plan.md`, runs a background reason
 
 **IP BOUNDARY — critical:** SDLC Accelerators uses **RAG + skill-constrained generation**.
 It does NOT use meta-skills, STL (Structured Topology Language), or signed Design Contracts.
-Those are **AgentForge (AnchorOps) constructs with ZERO overlap here** — keeping them out of
+Those are **the external platform (AnchorOps) constructs with ZERO overlap here** — keeping them out of
 this codebase is a deliberate IP-separation requirement. The single reasoning stage
 (`recommend_architecture`) is one LlmAgent steered by a human-authored company-curated
 system prompt + golden dataset — not four meta-skills.

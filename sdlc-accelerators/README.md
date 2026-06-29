@@ -11,7 +11,7 @@ Employer-internal, spec-driven multi-agent development platform on GCP.
 | `services/solution-accelerator/` | Solution Accelerator MCP Server (the spine) |
 | `services/governance-guardian/` | Governance Guardian MCP Server (EA assessment) |
 | `services/accelerator-cli/` | Deterministic scaffold + governance gate |
-| `skills/` | Domain skills (per-archetype) + overlay skills (NO meta-skills — that's AgentForge IP) |
+| `skills/` | Domain skills (per-archetype) + overlay skills (NO meta-skills — that's the external platform IP) |
 | `templates/` | Jinja2 templates for spec, plan, blueprint |
 | `iac/` | Terraform modules + environments |
 | `schemas/` | JSON Schemas — the contract layer (Phase 1) |
@@ -61,6 +61,7 @@ code .
 - Spec-kit writes command prompt files to **`.github/prompts/`**.
 - Open the **Copilot Chat** panel (Ctrl/Cmd+Shift+I).
 - The `.specify/` folder (preset.yml, templates, commands, `memory/constitution.md`) is created in the repo.
+- Optional (Greenfield): `/accelerator.ingest-epic` to start from a **Rally Epic** → signal-bearing `spec.md`.
 - Type `/specify` → `/plan` → `/accelerator.blueprint` → `/accelerator.assess` → `/accelerator.generate`.
 
 ![Greenfield full lifecycle — build, govern, deploy, operate](docs/greenfield-10-step-flow.png)
@@ -91,7 +92,7 @@ After `specify init --integration claude`:
 
 > **Note:** spec-kit's default workflow commands are namespaced `/speckit.*` (e.g. `/speckit.specify`).
 > The SDLC Accelerators preset adds the `/accelerator.*` commands on top. Use whichever your preset's
-> `preset.yml` registers — this preset uses `/accelerator.blueprint|assess|generate|refresh`.
+> `preset.yml` registers — this preset uses `/accelerator.ingest-epic|blueprint|assess|generate|refresh`.
 
 ### Cloning the repo — mixed-agent teams (Claude Code + Copilot)
 
@@ -132,7 +133,7 @@ Both `.claude/commands/` and `.github/prompts/` are gitignored so the two agents
 
 Installing the preset makes the commands **appear and run their instructions**. For a command to
 **complete**, the live backend must be reachable:
-- `/accelerator.blueprint` and `/accelerator.refresh` call the **Solution Accelerator MCP Server**
+- `/accelerator.ingest-epic` (optional Greenfield front door: Rally Epic → spec.md), `/accelerator.blueprint`, and `/accelerator.refresh` call the **Solution Accelerator MCP Server**
 - `/accelerator.assess` calls the **Governance Guardian MCP Server**
 
 Both must be deployed on Cloud Run (OAuth 2.1 + Entra ID) and reachable from your machine. Until then,
@@ -185,7 +186,7 @@ generation gate) and adds the four migration tools.
 The installable preset that makes `/accelerator.*` commands execute in Claude Code:
 - `preset.yml` — manifest registering archetype, templates, commands, MCP servers, memory
 - `templates/` — spec-template, plan-template, tasks-template
-- `commands/` — executable bodies for /accelerator.blueprint, .assess, .generate, .refresh
+- `commands/` — executable bodies for /accelerator.ingest-epic, .blueprint, .assess, .generate, .refresh
 - `memory/` — **constitution.md (20 ABSOLUTE rules)**, adk-reference, company-patterns, approved-tools, infra-standards
 
 Install into a project: `specify init --preset sdlc-accelerators` (copies `.specify/` into the repo).

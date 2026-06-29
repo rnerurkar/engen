@@ -1,0 +1,156 @@
+{
+  "schema": "epic-signal-ledger/v1",
+  "provenance": {
+    "source": "rally",
+    "formatted_id": "E5104",
+    "object_version": 6,
+    "last_update_date": "2026-06-20"
+  },
+  "sections": [
+    {
+      "num": 1,
+      "key": "use_case_actors",
+      "title": "Use Case & Actors",
+      "expected_slots": 2,
+      "filled": 1,
+      "confidence": 0.5,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "an order-issue-resolution agent for post-purchase support",
+          "kind": "use_case",
+          "epic_span": "an order-issue-resolution agent for post-purchase support"
+        }
+      ]
+    },
+    {
+      "num": 2,
+      "key": "workflow_ordering",
+      "title": "Workflow Ordering",
+      "expected_slots": 3,
+      "filled": 2,
+      "confidence": 0.67,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "classify the issue, then in parallel fetch order, shipment, and payment status",
+          "kind": "ordering",
+          "epic_span": "classify the issue, then in parallel fetch order, shipment, and payment status"
+        },
+        {
+          "value": "escalate refund requests above the auto-approval threshold to a human agent",
+          "kind": "ordering",
+          "epic_span": "escalate refund requests above the auto-approval threshold to a human agent"
+        }
+      ]
+    },
+    {
+      "num": 3,
+      "key": "scope_throughput_latency",
+      "title": "Scope, Throughput & Latency",
+      "expected_slots": 3,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 4,
+      "key": "data_sources",
+      "title": "Data Sources",
+      "expected_slots": 2,
+      "filled": 1,
+      "confidence": 0.5,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "reads the order management system and writes resolution actions to the case store",
+          "kind": "data_source",
+          "epic_span": "reads the order management system and writes resolution actions to the case store"
+        }
+      ]
+    },
+    {
+      "num": 5,
+      "key": "external_partners",
+      "title": "External Partners",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": false,
+      "optional": true,
+      "signals": []
+    },
+    {
+      "num": 6,
+      "key": "actors_permissions",
+      "title": "Actors & Permissions",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 7,
+      "key": "business_rules",
+      "title": "Business Rules (IF/THEN)",
+      "expected_slots": 2,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 8,
+      "key": "error_handling",
+      "title": "Error Handling & Edge Cases",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 9,
+      "key": "nfrs",
+      "title": "Non-Functional Requirements",
+      "expected_slots": 2,
+      "filled": 1,
+      "confidence": 0.5,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "the service must be available 99.9% of the time",
+          "kind": "nfr",
+          "epic_span": "the service must be available 99.9% of the time"
+        }
+      ]
+    },
+    {
+      "num": 10,
+      "key": "acceptance_criteria",
+      "title": "Acceptance Criteria",
+      "expected_slots": 3,
+      "filled": 1,
+      "confidence": 0.33,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "80% of issues are resolved without human escalation",
+          "kind": "acceptance_criterion",
+          "epic_span": "80% of issues are resolved without human escalation"
+        }
+      ]
+    }
+  ]
+}

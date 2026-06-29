@@ -5,21 +5,24 @@ the VertexSearchClient seam (Pattern Catalog over Vertex AI Search) via the shar
 pattern_search_core. Retrieval only — selection remains the LlmAgent's reasoning; the deterministic
 stages stay sequential steps, not tools.
 """
+
 from __future__ import annotations
+
+from typing import Any
 
 from clients.vertex_search import VertexSearchClient
 
 from .pattern_search_core import search_patterns_safe
 
 
-def make_pattern_search_tool(client: VertexSearchClient | None = None):
+def make_pattern_search_tool(client: VertexSearchClient | None = None) -> Any:
     """Build an ADK FunctionTool that searches the Pattern Catalog. `client` is injectable for
     tests; production uses the live VertexSearchClient seam."""
-    from google.adk.tools import FunctionTool
+    from google.adk.tools import FunctionTool  # type: ignore[attr-defined]
 
     search_client = client or VertexSearchClient()
 
-    def search_architecture_patterns(ordering_signals: list[str]) -> dict:
+    def search_architecture_patterns(ordering_signals: list[str]) -> dict[str, Any]:
         """Search the Pattern Catalog for candidate ADK architecture patterns.
 
         Use this to retrieve composition patterns (SequentialAgent, ParallelAgent, LoopAgent,

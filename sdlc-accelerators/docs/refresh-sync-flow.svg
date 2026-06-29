@@ -26,6 +26,13 @@
   <text x="500" y="65" text-anchor="middle" class="s12b" fill="#1565C0">Step 0: Detect What Changed</text>
   <text x="500" y="80" text-anchor="middle" class="s9">Compare .md and .drawio timestamps against .blueprint-hashes</text>
 
+  <!-- Epic drift check (Greenfield, epic-sourced specs) -->
+  <rect x="690" y="38" width="296" height="56" fill="#FFF8E1" stroke="#F9A825" stroke-width="2" rx="6"/>
+  <text x="838" y="54" text-anchor="middle" class="s10" font-weight="bold" fill="#F57F17">If spec came from a Rally Epic</text>
+  <text x="838" y="69" text-anchor="middle" class="s9">also compare stamped Rally ObjectVersion</text>
+  <text x="838" y="82" text-anchor="middle" class="s9">vs current → warn + offer re-ingest</text>
+  <line x1="688" y1="67" x2="652" y2="67" class="arrow-d"/>
+
   <!-- Three cases -->
   <line x1="400" y1="90" x2="160" y2="120" class="arrow"/>
   <line x1="500" y1="90" x2="500" y2="120" class="arrow"/>

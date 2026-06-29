@@ -1,0 +1,156 @@
+{
+  "schema": "epic-signal-ledger/v1",
+  "provenance": {
+    "source": "rally",
+    "formatted_id": "E5102",
+    "object_version": 7,
+    "last_update_date": "2026-06-20"
+  },
+  "sections": [
+    {
+      "num": 1,
+      "key": "use_case_actors",
+      "title": "Use Case & Actors",
+      "expected_slots": 2,
+      "filled": 1,
+      "confidence": 0.5,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "a deal-qualification agent that scores inbound sales opportunities",
+          "kind": "use_case",
+          "epic_span": "a deal-qualification agent that scores inbound sales opportunities"
+        }
+      ]
+    },
+    {
+      "num": 2,
+      "key": "workflow_ordering",
+      "title": "Workflow Ordering",
+      "expected_slots": 3,
+      "filled": 2,
+      "confidence": 0.67,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "enrich the lead from CRM and firmographic sources, then score fit and intent",
+          "kind": "ordering",
+          "epic_span": "enrich the lead from CRM and firmographic sources, then score fit and intent"
+        },
+        {
+          "value": "route qualified deals to an account executive",
+          "kind": "ordering",
+          "epic_span": "route qualified deals to an account executive"
+        }
+      ]
+    },
+    {
+      "num": 3,
+      "key": "scope_throughput_latency",
+      "title": "Scope, Throughput & Latency",
+      "expected_slots": 3,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 4,
+      "key": "data_sources",
+      "title": "Data Sources",
+      "expected_slots": 2,
+      "filled": 1,
+      "confidence": 0.5,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "reads CRM opportunities and writes qualification scores back to CRM",
+          "kind": "data_source",
+          "epic_span": "reads CRM opportunities and writes qualification scores back to CRM"
+        }
+      ]
+    },
+    {
+      "num": 5,
+      "key": "external_partners",
+      "title": "External Partners",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": false,
+      "optional": true,
+      "signals": []
+    },
+    {
+      "num": 6,
+      "key": "actors_permissions",
+      "title": "Actors & Permissions",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 7,
+      "key": "business_rules",
+      "title": "Business Rules (IF/THEN)",
+      "expected_slots": 2,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 8,
+      "key": "error_handling",
+      "title": "Error Handling & Edge Cases",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 9,
+      "key": "nfrs",
+      "title": "Non-Functional Requirements",
+      "expected_slots": 2,
+      "filled": 1,
+      "confidence": 0.5,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "all customer contact data is encrypted at rest and in transit",
+          "kind": "nfr",
+          "epic_span": "all customer contact data is encrypted at rest and in transit"
+        }
+      ]
+    },
+    {
+      "num": 10,
+      "key": "acceptance_criteria",
+      "title": "Acceptance Criteria",
+      "expected_slots": 3,
+      "filled": 1,
+      "confidence": 0.33,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "qualification must complete within 2 minutes at the 95th percentile",
+          "kind": "acceptance_criterion",
+          "epic_span": "qualification must complete within 2 minutes at the 95th percentile"
+        }
+      ]
+    }
+  ]
+}

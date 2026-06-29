@@ -356,7 +356,7 @@ Nightly comparison of the manifest's `current` version against what's referenced
 
 The Solution Accelerator has two deployment components:
 
-**MCP API layer** — Cloud Run service `solution-accelerator-api` in `enterprise-platform-prod`. Handles the three fast MCP tools (`blueprint_start`, `blueprint_status`, `blueprint_result`). Min: 2 instances. Max: 10. Concurrency: 80 requests/instance (lightweight queries to AlloyDB via connection pool — 20 PostgreSQL connections per instance via AlloyDB Auth Proxy sidecar). Request timeout: 30 seconds (each call completes in <2s). 2 vCPU, 4 GB memory.
+**MCP API layer** — Cloud Run service `solution-accelerator-api` in `enterprise-platform-prod`. Handles six MCP tools — the three blueprint tools (`blueprint_start`, `blueprint_status`, `blueprint_result`) and the optional Epic front door (`ingest_epic_start`, `ingest_epic_status`, `ingest_epic_result`), which delegates to the Solution Accelerator Agent's `create_epic_signal_ledger` tool. Min: 2 instances. Max: 10. Concurrency: 80 requests/instance (lightweight queries to AlloyDB via connection pool — 20 PostgreSQL connections per instance via AlloyDB Auth Proxy sidecar). Request timeout: 30 seconds (each call completes in <2s). 2 vCPU, 4 GB memory.
 
 **Background pipeline** — Cloud Run Jobs `solution-accelerator-pipeline` in `enterprise-platform-prod`. Runs the 4-stage pipeline (map → recommend → check → assemble) with no request-timeout constraint. Triggered by Cloud Tasks queue `blueprint-tasks`. 4 vCPU, 8 GB memory per job. Max concurrent jobs: 20.
 
@@ -421,7 +421,8 @@ Rate limits apply to `blueprint_start` only (the expensive operation that trigge
 | Cloud Run API layer (start + ~18 polls + result) | ~$0.002 |
 | Cloud Run Jobs (pipeline execution, 4 integrations) | ~$0.01 |
 | Vertex AI Search queries (4–8 per task) | ~$0.02 |
-| LlmAgent (stage ⑤ pattern composition) | ~$0.08 |
+| Solution Accelerator Agent · recommend_architecture (stage ⑤ pattern composition) | ~$0.08 |
+| Solution Accelerator Agent · create_epic_signal_ledger (Epic front door, when used) | ~$0.04 |
 | AlloyDB (task record + result storage, 24h retention) | ~$0.001 |
 | Logging + observability | ~$0.005 |
 | **Per-task total** | **~$0.12** |

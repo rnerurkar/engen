@@ -1,0 +1,161 @@
+{
+  "schema": "epic-signal-ledger/v1",
+  "provenance": {
+    "source": "rally",
+    "formatted_id": "E5101",
+    "object_version": 9,
+    "last_update_date": "2026-06-20"
+  },
+  "sections": [
+    {
+      "num": 1,
+      "key": "use_case_actors",
+      "title": "Use Case & Actors",
+      "expected_slots": 2,
+      "filled": 1,
+      "confidence": 0.5,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "an iterative credit-memo drafting agent for commercial lending",
+          "kind": "use_case",
+          "epic_span": "an iterative credit-memo drafting agent for commercial lending"
+        }
+      ]
+    },
+    {
+      "num": 2,
+      "key": "workflow_ordering",
+      "title": "Workflow Ordering",
+      "expected_slots": 3,
+      "filled": 2,
+      "confidence": 0.67,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "draft a memo, then progressively improve that same stored memo over multiple passes",
+          "kind": "ordering",
+          "epic_span": "draft a memo, then progressively improve that same stored memo over multiple passes"
+        },
+        {
+          "value": "exit when the memo meets a quality bar or hits a pass cap",
+          "kind": "ordering",
+          "epic_span": "exit when the memo meets a quality bar or hits a pass cap"
+        }
+      ]
+    },
+    {
+      "num": 3,
+      "key": "scope_throughput_latency",
+      "title": "Scope, Throughput & Latency",
+      "expected_slots": 3,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 4,
+      "key": "data_sources",
+      "title": "Data Sources",
+      "expected_slots": 2,
+      "filled": 1,
+      "confidence": 0.5,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "reads loan-origination data and writes memo versions to the memo store",
+          "kind": "data_source",
+          "epic_span": "reads loan-origination data and writes memo versions to the memo store"
+        }
+      ]
+    },
+    {
+      "num": 5,
+      "key": "external_partners",
+      "title": "External Partners",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": false,
+      "optional": true,
+      "signals": []
+    },
+    {
+      "num": 6,
+      "key": "actors_permissions",
+      "title": "Actors & Permissions",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 7,
+      "key": "business_rules",
+      "title": "Business Rules (IF/THEN)",
+      "expected_slots": 2,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 8,
+      "key": "error_handling",
+      "title": "Error Handling & Edge Cases",
+      "expected_slots": 1,
+      "filled": 0,
+      "confidence": 0.0,
+      "needs_review": true,
+      "optional": false,
+      "signals": []
+    },
+    {
+      "num": 9,
+      "key": "nfrs",
+      "title": "Non-Functional Requirements",
+      "expected_slots": 2,
+      "filled": 1,
+      "confidence": 0.5,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "every memo version and score is retained for 7 years",
+          "kind": "nfr",
+          "epic_span": "every memo version and score is retained for 7 years"
+        }
+      ]
+    },
+    {
+      "num": 10,
+      "key": "acceptance_criteria",
+      "title": "Acceptance Criteria",
+      "expected_slots": 3,
+      "filled": 2,
+      "confidence": 0.67,
+      "needs_review": true,
+      "optional": false,
+      "signals": [
+        {
+          "value": "the memo must reach a quality score of at least 0.90",
+          "kind": "acceptance_criterion",
+          "epic_span": "the memo must reach a quality score of at least 0.90"
+        },
+        {
+          "value": "no more than 4 refinement passes",
+          "kind": "acceptance_criterion",
+          "epic_span": "no more than 4 refinement passes"
+        }
+      ]
+    }
+  ]
+}

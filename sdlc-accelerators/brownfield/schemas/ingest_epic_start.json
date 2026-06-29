@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ingest_epic_start (brownfield)",
+  "description": "Start the Brownfield Epic-to-Spec front door. Receives a Rally Epic payload (content only — no credentials). Returns a taskId to poll. The server delegates Phase A to the Solution Accelerator Agent's create_epic_signal_ledger FunctionTool, then runs Phase B deterministic mapping.",
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": ["epic"],
+      "properties": {
+        "epic": {
+          "type": "object",
+          "description": "Rally Epic content (formatted_id, name, description, integrations_text, acceptance_criteria, nfrs, object_version, last_update_date)."
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["taskId", "status"],
+      "properties": {
+        "taskId": { "type": "string" },
+        "status": { "type": "string" },
+        "pollInterval": { "type": "integer" }
+      }
+    }
+  }
+}

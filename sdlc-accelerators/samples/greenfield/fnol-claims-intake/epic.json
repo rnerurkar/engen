@@ -1,0 +1,27 @@
+{
+  "formatted_id": "E4417",
+  "name": "Automated First-Notice-of-Loss (FNOL) intake agent for auto claims",
+  "description": "When a customer files an auto claim, the agent first classifies claim severity, then in parallel enriches the claim from three sources: the policy system, the VIN vehicle service, and the weather service. It coordinates these enrichment steps and assembles a unified claim record. If a body shop operates their own estimate system, the agent obtains the estimate from that partner. The agent reads and updates the policy database and writes the assembled claim to the claims datastore. Route high-severity claims to a human adjuster for review before finalizing. Loop the enrichment-and-scoring step until the claim-completeness score is at least 0.9.",
+  "acceptance_criteria": [
+    "End-to-end intake must complete within 5 minutes at the 95th percentile",
+    "Severity classification accuracy must be above 95%",
+    "100% of high-severity claims are routed to a human adjuster",
+    "No PII is written to logs"
+  ],
+  "nfrs": [
+    "The service must be available 99.9% of the time",
+    "Recovery point objective of 5 minutes and recovery time objective of 30 minutes",
+    "All customer PII must be encrypted at rest and in transit"
+  ],
+  "dependencies": [
+    "Policy system (transactional, read/write)",
+    "VIN vehicle lookup service",
+    "Body-shop estimate partner (operates their own system)"
+  ],
+  "linked_items": [
+    "F1201 Claims modernization",
+    "US3320 Severity model integration"
+  ],
+  "object_version": 14,
+  "last_update_date": "2026-06-22"
+}

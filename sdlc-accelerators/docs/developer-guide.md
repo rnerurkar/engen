@@ -23,7 +23,8 @@ mkdir my-app && cd my-app && specify init --preset sdlc-accelerators-agentic
 gemini skills install github.com/company/sdlc-accelerators-skills --scope user
 
 # 4. In VSCode with your coding agent:
-/specify              # fill in the structured template → spec.md
+/accelerator.ingest-epic # OPTIONAL (Greenfield) — pull a Rally Epic → signal-bearing spec.md (see § 2.3a)
+/specify              # fill in the structured template → spec.md (or review the ingested one)
 /plan                 # answer technical questions → plan.md
 /accelerator.blueprint   # Connects to Solution Accelerator MCP Server (async) → returns app-blueprint.md
 # review + edit the markdown blueprint
@@ -119,7 +120,7 @@ They've already set up everything you need. You don't configure any of this:
 
 ## 1. Prerequisites
 
-> **Important:** The SDLC Accelerators preset includes a `constitution.md` file that encodes non-negotiable rules your coding agent MUST follow (e.g., never deploy directly, always use company Terraform modules, always generate pre-commit hooks). These are coding agent constraints — NOT meta-skills or decision frameworks (those exist only in AgentForge). Your coding agent reads constitution.md before generating any code.
+> **Important:** The SDLC Accelerators preset includes a `constitution.md` file that encodes non-negotiable rules your coding agent MUST follow (e.g., never deploy directly, always use company Terraform modules, always generate pre-commit hooks). These are coding agent constraints — NOT meta-skills or decision frameworks (those exist only in the external platform). Your coding agent reads constitution.md before generating any code.
 
 ### 1.1 Workstation requirements
 
@@ -164,6 +165,26 @@ gemini skills install github.com/company/sdlc-accelerators-skills --scope user
 ```
 
 If skills don't appear, check that `~/.agents/skills/` directory contains the skill folders.
+
+**Optional (Greenfield) — register the Rally MCP server for `/accelerator.ingest-epic`.** If you intend to start from a Rally Epic rather than a blank `/specify`, add a `.vscode/mcp.json` to your project so your coding agent can fetch Epics. Auth is your **Entra ID SSO** inside VS Code — your Rally credentials stay in the IDE and never reach the Solution Accelerator server.
+
+```json
+// .vscode/mcp.json
+{
+  "servers": {
+    "rally": {
+      "type": "http",
+      "url": "https://rally-mcp.internal.<company>.com/mcp",
+      "headers": { "Authorization": "Bearer ${input:entra_sso_token}" }
+    }
+  },
+  "inputs": [
+    { "id": "entra_sso_token", "type": "promptString", "description": "Entra ID SSO token (auto-filled by the company VS Code auth extension)", "password": true }
+  ]
+}
+```
+
+The server URL and token rotation are owned by Platform Engineering — see **Operations Runbook § 9a** (Rally MCP Server Integration). Architecture rationale is in **Architecture § "Epic-to-Spec Ingestion (Greenfield)"** and **Appendix § G2**. You can skip this entirely if you always author specs with `/specify`.
 
 ### 1.3 Where skills live on disk
 
@@ -246,6 +267,49 @@ Type `/specify`. The coding agent presents the 6-section template. Fill in each 
 **Infrastructure:** us-central1, gemini-2.0-flash, Harness CI/CD, Model Armor + DLP + CMEK + VPC-SC
 
 Saved as `spec.md`. (~15 min)
+
+### 2.3a `/accelerator.ingest-epic` — Start from a Rally Epic (optional, Greenfield)
+
+> Optional front door. If a business analyst already wrote the work up as a **Rally Epic**, you can have it turned into a signal-bearing `spec.md` instead of filling `/specify` by hand — then review rather than author. Skip this section if you author specs manually. **Prerequisite:** the Rally MCP server registered in `.vscode/mcp.json` (§ 1.2). Architecture detail: **Architecture § "Epic-to-Spec Ingestion (Greenfield)"**; operations: **Operations Runbook § 9a**.
+
+**What you do:**
+
+```text
+/accelerator.ingest-epic
+```
+
+Your coding agent runs a short interview and asks only for what it can't infer — at minimum the **Rally Epic FormattedID** (e.g. `E1234`):
+
+```text
+Agent: Which Rally Epic should I ingest? (FormattedID, e.g. E1234)
+You:   E2207
+Agent: Fetching E2207 from Rally… (auth via your Entra ID SSO — no credentials leave VS Code)
+Agent: Shaping signals → mapping to spec.md…
+Agent: Done. Wrote spec.md (Rally provenance: E2207 @ ObjectVersion 14) and epic-signal-ledger.json.
+       Per-section confidence:
+         §2 Workflow ............ 0.92
+         §4 Data Systems ........ 0.80
+         §5 External Partners ... 0.55  ⚠ review — partner "own-system" flags inferred
+         §7 Business Rules ...... 0.70  ⚠ 2 rules captured as prose, not IF/THEN
+         §10 Acceptance Criteria  0.95
+       Review the ⚠ sections, then run /specify to confirm, /plan, /accelerator.blueprint.
+```
+
+**What happens under the hood (two phases inside `ingest_epic`):**
+
+- **Phase A — agentic shaping.** The Solution Accelerator MCP Server delegates to the **Solution Accelerator Agent** (one ADK agent), invoking its `create_epic_signal_ledger` FunctionTool — the same agent used for architecture advice via its `recommend_architecture` tool. It does one bounded, *extractive* pass: it reads the Epic and normalizes its linguistic signals into a section-keyed **Epic Signal Ledger**. It only lifts what the Epic actually says — every signal is traced to a verbatim Epic span and its value is grounded in that span (no fabricated or altered numbers), so it cannot fabricate or alter requirements; it does not map sections or score confidence.
+- **Phase B — deterministic mapping.** A deterministic stage renders the 10-section `spec.md` from the ledger, computes **per-section confidence from how completely each section's signals were filled** (not an LLM guess), and stamps the Rally FormattedID + ObjectVersion into the spec header.
+
+**What you get:**
+
+- `spec.md` — the same 10-section template `/specify` produces, pre-populated and signal-bearing, with a Rally provenance header.
+- `epic-signal-ledger.json` — a reference artifact mapping each signal back to its Epic source. **Don't edit it by hand.**
+
+**After ingest:** treat `spec.md` exactly as if you'd written it. Run `/specify` to review/confirm (it's quick — the structure is already there), fix any ⚠ low-confidence sections, then `/plan` and `/accelerator.blueprint` as normal.
+
+**If the Epic changes later:** `/accelerator.refresh` compares the stamped Rally **ObjectVersion** against Rally's current version and warns you if the Epic drifted from your spec — it won't silently overwrite your edits. Re-run `/accelerator.ingest-epic` to re-sync. (This is separate from the `.md ↔ .drawio ↔ .json` content-hash sync described in § 2.6a.)
+
+**Governance:** when a spec came from an Epic, `/accelerator.assess` adds an **Epic-coverage** check — it flags any Epic acceptance criterion or NFR that isn't represented in your blueprint (Medium, or High if an acceptance criterion is unmet), in the same findings loop you already use.
 
 ### 2.4 `/plan` — Technical decisions
 
@@ -1513,7 +1577,7 @@ This shows you exactly which agent failed, which tool returned bad data, and whe
 
 > **If the Solution Accelerator is unavailable:** You can author `app-blueprint.md` manually using the template schema below and the FNOL example in the Architecture Document (Appendix A.10) as a template. The `/accelerator.generate` command only needs the `app-blueprint.md` file — it does not require the MCP Server. You lose the AI-guided recommendation but are not blocked from generating code.
 
-> **How the blueprint is created:** Your coding agent calls `blueprint_start(spec, plan)` on the Solution Accelerator MCP Server, which returns a task ID immediately. The background pipeline runs the Solution Accelerator LlmAgent internally (RAG search + LLM reasoning + company system prompt) and stores the result when complete. Your coding agent polls `blueprint_status(taskId)` for progress and retrieves the result via `blueprint_result(taskId)`. After reviewing and editing, your coding agent calls `refresh(blueprint_md, drawio_files[])` to validate edits and regenerate .json + .png. All calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the LlmAgent directly. See the Architecture Document for the full MCP Server tool table.
+> **How the blueprint is created:** Your coding agent calls `blueprint_start(spec, plan)` on the Solution Accelerator MCP Server, which returns a task ID immediately. The background pipeline delegates to the **Solution Accelerator Agent** (one ADK agent — its `recommend_architecture` FunctionTool) internally (RAG search + LLM reasoning + company system prompt) and stores the result when complete. Your coding agent polls `blueprint_status(taskId)` for progress and retrieves the result via `blueprint_result(taskId)`. After reviewing and editing, your coding agent calls `refresh(blueprint_md, drawio_files[])` to validate edits and regenerate .json + .png. All calls happen via MCP protocol — your coding agent never accesses Vertex AI Search or the Solution Accelerator Agent directly. See the Architecture Document for the full MCP Server tool table.
 
 ### Agentic blueprint — key fields
 
@@ -2248,7 +2312,7 @@ A: The brownfield SPA example in Section 3 uses AWS (ECS Fargate + Oracle RDS). 
 
 → *Referenced from Architecture Document Layer 2 (Solution Accelerator internal components — company system prompt).*
 
-The Solution Accelerator LlmAgent uses a curated system prompt that guides its reasoning about greenfield architecture. This prompt is maintained by the platform engineering team and updated quarterly with the EA office.
+The **Solution Accelerator Agent** — the single ADK agent the MCP server delegates to — carries **two FunctionTools**, each bound to a curated system prompt maintained by platform engineering (updated quarterly with the EA office): `recommend_architecture` uses the greenfield architecture-reasoning prompt (below); `create_epic_signal_ledger` uses the extractive epic-shaping prompt (see Architecture § "Epic-to-Spec Ingestion"). The architecture-reasoning prompt guides the agent's reasoning about greenfield architecture.
 
 ```markdown
 You are the Solution Accelerator for greenfield agentic application development. You receive a structured spec (10 sections with ordering words, business rules, and acceptance criteria) and a technical plan (region, model, CI/CD, DR, security, observability, EvalOps).

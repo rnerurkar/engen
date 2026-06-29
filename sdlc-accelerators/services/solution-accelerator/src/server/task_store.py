@@ -1,6 +1,7 @@
 """Async MCP Task store. In-memory reference; AlloyDB-backed in production (TODO).
 Implements the queued->running->completed/failed lifecycle with 24h retention semantics.
 """
+
 from __future__ import annotations
 
 import time
@@ -24,7 +25,8 @@ class Task:
 
 class TaskStore:
     """TODO(live): back with AlloyDB + row-level security + 24h retention."""
-    def __init__(self):
+
+    def __init__(self) -> None:
         self._tasks: dict[str, Task] = {}
 
     def create(self, owner_id: str = "") -> Task:
@@ -35,7 +37,7 @@ class TaskStore:
     def get(self, task_id: str) -> Task | None:
         return self._tasks.get(task_id)
 
-    def update(self, task_id: str, **kwargs) -> Task:
+    def update(self, task_id: str, **kwargs: Any) -> Task:
         t = self._tasks[task_id]
         for k, v in kwargs.items():
             setattr(t, k, v)

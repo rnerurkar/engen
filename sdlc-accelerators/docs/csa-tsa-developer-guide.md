@@ -71,7 +71,7 @@ You: "dual-write"
 Agent: ✅ Flagged: dual-write during Phase 2. Rollback = stop writes to new system.
 ```
 
-**Layer 2 — Server-side (inside `blueprint_start`):** When you run `/accelerator.blueprint`, the Solution Accelerator runs `validate_spec` as Step 0 with access to the Tech Substitution Table (are ALL tech mappings approved?), Apigee API Hub (are A2A agents actually deployed?), ADR Store (do migration decisions comply with architecture decisions?), and cross-integration graph analysis (circular dependencies? conflicting coexistence constraints?).
+**Layer 2 — Server-side (inside `blueprint_start`):** When you run `/accelerator.blueprint`, the Solution Accelerator MCP Server delegates blueprint reasoning to the **Solution Accelerator Agent** (one ADK agent; its `recommend_architecture` FunctionTool) and runs `validate_spec` as Step 0 with access to the Tech Substitution Table (are ALL tech mappings approved?), Apigee API Hub (are A2A agents actually deployed?), ADR Store (do migration decisions comply with architecture decisions?), and cross-integration graph analysis (circular dependencies? conflicting coexistence constraints?).
 
 **Why both layers:** Layer 1 catches missing tech names, unclassified integrations, and missing coexistence flags DURING capture — you fix each one in real time. Layer 2 catches cross-integration conflicts and verifies against live data sources. Without Layer 1, you'd discover that 5 of your 15 integrations are missing coexistence flags only AFTER waiting for the Solution Accelerator to process — and the resulting blueprint would have data loss risks built in.
 
@@ -232,6 +232,7 @@ Verify: in Copilot Chat, Agent mode, type `/` and confirm `speckit.constitution`
 
 | Step | Command | What happens | Time |
 |---|---|---|---|
+| 0 (optional) | `/accelerator.ingest-epic` | **Epic front door** — Rally Epic → integration-inventory `spec.md` via the Solution Accelerator Agent's `create_epic_signal_ledger` tool (extractive, span-grounded). Reviewed, then refined by `/speckit.specify`. | 2 min |
 | 1 | `/speckit.constitution` | Confirm enterprise principles (one-time per project) | 5 min |
 | 2 | `/speckit.specify` | csa-extractor parses diagram → pre-fills spec.md → elicits details | 30 min |
 | 3 | `/speckit.plan.draft` | Developer first-pass: r-factor + cutover per integration | 30 min |
@@ -1006,7 +1007,7 @@ A: At minimum before every PR. For long-lived projects, run weekly as a hygiene 
 
 → *Referenced from Architecture Document §9.2 (Solution Accelerator internal components — company system prompt).*
 
-The Solution Accelerator LlmAgent uses a curated system prompt that guides its reasoning about CSA→TSA transformation. This prompt is maintained by the platform engineering team and updated quarterly with the EA office.
+The **Solution Accelerator Agent** — the single ADK agent the MCP server delegates to — carries **two FunctionTools**, each bound to a curated system prompt maintained by platform engineering (updated quarterly with the EA office): `recommend_architecture` uses the CSA→TSA transformation prompt below; `create_epic_signal_ledger` uses the extractive epic-shaping prompt (Architecture § "Epic-to-Spec Ingestion"). The transformation prompt guides the agent's reasoning about CSA→TSA.
 
 ```markdown
 You are the Solution Accelerator for brownfield CSA→TSA transformations. You receive a structured spec (with current-state integrations extracted from a CSA diagram) and a technical plan (with r_factor, cutover strategy, and migration sequencing).

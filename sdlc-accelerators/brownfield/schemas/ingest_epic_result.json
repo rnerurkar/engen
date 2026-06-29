@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ingest_epic_result (brownfield)",
+  "description": "Retrieve the integration-inventory spec.md + Brownfield Epic Signal Ledger + per-integration confidence + the readiness-gate verdict. The prompt file writes spec.md and epic-signal-ledger.json to the workspace.",
+  "type": "object",
+  "properties": {
+    "input": { "type": "object", "required": ["taskId"], "properties": { "taskId": { "type": "string" } } },
+    "output": {
+      "type": "object",
+      "required": ["spec_md", "epic_signal_ledger", "per_integration_confidence"],
+      "properties": {
+        "spec_md": { "type": "string", "description": "Integration-inventory brownfield spec.md with a Rally provenance header" },
+        "epic_signal_ledger": { "$ref": "brownfield-epic-signal-ledger.schema.json" },
+        "per_integration_confidence": {
+          "type": "object",
+          "description": "Per-integration fill ratio over the 8 readiness signals (deterministic).",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "blueprint_gate": {
+          "type": "object",
+          "description": "The 8-signal readiness-gate verdict for the produced spec (H-3 reconciliation).",
+          "properties": {
+            "migration_readiness_score": { "type": "number" },
+            "blocked": { "type": "boolean" },
+            "overall": { "type": "string" },
+            "findings": { "type": "array", "items": { "type": "object" } },
+            "phase_assignment_preview": { "type": "object" },
+            "high_confidence_but_gated": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "provenance": { "type": "object" }
+      }
+    }
+  }
+}

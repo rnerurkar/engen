@@ -74,7 +74,7 @@
   <line x1="340" y1="712" x2="340" y2="738" stroke="#777" stroke-width="1.2" marker-end="url(#arrow)" />
   <rect x="225" y="738" width="230" height="40" rx="8" fill="#FFF0E6" stroke="#E67E22" stroke-width="1.5" filter="url(#shadow)" />
   <text x="340" y="754" font-size="10" font-weight="bold" fill="#333" text-anchor="middle">recommend_architecture</text>
-  <text x="340" y="768" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">(LlmAgent)</text>
+  <text x="340" y="768" font-size="8" font-weight="normal" fill="#888" text-anchor="middle">(Solution Accelerator Agent)</text>
   <rect x="25" y="798" width="150" height="38" rx="5" fill="#F0F0F0" stroke="#7F8C8D" stroke-width="1.5" filter="url(#shadow)" />
   <text x="100" y="814" font-size="9" font-weight="bold" fill="#333" text-anchor="middle">Tool Registry</text>
   <text x="100" y="828" font-size="8" font-weight="normal" fill="#666" text-anchor="middle">Apigee API Hub</text>

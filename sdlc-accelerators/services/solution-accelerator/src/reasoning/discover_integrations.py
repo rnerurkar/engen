@@ -10,11 +10,13 @@ Partners flagged "operate their own system" bias toward an A2A query (per the FN
 Query construction + response shaping + priority mapping are real and tested via an injected
 API Hub client. The live API Hub network call lives (commented out) in ApigeeHubClient._live_search.
 """
+
 from __future__ import annotations
 
 import os
 import re
 import sys
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -39,21 +41,29 @@ def _capability_terms(text: str) -> list[str]:
     terms = []
     if slug:
         terms.append(slug)
-        terms.append(f"{slug}-estimate")   # common capability suffix; over-broad is fine for a filter
+        terms.append(
+            f"{slug}-estimate"
+        )  # common capability suffix; over-broad is fine for a filter
     return terms
 
 
-def _entry_dict(e: ApiHubEntry) -> dict:
+def _entry_dict(e: ApiHubEntry) -> dict[str, Any]:
     return {
-        "name": e.api_id, "display_name": e.display_name, "type": e.api_type,
-        "endpoint": e.endpoint, "auth_method": e.auth_method,
-        "capabilities": e.capabilities, "agent_card_url": e.agent_card_url,
-        "lifecycle": e.lifecycle, "version": e.version,
+        "name": e.api_id,
+        "display_name": e.display_name,
+        "type": e.api_type,
+        "endpoint": e.endpoint,
+        "auth_method": e.auth_method,
+        "capabilities": e.capabilities,
+        "agent_card_url": e.agent_card_url,
+        "lifecycle": e.lifecycle,
+        "version": e.version,
     }
 
 
-def discover_integrations(data_sources: list[str], partners: list[str],
-                          client: ApigeeHubClient | None = None) -> dict:
+def discover_integrations(
+    data_sources: list[str], partners: list[str], client: ApigeeHubClient | None = None
+) -> dict[str, Any]:
     """Return discovered MCP servers, A2A agents, REST APIs from Apigee API Hub.
 
     client is injectable for tests (with ApigeeHubClient(_search=...)); in production it runs
@@ -78,7 +88,7 @@ def discover_integrations(data_sources: list[str], partners: list[str],
         rest.extend(hub.search(api_type="rest_api", capabilities=caps))
 
     # De-duplicate by api_id (a capability term may match the same entry twice).
-    def _dedup(entries):
+    def _dedup(entries: Any) -> Any:
         seen, out = set(), []
         for e in entries:
             if e.api_id and e.api_id not in seen:

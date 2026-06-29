@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ingest_epic_status (brownfield)",
+  "description": "Poll the Epic ingestion task. Returns phase shaping|mapping (best-effort; synchronous in the reference impl) and terminal status. owner_id-isolated.",
+  "type": "object",
+  "properties": {
+    "input": { "type": "object", "required": ["taskId"], "properties": { "taskId": { "type": "string" } } },
+    "output": {
+      "type": "object",
+      "required": ["taskId", "status"],
+      "properties": {
+        "taskId": { "type": "string" },
+        "status": { "type": "string", "enum": ["queued", "running", "completed", "failed"] },
+        "phase": { "type": "string" },
+        "error": { "type": "string" }
+      }
+    }
+  }
+}

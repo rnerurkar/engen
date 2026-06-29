@@ -468,13 +468,15 @@ A legacy multi-page application runs on vSphere (Java + JSP on Tomcat), with two
 
 The Solution Accelerator is an ADK-based agent exposed as an MCP Server, deployed on Cloud Run in the company's GCP project. It is OAuth 2.1 protected and does not persist the inbound spec or plan beyond the task boundary. Audit logs (caller, timestamp, integrations summary, output blueprint hash) are written to Splunk.
 
-The MCP interface exposes **three async tools** using the MCP Tasks primitive (spec revision 2025-11-25). This is necessary because VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls, while the internal 4-stage pipeline (map → recommend → check → assemble) can take 1–30 minutes depending on integration count and pattern-catalog query volume.
+The MCP interface exposes **six async tools** using the MCP Tasks primitive (spec revision 2025-11-25): the three blueprint tools below, plus the optional Epic-to-Spec front door `ingest_epic_start` / `ingest_epic_status` / `ingest_epic_result` (§ "Epic-to-Spec Ingestion"). This is necessary because VS Code Copilot enforces a hard 10–15 second timeout on synchronous MCP tool calls, while the internal 4-stage pipeline (map → recommend → check → assemble) can take 1–30 minutes depending on integration count and pattern-catalog query volume.
 
 | MCP tool | What it does | Latency |
 |---|---|---|
 | `blueprint_start` | Validates input, creates a background task, returns `taskId` | < 2 seconds |
 | `blueprint_status` | Returns current pipeline stage and progress message | < 1 second |
 | `blueprint_result` | Returns JSON: `markdown` (app-blueprint.md), `blueprint_json` (app-blueprint.json — derived, machine-readable), `diagrams` (base64 PNGs + `.drawio.xml` source), `design_contract`, hashes | < 1 second |
+| `ingest_epic_start(epic)` | **Epic front door.** Receives a Rally Epic (content only); delegates Phase A to the Solution Accelerator Agent's `create_epic_signal_ledger` tool, then Phase B maps deterministically → integration-inventory `spec.md` + ledger | < 2 seconds |
+| `ingest_epic_status` / `ingest_epic_result` | Poll phase (`shaping`/`mapping`); return `spec.md` + `epic-signal-ledger.json` + per-integration confidence + the readiness-gate verdict | < 1 second |
 
 Internally, the background task runs the 4-stage pipeline described in §9.4–§9.7. The background work executes on **Cloud Run Jobs** (no request-timeout constraint), triggered by `blueprint_start` via Cloud Tasks. Task state (taskId, status, progress, result) is stored in AlloyDB with a 24-hour retention enforced by a scheduled Cloud Scheduler cleanup job (hourly: `DELETE FROM blueprint_tasks WHERE created_at < NOW() - INTERVAL '24 hours'`).
 
@@ -482,23 +484,44 @@ Rate limiting applies to `blueprint_start` (10 starts/hour per user, 200/hour pe
 
 #### One MCP Server, one Agent — how the four tools are distributed (steps 4–7 internals)
 
-The Solution Accelerator is **one MCP Server containing exactly one `LlmAgent`** (`brownfield_pattern_recommender`) — there is no fleet of agents behind the server. The four tools that the full-lifecycle diagram labels steps 4–7 (Tools 1–4) run in a **fixed order** inside the background job, and only one of them — Tool 2 — invokes the model. The fixed order is itself a governance control: substitution and ADR compliance must run deterministically and in sequence, never at an LLM's discretion.
+The Solution Accelerator MCP Server **delegates to exactly one ADK agent — the `solution_accelerator_agent` (the "Solution Accelerator Agent"), built with the ADK framework** — there is no fleet of agents behind the server. The MCP server itself does no reasoning (transport, async MCP Tasks, OAuth, orchestration); it hands each task to the agent via **direct capability dispatch** (the server names the capability — there is no LLM tool-router, so no extra model call is spent choosing a tool). The agent owns **two FunctionTools**: `recommend_architecture` (Tool 2 below, the per-integration pattern composition) and `create_epic_signal_ledger` (Phase A of the optional Epic front door, § "Epic-to-Spec Ingestion"). The four tools that the full-lifecycle diagram labels steps 4–7 (Tools 1–4) run in a **fixed order** inside the background job, and only one of them — Tool 2, the agent's `recommend_architecture` — invokes the model. The fixed order is itself a governance control: substitution and ADR compliance must run deterministically and in sequence, never at an LLM's discretion.
 
 ![Brownfield steps 4–7 internals — one MCP Server, one Agent](brownfield-steps-4-7-internals.png)
 
 - **`validate_spec` (Step 0)** — deterministic 8-signal migration-readiness gate (readiness score + PASS/WARN/BLOCK + phase preview).
 - **Tool 1 · `map_current_to_target`** — deterministic context-filtered decision table. Unresolved substitutions raise an error with **no LLM fallback** — a wrong CSA→TSA substitution would lose production data, so the LLM is never allowed to guess here.
-- **Tool 2 · `recommend_architecture`** — the only stage that touches the LLM, and even it is `retrieve()` (deterministic RAG) → **the single `LlmAgent`** picks a transition pattern with a confidence → deterministic parse + guard (confidence `< 0.65` → `requires_review`, never a fabricated selection).
+- **Tool 2 · `recommend_architecture`** (the Solution Accelerator Agent's FunctionTool) — the only stage that touches the LLM, and even it is `retrieve()` (deterministic RAG) → **the agent** picks a transition pattern with a confidence → deterministic parse + guard (confidence `< 0.65` → `requires_review`, never a fabricated selection).
 - **Tool 3 · `adr_compliance_check`** — deterministic no-`eval()` predicate DSL (pass / flag / reject + attested ADRs), preserved as a **separate gate** rather than folded into the LLM.
 - **Tool 4 · `assemble_blueprint`** — deterministic: `design_contract.json` v2.0 + four diagram DSLs + cross-cloud Phase-0 injection; *calls* the Eraser MCP server to render diagrams.
 
-As in greenfield, **the agent reasons but never acts** — substitution, ADR enforcement, and assembly are deterministic server stages. (No meta-skills, no signed Design Contracts — that is AgentForge IP, kept on the other side of the boundary.)
+As in greenfield, **the agent reasons but never acts** — substitution, ADR enforcement, and assembly are deterministic server stages. (No meta-skills, no signed Design Contracts — that is the external platform IP.)
+
+> **No new skills/tools are synthesized in brownfield (by design).** The no-match → create-new path — emitting a new SKILL.md or a new FunctionTool definition when semantic search misses — is a **greenfield-only** capability, because greenfield composes a *new agentic application* whose agents own skills and tools. **Brownfield is modernization, not agentic-app creation**: it maps each existing integration to a target via deterministic CSA→TSA transition patterns and substitutions, and binds to existing target services — it does not build an agent topology, so there are no agent skills/tools to create. The brownfield design contract therefore carries no `to_create` block.
+
+> **IP note (Solution Accelerator Agent + two FunctionTools).** The *structure* "an MCP server delegates to one ADK agent holding FunctionTools, one of which builds an epic-derived artifact" is a **shared ADK pattern** (it overlaps the external platform's design-agent-with-tools structure) and is **not** claimed for brownfield. The distinctive, claimed mechanism is the artifact: the **integration-keyed, span-grounded Brownfield Epic Signal Ledger** (every signal verbatim-traced to an Epic span, values grounded in their span — no fabricated/altered quantities), deterministic **fill-ratio** confidence (filled / 8 readiness signals), the Rally **ObjectVersion** staleness token, and the **readiness-gate reconciliation**. *(Not legal advice — confirm claim-level non-overlap with a practitioner.)*
+
+#### Epic-to-Spec Ingestion (Brownfield) — optional front door
+
+![Brownfield full lifecycle — Epic front door + build/govern/deploy/operate](brownfield-10-step-flow.png)
+
+Before `/speckit.specify`, a developer can seed the integration-inventory `spec.md` from a **Rally Epic** via `/accelerator.ingest-epic`. The coding agent fetches the Epic **client-side** through the Rally MCP server (`.vscode/mcp.json`, Entra ID SSO — credentials stay in the IDE) and calls `ingest_epic_start` with the Epic **content only**. Two phases run server-side:
+
+- **Phase A — agentic shaping (the Solution Accelerator Agent).** The MCP server delegates to the agent's `create_epic_signal_ledger` FunctionTool — one bounded, **extractive** pass that normalizes the Epic into an **integration-keyed Brownfield Epic Signal Ledger**: one entry per integration with up to eight span-traced readiness signals (technology+version, type, direction, criticality, coexistence, API surface, state, volume+SLA), plus Application Summary, Modernization Scope, and NFRs. Every signal carries a verbatim `epic_span` and a span-grounded value; a deterministic validator drops the rest, so the agent cannot fabricate or alter requirements (invented volumes/SLAs are dropped).
+- **Phase B — deterministic mapping (no LLM).** The ledger renders to a brownfield `spec.md` that parses via `spec_parser` and is scored by the same 8-signal `validate_spec` gate the blueprint uses. Output carries a Rally provenance header (FormattedID + ObjectVersion), per-integration fill-ratio confidence, `[NEEDS CLARIFICATION]` markers, and a `blueprint_gate` verdict so the developer sees real migration-readiness (not fill-ratio alone).
+
+**Format contract (M-1).** Ingestion emits the **canonical 8-signal migration-readiness template** (`### Integration: INT-XXX` with the eight signal fields) — the shape `spec_parser` parses and `validate_spec` scores. This is intentionally *not* the richer Current-State inventory the samples show: `/speckit.specify`'s `csa-extractor` **up-converts** the readiness template into the full Current-State block (Protocol/Transport/Auth/Stack…) and reconciles it against the authoritative CSA diagram. The two shapes are a pipeline contract, not a divergence.
+
+The **CSA diagram remains authoritative** for current state (the CSA Agent handoff, §7): ingestion pre-fills the inventory; `/speckit.specify`'s `csa-extractor` then reconciles it against the diagram. Staleness uses the Rally **ObjectVersion** token (read from the durable `epic-signal-ledger.json` sidecar by `/accelerator.refresh`), not a content hash.
+
+#### Tool payload note (L-3)
+
+The greenfield and brownfield Solution Accelerator Agents expose a same-named `recommend_architecture` FunctionTool, but their payloads differ by archetype (this is expected — they are separate services): greenfield takes `{spec, plan}` (compose an agent topology for the whole app), while brownfield takes `{substitution, candidates}` (select a transition pattern for one integration). The `create_epic_signal_ledger` tool takes an Epic payload in both. Consumers branch on archetype; there is no shared payload contract for `recommend_architecture` across archetypes.
 
 ### 9.2 Component view
 
 ![Solution Accelerator — Async Internal Architecture (MCP Tasks)](solution-accelerator-components.png)
 
-The LlmAgent inside `recommend_architecture` is guided by a company-curated system prompt that encodes brownfield-specific reasoning: CSA→TSA tech substitution priority, Strangler-Fig composition rules, migration phase sequencing, and ADR compliance enforcement. → *See Developer Guide "System Prompt Template — Brownfield Solution Accelerator" for the full system prompt.*
+The Solution Accelerator Agent's `recommend_architecture` FunctionTool is guided by a company-curated system prompt that encodes brownfield-specific reasoning: CSA→TSA tech substitution priority, Strangler-Fig composition rules, migration phase sequencing, and ADR compliance enforcement. → *See Developer Guide "System Prompt Template — Brownfield Solution Accelerator" for the full system prompt.*
 
 ### 9.3 Call sequence (async MCP Tasks)
 

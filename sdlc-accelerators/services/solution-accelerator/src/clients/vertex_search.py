@@ -4,40 +4,48 @@ INTERFACE + query/result shaping are real and testable via an injected `_search`
 The live Discovery Engine (Vertex AI Search) network call is written below but COMMENTED OUT.
 Per root CLAUDE.md, all external calls go through clients/base.with_retry.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from .base import with_retry
 
 
 class VertexSearchClient:
-    def __init__(self, project_id: str | None = None, location: str = "global",
-                 pattern_data_store: str = "sdlc-pattern-catalog",
-                 skill_data_store: str = "sdlc-skill-catalog",
-                 _search: Callable[[str, str], list] | None = None):
+    def __init__(
+        self,
+        project_id: str | None = None,
+        location: str = "global",
+        pattern_data_store: str = "sdlc-pattern-catalog",
+        skill_data_store: str = "sdlc-skill-catalog",
+        _search: Callable[[str, str], list[Any]] | None = None,
+    ) -> None:
         self.project_id = project_id
         self.location = location
         self.pattern_data_store = pattern_data_store
         self.skill_data_store = skill_data_store
-        self._search = _search   # test injection seam: (data_store_id, query) -> list[dict]
+        self._search = (
+            _search  # test injection seam: (data_store_id, query) -> list[dict]
+        )
 
-    def search_patterns(self, signals: list[str]) -> list[dict]:
+    def search_patterns(self, signals: list[str]) -> list[dict[str, Any]]:
         """Semantic search over the Pattern Catalog. Returns matched patterns + metadata."""
         query = " ".join(signals)
         return self._run(self.pattern_data_store, query)
 
-    def search_tools(self, data_sources: list[str]) -> list[dict]:
+    def search_tools(self, data_sources: list[str]) -> list[dict[str, Any]]:
         """Semantic search over the Skill Catalog (skill metadata + SHA/version provenance)."""
         query = " ".join(data_sources)
         return self._run(self.skill_data_store, query)
 
-    def _run(self, data_store_id: str, query: str) -> list[dict]:
+    def _run(self, data_store_id: str, query: str) -> list[dict[str, Any]]:
         if self._search is not None:
-            return with_retry(lambda: self._search(data_store_id, query))
+            return with_retry(lambda: self._search(data_store_id, query))  # type: ignore[misc]  # guarded non-None; mypy can't narrow self.attr into a closure
         return self._live_search(data_store_id, query)
 
-    def _live_search(self, data_store_id: str, query: str) -> list[dict]:
+    def _live_search(self, data_store_id: str, query: str) -> list[dict[str, Any]]:
         """The actual Vertex AI Search (Discovery Engine) call. COMMENTED OUT until wired.
 
         TO WIRE (checklist):

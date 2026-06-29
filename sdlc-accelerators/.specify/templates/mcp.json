@@ -1,0 +1,19 @@
+{
+  "servers": {
+    "rally": {
+      "type": "http",
+      "url": "https://rally-mcp.internal.<company>.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:entra_sso_token}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "entra_sso_token",
+      "type": "promptString",
+      "description": "Entra ID SSO token (auto-filled by the company VS Code auth extension)",
+      "password": true
+    }
+  ]
+}

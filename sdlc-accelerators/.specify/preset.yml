@@ -9,8 +9,11 @@ templates:
   spec: templates/spec-template.md      # loaded by /specify
   plan: templates/plan-template.md      # loaded by /plan
   tasks: templates/tasks-template.md    # loaded by /tasks
+  mcp: templates/mcp.json               # OPTIONAL: copied to .vscode/mcp.json for /accelerator.ingest-epic (Rally MCP)
 
 commands:
+  - command: accelerator.ingest-epic
+    file: commands/accelerator.ingest-epic.md   # OPTIONAL Greenfield front door: Rally Epic -> spec.md
   - command: accelerator.blueprint
     file: commands/accelerator.blueprint.md
   - command: accelerator.assess
@@ -47,14 +50,23 @@ mcp_servers:
   solution_accelerator:
     endpoint: https://solution-accelerator.<company-domain>.run.app
     auth: oauth
-    tools: [blueprint_start, blueprint_status, blueprint_result, assemble_blueprint, validate_composition, refresh]
+    tools: [blueprint_start, blueprint_status, blueprint_result, assemble_blueprint, validate_composition, refresh, ingest_epic_start, ingest_epic_status, ingest_epic_result]
   governance_guardian:
     endpoint: https://governance-guardian.<company-domain>.run.app
     auth: oauth
     tools: [assess_start, assess_status, assess_result, recordTechDebt]
+  # Rally MCP server is CLIENT-SIDE (registered in .vscode/mcp.json, see templates/mcp.json), NOT a
+  # company server in this preset. The coding agent calls it directly with the developer's Entra ID SSO
+  # to fetch Epics during /accelerator.ingest-epic, then passes epic CONTENT (no credentials) to the
+  # Solution Accelerator's ingest_epic_* tools. It is intentionally outside the server-side trust boundary.
+  # rally (client-side): templates/mcp.json -> read tools: get_epic, query_epics, get_acceptance_criteria
 
 settings:
   diagram_format: [drawio, png]
   blueprint_primary: app-blueprint.md
   blueprint_derived: app-blueprint.json
   hash_file: .accelerator-hashes
+
+# NOTE (verify per environment): the `mcp:` template key and the Rally MCP read-tool names
+# (get_epic / query_epics / get_acceptance_criteria) are environment-specific assumptions —
+# confirm against your spec-kit preset schema and the deployed Rally MCP server before rollout.

@@ -1,13 +1,16 @@
 """Pydantic models for app-blueprint.json.
 Mirrors schemas/app-blueprint.schema.json — validated against examples/fnol.
 """
+
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-AgentType = Literal["SequentialAgent", "ParallelAgent", "LoopAgent", "LlmAgent", "CustomAgent"]
+AgentType = Literal[
+    "SequentialAgent", "ParallelAgent", "LoopAgent", "LlmAgent", "CustomAgent"
+]
 ToolType = Literal["mcp_server", "a2a_agent", "function_tool"]
 
 
@@ -66,22 +69,22 @@ class AgentTree(BaseModel):
 
 
 class AppBlueprint(BaseModel):
-    metadata: dict
-    pattern_composition: dict
+    metadata: dict[str, Any]
+    pattern_composition: dict[str, Any]
     adk_agent_tree: AgentTree
     tool_bindings: list[ToolBinding]
     business_rules: list[BusinessRule]
     agent_identity_config: list[AgentIdentity]
     screening_config: ScreeningConfig
-    observability_config: dict
-    infra_modules: list[dict] = Field(default_factory=list)
-    hadr_config: dict = Field(default_factory=dict)
-    nfr_targets: dict = Field(default_factory=dict)
-    data_flows: list[dict] = Field(default_factory=list)
-    sequence_summary: list = Field(default_factory=list)
-    gateway_routes: list[dict] = Field(default_factory=list)
-    pipeline_configs: dict = Field(default_factory=dict)
-    confidence_scores: dict = Field(default_factory=dict)
+    observability_config: dict[str, Any]
+    infra_modules: list[dict[str, Any]] = Field(default_factory=list)
+    hadr_config: dict[str, Any] = Field(default_factory=dict)
+    nfr_targets: dict[str, Any] = Field(default_factory=dict)
+    data_flows: list[dict[str, Any]] = Field(default_factory=list)
+    sequence_summary: list[Any] = Field(default_factory=list)
+    gateway_routes: list[dict[str, Any]] = Field(default_factory=list)
+    pipeline_configs: dict[str, Any] = Field(default_factory=dict)
+    confidence_scores: dict[str, Any] = Field(default_factory=dict)
 
 
 AgentNode.model_rebuild()

@@ -1,4 +1,7 @@
 """Shim: section extraction (mirrors governance-guardian extraction/sections.py)."""
+
+from __future__ import annotations
+
 import re
 
 

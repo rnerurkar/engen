@@ -1,0 +1,164 @@
+{
+  "schema": "brownfield-epic-signal-ledger/v1",
+  "provenance": {
+    "source": "rally",
+    "formatted_id": "E6101",
+    "object_version": 12,
+    "last_update_date": "2026-06-21"
+  },
+  "summary": {
+    "value": "a legacy billing and collections monolith on WebLogic 12",
+    "epic_span": "a legacy billing and collections monolith on WebLogic 12"
+  },
+  "modernization_scope": {
+    "value": "all three integrations are in scope this iteration",
+    "epic_span": "all three integrations are in scope this iteration"
+  },
+  "integrations": [
+    {
+      "int_id": "INT-001",
+      "name": "Billing UI",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "JSF on WebLogic 12",
+          "epic_span": "JSF on WebLogic 12"
+        },
+        "type": {
+          "value": "sync api",
+          "epic_span": "sync api"
+        },
+        "direction": {
+          "value": "bidirectional",
+          "epic_span": "bidirectional"
+        },
+        "criticality": {
+          "value": "high",
+          "epic_span": "high"
+        },
+        "coexistence": {
+          "value": "hard-cutover",
+          "epic_span": "hard-cutover"
+        },
+        "api_surface": {
+          "value": "internal pages",
+          "epic_span": "internal pages"
+        },
+        "state": {
+          "value": "session sticky",
+          "epic_span": "session sticky"
+        },
+        "volume_sla": {
+          "value": "1.5M page views/day p95 < 700ms",
+          "epic_span": "1.5M page views/day p95 < 700ms"
+        }
+      },
+      "target_intent": {
+        "value": "React SPA on CloudFront",
+        "epic_span": "React SPA on CloudFront"
+      }
+    },
+    {
+      "int_id": "INT-002",
+      "name": "Collections engine",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "Spring Batch 4 on WebLogic 12",
+          "epic_span": "Spring Batch 4 on WebLogic 12"
+        },
+        "type": {
+          "value": "batch",
+          "epic_span": "batch"
+        },
+        "direction": {
+          "value": "read-only",
+          "epic_span": "read-only"
+        },
+        "criticality": {
+          "value": "critical",
+          "epic_span": "critical"
+        },
+        "coexistence": {
+          "value": "dual-read",
+          "epic_span": "dual-read"
+        },
+        "api_surface": {
+          "value": "internal jobs",
+          "epic_span": "internal jobs"
+        },
+        "state": {
+          "value": "stateless",
+          "epic_span": "stateless"
+        },
+        "volume_sla": {
+          "value": "nightly 3M accounts batch SLA 4h",
+          "epic_span": "nightly 3M accounts batch SLA 4h"
+        }
+      },
+      "target_intent": {
+        "value": "AWS Batch on Fargate",
+        "epic_span": "AWS Batch on Fargate"
+      }
+    },
+    {
+      "int_id": "INT-003",
+      "name": "Payment gateway",
+      "filled": 8,
+      "expected_slots": 8,
+      "confidence": 1.0,
+      "needs_review": false,
+      "fields": {
+        "technology": {
+          "value": "IBM MQ 9.1 producer",
+          "epic_span": "IBM MQ 9.1 producer"
+        },
+        "type": {
+          "value": "async messaging",
+          "epic_span": "async messaging"
+        },
+        "direction": {
+          "value": "write-only",
+          "epic_span": "write-only"
+        },
+        "criticality": {
+          "value": "high",
+          "epic_span": "high"
+        },
+        "coexistence": {
+          "value": "dual-write",
+          "epic_span": "dual-write"
+        },
+        "api_surface": {
+          "value": "message contract documented",
+          "epic_span": "message contract documented"
+        },
+        "state": {
+          "value": "stateless",
+          "epic_span": "stateless"
+        },
+        "volume_sla": {
+          "value": "400K payments/day",
+          "epic_span": "400K payments/day"
+        }
+      },
+      "target_intent": {
+        "value": "AWS SQS producer",
+        "epic_span": "AWS SQS producer"
+      }
+    }
+  ],
+  "nfrs": [
+    {
+      "value": "exit the on-prem datacenter by Q4",
+      "kind": "nfr",
+      "epic_span": "exit the on-prem datacenter by Q4"
+    }
+  ]
+}

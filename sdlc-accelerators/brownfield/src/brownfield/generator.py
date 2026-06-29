@@ -6,9 +6,11 @@ cutover strategy -> template:
   dual-publish   -> dual_write
   blue-green / hard-cutover / big-bang -> cutover_gate
 """
+
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -21,8 +23,13 @@ STRATEGY_TEMPLATE = {
 }
 
 
-def generate_migration_code(design_contract: dict, plan_decisions: list, spec,
-                            template_dir: str, out_dir: str) -> dict:
+def generate_migration_code(
+    design_contract: dict[str, Any],
+    plan_decisions: list[Any],
+    spec: Any,
+    template_dir: str,
+    out_dir: str,
+) -> dict[str, Any]:
     """Render one migration artifact per integration. Returns {files: [...], count: n}."""
     env = Environment(loader=FileSystemLoader(template_dir), keep_trailing_newline=True)
     plan_by_id = {d.integration_id: d for d in plan_decisions}
@@ -38,7 +45,8 @@ def generate_migration_code(design_contract: dict, plan_decisions: list, spec,
         tmpl_name = STRATEGY_TEMPLATE.get(strategy, "cutover_gate.py.j2")
         tmpl = env.get_template(tmpl_name)
         rendered = tmpl.render(
-            integration_id=iid, name=name_by_id.get(iid, iid),
+            integration_id=iid,
+            name=name_by_id.get(iid, iid),
             source="+".join(sub.get("source_tokens", [])),
             target="+".join(sub.get("target_tokens", [])),
             coexistence_window=(d.coexistence_window if d else ""),
@@ -50,7 +58,7 @@ def generate_migration_code(design_contract: dict, plan_decisions: list, spec,
     return {"files": sorted(files), "count": len(files)}
 
 
-def check_rollback_paths(out_dir: str) -> list:
+def check_rollback_paths(out_dir: str) -> list[Any]:
     """Brownfield PRS rule: every migration artifact must contain a rollback path.
     Returns a list of files missing 'def rollback' (constitution violation)."""
     violations = []

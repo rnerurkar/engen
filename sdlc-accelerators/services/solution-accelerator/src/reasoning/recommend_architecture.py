@@ -11,11 +11,13 @@ is the Gemini call inside invoke_llm_agent (inject model_fn in tests; bind ADK L
 
 Spec/plan are passed AS MARKDOWN throughout — never converted to JSON (architecture-faithful).
 """
+
 from __future__ import annotations
 
 import os
 import sys
 from collections.abc import Callable
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -34,27 +36,31 @@ from reasoning.validate_spec import SpecValidation, validate_spec
 
 class SpecBlockedError(Exception):
     """Raised when validate_spec returns a BLOCK status — blueprint_start returns guidance."""
-    def __init__(self, validation: SpecValidation):
+
+    def __init__(self, validation: SpecValidation) -> None:
         self.validation = validation
         msgs = [f.guidance for f in validation.findings if f.status == "BLOCK"]
         super().__init__("; ".join(msgs))
 
 
 class RecommendArchitecture:
-    def __init__(self):
+    def __init__(self) -> None:
         self.search = VertexSearchClient()
         self.api_hub = ApigeeHubClient()
 
-    def retrieve(self, signals) -> RetrievedContext:
+    def retrieve(self, signals: Any) -> RetrievedContext:
         """RAG retrieval (search_patterns + search_skills) + API Hub discovery.
         Pattern/skill results are empty until the corpus is populated; the orchestration,
         and the API Hub discovery query construction + shaping, are real."""
         from reasoning.discover_integrations import discover_integrations
+
         # Vertex AI Search live call is commented out until the corpus is ingested; degrade
         # gracefully to empty results so the pipeline orchestration stays testable.
         try:
             patterns = self.search.search_patterns(signals.ordering_words)
-            skills = self.search.search_tools(signals.data_systems)  # skill catalog query
+            skills = self.search.search_tools(
+                signals.data_systems
+            )  # skill catalog query
         except NotImplementedError:
             patterns, skills = [], []
         # discover_integrations builds the API Hub filters and shapes results (A2A>MCP>Build).
@@ -69,10 +75,16 @@ class RecommendArchitecture:
             integrations = disc["a2a_agents"] + disc["mcp_servers"] + disc["rest_apis"]
         except NotImplementedError:
             integrations = []  # API Hub live call not yet wired (commented out)
-        return RetrievedContext(patterns=patterns, skills=skills, integrations=integrations)
+        return RetrievedContext(
+            patterns=patterns, skills=skills, integrations=integrations
+        )
 
-    def run(self, spec_md: str, plan_md: str,
-            model_fn: Callable[[str, str], dict] | None = None) -> ArchitectureSelections:
+    def run(
+        self,
+        spec_md: str,
+        plan_md: str,
+        model_fn: Callable[[str, str], dict[str, Any]] | None = None,
+    ) -> ArchitectureSelections:
         """Full pipeline: validate -> retrieve -> reason -> parse selections.
 
         model_fn injects the model in tests; in production it wraps the live ADK LlmAgent.
